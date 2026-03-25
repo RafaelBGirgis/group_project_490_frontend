@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+/* src/index.css */
+body {
+  margin: 0;
+  background-color: #080D19;
+  color: #ffffff;
+  min-height: 100vh;
+}

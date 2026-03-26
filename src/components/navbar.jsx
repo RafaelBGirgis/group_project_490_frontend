@@ -1,7 +1,16 @@
 import { ROLE_THEMES } from "./theme";
+import clientLogo from "../assets/Client Logo.svg"
+import coachLogo from "../assets/Coach Logo.svg"
+import adminLogo from "../assets/Admin Logo.svg"
 
 export function Navbar({ role = "client", userName = "RG", onSwitch, onMessage, onNotification }) {
   const theme = ROLE_THEMES[role];
+<<<<<<< Updated upstream
+=======
+  const navigate = useNavigate();
+  const logo = role === "coach" ? coachLogo : role === "admin" ? adminLogo : clientLogo;
+  
+>>>>>>> Stashed changes
 
   const switchText = role === "client" ? "Switch to Coach" : role === "coach" ? "Switch to Client" : null;
 
@@ -9,14 +18,18 @@ export function Navbar({ role = "client", userName = "RG", onSwitch, onMessage, 
     <nav className="flex items-center justify-between px-6 py-3 bg-[#0B1120] border-b border-white/5">
       {/* Left: Logo + Role Badge */}
       <div className="flex items-center gap-3">
-        <div
-          className="w-8 h-8 rounded-lg flex items-center justify-center text-lg"
-          style={{ backgroundColor: theme.accent + "25", color: theme.accent }}
-        >
-          ✦
+        <div>
+          
+          <img src={logo} alt="Logo" className="h-8 cursor-pointer" onClick={() => navigate(`/${role}`)}/>
         </div>
+<<<<<<< Updated upstream
         <span className="text-#3B82F6 font-semibold text-lg tracking-tight">Till Failure</span>
         <span className={`px-2.5 py-0.5 rounded text-[11px] font-bold tracking-wider uppercase ${theme.badge} ${theme.badgeText}`}>
+=======
+        <span
+          className={`px-2.5 py-0.5 rounded text-[11px] font-bold tracking-wider uppercase ${theme.badge} ${theme.badgeText}`}
+        >
+>>>>>>> Stashed changes
           {theme.label}
         </span>
       </div>

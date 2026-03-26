@@ -1,12 +1,31 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
-function LoginPage() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+export default function SignupPage() {
+  const [formData, setFormData] = useState({
+    fullName: "",
+    email: "",
+    password: "",
+    confirmPassword: "",
+    role: "client",
+  });
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    // connect backend signup logic here later
+    console.log("Signup submitted:", formData);
+  };
 
   return (
-    <div className="min-h-screen bg-[#080D19] text-white overflow-hidden">
+    <div className="min-h-screen bg-[#080D19] text-white overflow-hidden relative">
       {/* Background glow */}
       <div className="absolute inset-0 pointer-events-none">
         <div className="absolute -top-24 -left-16 h-72 w-72 rounded-full bg-blue-600/10 blur-3xl" />
@@ -14,69 +33,69 @@ function LoginPage() {
         <div className="absolute bottom-0 left-1/3 h-72 w-72 rounded-full bg-indigo-500/10 blur-3xl" />
       </div>
 
-      {/* Top brand bar */}
+      {/* Top bar */}
       <header className="relative z-10 border-b border-white/5">
         <div className="mx-auto flex max-w-7xl items-center gap-3 px-6 py-4">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-cyan-400 shadow-[0_0_30px_rgba(59,130,246,0.25)]">
             <span className="text-lg">🏋️</span>
           </div>
-          <div>
-            <p className="text-base font-semibold text-blue-300">Till Failure</p>
-          </div>
+          <p className="text-base font-semibold text-blue-300">Till Failure</p>
         </div>
       </header>
 
       <main className="relative z-10 mx-auto grid min-h-[calc(100vh-73px)] max-w-7xl grid-cols-1 items-center gap-10 px-6 py-10 lg:grid-cols-2">
-        {/* Left panel */}
+        {/* Left side info panel */}
         <section className="hidden lg:flex">
           <div className="w-full max-w-xl rounded-[28px] border border-white/8 bg-white/[0.02] p-10 shadow-[0_0_60px_rgba(0,0,0,0.35)] backdrop-blur-sm">
-            <p className="mb-8 text-lg font-semibold text-blue-400">Till Failure</p>
+            <p className="mb-8 text-lg font-semibold text-blue-400">Start Strong</p>
 
             <h1 className="max-w-md text-5xl font-black leading-tight tracking-tight">
-              Transform your{" "}
+              Create your{" "}
               <span className="bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">
-                fitness journey
+                fitness account
               </span>{" "}
               today
             </h1>
 
             <p className="mt-6 max-w-md text-base leading-7 text-slate-300">
-              Connect with elite coaches, track your progress, and hit every goal —
-              all in one place.
+              Join your coaches, track your goals, and build a consistent routine
+              with one account.
             </p>
 
             <div className="mt-10 space-y-4">
               <FeatureCard
-                emoji="🏅"
-                title="Find Your Coach"
-                text="Browse certified coaches by specialty and availability."
+                emoji="✅"
+                title="Simple Signup"
+                text="Create your account in minutes with email or Google."
               />
               <FeatureCard
-                emoji="📊"
-                title="Track Everything"
-                text="Workouts, calories, steps, mood — all in one dashboard."
+                emoji="📈"
+                title="Track Progress"
+                text="Keep your workouts, calories, and milestones all in one place."
               />
               <FeatureCard
-                emoji="🔥"
-                title="Stay Consistent"
-                text="Streaks, reminders, and coach check-ins keep you on track."
+                emoji="🤝"
+                title="Connect With Coaches"
+                text="Work directly with experts and stay accountable."
               />
             </div>
           </div>
         </section>
 
-        {/* Right panel */}
+        {/* Right side form */}
         <section className="flex justify-center lg:justify-end">
-            <div className="w-full max-w-md rounded-[28px] border border-white/10 bg-white/[0.03] p-8 shadow-[0_0_80px_rgba(37,99,235,0.12)] backdrop-blur-md">
+          <div className="w-full max-w-md rounded-[28px] border border-white/10 bg-white/[0.03] p-8 shadow-[0_0_80px_rgba(37,99,235,0.12)] backdrop-blur-md">
             <div className="mx-auto mb-6 flex w-fit rounded-xl border border-white/10 bg-white/[0.05] px-30 py-2">
-            <span className="text-sm font-semibold text-slate-200">Sign In</span>
+              <button className="text-sm font-semibold text-slate-200">
+                Sign Up
+              </button>
             </div>
 
             <h2 className="text-4xl font-black tracking-tight">
-              Welcome <span className="text-blue-400">back</span>
+              Create your <span className="text-blue-400">account</span>
             </h2>
             <p className="mt-2 text-sm text-slate-400">
-              Sign in to continue your fitness journey
+              Start your fitness journey with a free account
             </p>
 
             <div className="mt-6">
@@ -87,7 +106,7 @@ function LoginPage() {
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-[10px] font-bold text-white">
                   G
                 </span>
-                Google
+                Continue with Google
               </button>
             </div>
 
@@ -97,18 +116,48 @@ function LoginPage() {
               <div className="h-px flex-1 bg-white/10" />
             </div>
 
-            <form className="space-y-5">
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-400">
+                  Full Name
+                </label>
+                <input
+                  type="text"
+                  name="fullName"
+                  placeholder="John Doe"
+                  value={formData.fullName}
+                  onChange={handleChange}
+                  className="w-full rounded-xl border border-white/10 bg-[#0B1220] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-blue-400/60 focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
+
               <div>
                 <label className="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-400">
                   Email Address
                 </label>
                 <input
                   type="email"
+                  name="email"
                   placeholder="you@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  value={formData.email}
+                  onChange={handleChange}
                   className="w-full rounded-xl border border-white/10 bg-[#0B1220] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-blue-400/60 focus:ring-2 focus:ring-blue-500/20"
                 />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-400">
+                  Role
+                </label>
+                <select
+                  name="role"
+                  value={formData.role}
+                  onChange={handleChange}
+                  className="w-full rounded-xl border border-white/10 bg-[#0B1220] px-4 py-3 text-sm text-white outline-none transition focus:border-blue-400/60 focus:ring-2 focus:ring-blue-500/20"
+                >
+                  <option value="client">Client</option>
+                  <option value="coach">Coach</option>
+                </select>
               </div>
 
               <div>
@@ -117,45 +166,42 @@ function LoginPage() {
                 </label>
                 <input
                   type="password"
+                  name="password"
                   placeholder="••••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  value={formData.password}
+                  onChange={handleChange}
                   className="w-full rounded-xl border border-white/10 bg-[#0B1220] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-blue-400/60 focus:ring-2 focus:ring-blue-500/20"
                 />
               </div>
 
-              <div className="flex justify-end">
-                <Link
-                  to="/forgot-password"
-                  className="text-xs font-medium text-blue-400 transition hover:text-cyan-300"
-                >
-                  Forgot password?
-                </Link>
+              <div>
+                <label className="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-400">
+                  Confirm Password
+                </label>
+                <input
+                  type="password"
+                  name="confirmPassword"
+                  placeholder="••••••••••"
+                  value={formData.confirmPassword}
+                  onChange={handleChange}
+                  className="w-full rounded-xl border border-white/10 bg-[#0B1220] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-blue-400/60 focus:ring-2 focus:ring-blue-500/20"
+                />
               </div>
 
               <button
                 type="submit"
                 className="w-full rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-400 px-4 py-3 text-sm font-bold text-white shadow-[0_0_30px_rgba(59,130,246,0.3)] transition hover:scale-[1.01]"
               >
-                Sign In →
+                Create account →
               </button>
             </form>
 
             <p className="mt-5 text-center text-xs text-slate-500">
-              Don&apos;t have an account?{" "}
-              <Link to="/signup" className="font-semibold text-blue-400 hover:text-cyan-300">
-                Create one free
+              Already have an account?{" "}
+              <Link to="/login" className="font-semibold text-blue-400 hover:text-cyan-300">
+                Sign in
               </Link>
             </p>
-
-            <div className="mt-8 flex justify-center">
-              <Link
-                to="/admin"
-                className="rounded-full border border-red-500/30 bg-red-500/10 px-4 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-red-400 transition hover:bg-red-500/15"
-              >
-                Admin Login
-              </Link>
-            </div>
           </div>
         </section>
       </main>
@@ -176,5 +222,3 @@ function FeatureCard({ emoji, title, text }) {
     </div>
   );
 }
-
-export default LoginPage;

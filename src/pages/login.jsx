@@ -40,8 +40,12 @@ function LoginPage() {
       // Save JWT token from backend
       localStorage.setItem("jwt", data.access_token);
 
-      // Redirect to client dashboard
-      window.location.href = "/client";
+      const normalizedEmail = email.trim().toLowerCase();
+      localStorage.setItem("active_user_email", normalizedEmail);
+      const hasOnboarded = localStorage.getItem(`onboarding_complete:${normalizedEmail}`) === "true";
+
+      // Redirect to required onboarding unless completed
+      window.location.href = hasOnboarded ? "/client" : "/onboarding";
     } catch (err) {
       console.error(err);
       setError(err.message);

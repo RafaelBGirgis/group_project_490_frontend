@@ -33,7 +33,23 @@ function CoachRequestFormPage() {
     yearsExperience: "",
     reason: "",
     specializations: [],
+    certifications: [],
+    experiences: [],
   });
+  const [newCertification, setNewCertification] = useState({
+    title: "",
+    issuer: "",
+    year: "",
+    description: "",
+  });
+  const [newExperience, setNewExperience] = useState({
+    title: "",
+    organization: "",
+    year: "",
+    description: "",
+  });
+  const [showCertForm, setShowCertForm] = useState(false);
+  const [showExpForm, setShowExpForm] = useState(false);
 
   const initials = useMemo(() => {
     const parts = form.name.trim().split(/\s+/).filter(Boolean);
@@ -87,6 +103,8 @@ function CoachRequestFormPage() {
           specializations: Array.isArray(existing?.specializations)
             ? existing.specializations
             : prev.specializations,
+          certifications: Array.isArray(existing?.certifications) ? existing.certifications : prev.certifications,
+          experiences: Array.isArray(existing?.experiences) ? existing.experiences : prev.experiences,
         }));
       } catch (err) {
         setError(err.message || "Failed to load your account session.");
@@ -143,6 +161,36 @@ function CoachRequestFormPage() {
     const key = requestStorageKey || "coachRequestDraft";
     localStorage.setItem(key, JSON.stringify(payload));
     setSubmitMessage(isEditMode ? "Coach request updated." : "Coach request form submitted.");
+  };
+
+  const addCertification = () => {
+    if (isViewMode) return;
+    if (!newCertification.title || !newCertification.issuer || !newCertification.year) return;
+    setForm((prev) => ({
+      ...prev,
+      certifications: [...prev.certifications, { id: Date.now(), ...newCertification }],
+    }));
+    setNewCertification({ title: "", issuer: "", year: "", description: "" });
+    setShowCertForm(false);
+  };
+
+  const addExperience = () => {
+    if (isViewMode) return;
+    if (!newExperience.title || !newExperience.organization || !newExperience.year) return;
+    setForm((prev) => ({
+      ...prev,
+      experiences: [...prev.experiences, { id: Date.now(), ...newExperience }],
+    }));
+    setNewExperience({ title: "", organization: "", year: "", description: "" });
+    setShowExpForm(false);
+  };
+
+  const removeItem = (field, id) => {
+    if (isViewMode) return;
+    setForm((prev) => ({
+      ...prev,
+      [field]: prev[field].filter((item) => item.id !== id),
+    }));
   };
 
   return (
@@ -210,7 +258,7 @@ function CoachRequestFormPage() {
 
               <div>
                 <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
-                  Years Of Experience
+                  Total Years Of Experience
                 </label>
                 <input
                   type="number"
@@ -240,9 +288,9 @@ function CoachRequestFormPage() {
                       onClick={() => toggleSpecialization(item)}
                       className="rounded-full border px-3 py-1 text-xs transition"
                       style={{
-                        borderColor: selected ? "#3B82F6" : "rgba(255,255,255,0.08)",
-                        backgroundColor: selected ? "rgba(59,130,246,0.12)" : "rgba(255,255,255,0.03)",
-                        color: selected ? "#3B82F6" : "#94A3B8",
+                        borderColor: selected ? "#F59E0B" : "rgba(255,255,255,0.08)",
+                        backgroundColor: selected ? "rgba(245,158,11,0.18)" : "rgba(255,255,255,0.03)",
+                        color: selected ? "#FBBF24" : "#94A3B8",
                       }}
                     >
                       {item}
@@ -250,6 +298,210 @@ function CoachRequestFormPage() {
                   );
                 })}
               </div>
+            </div>
+
+            <div className="space-y-3">
+              <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                Certifications
+              </label>
+              {form.certifications.length > 0 && (
+                <div className="space-y-2">
+                  {form.certifications.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-xl border border-white/6 bg-[#101827] px-4 py-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <h3 className="text-sm font-semibold text-white">{item.title}</h3>
+                          <p className="mt-1 text-xs text-amber-300">{item.issuer}</p>
+                          <p className="mt-1 text-[11px] text-slate-500">{item.year}</p>
+                          {item.description && (
+                            <p className="mt-2 text-xs text-slate-300">{item.description}</p>
+                          )}
+                        </div>
+                        {!isViewMode && (
+                          <button
+                            type="button"
+                            onClick={() => removeItem("certifications", item.id)}
+                            className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {!isViewMode && !showCertForm && (
+                <button
+                  type="button"
+                  onClick={() => setShowCertForm(true)}
+                  className="w-full rounded-xl border border-dashed border-[#F59E0B]/50 bg-[#F59E0B]/10 px-4 py-3 text-sm font-semibold text-[#FBBF24]"
+                >
+                  + Add Certification
+                </button>
+              )}
+
+              {!isViewMode && showCertForm && (
+                <div className="rounded-xl border border-white/6 bg-[#101827] p-4 space-y-3">
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <input
+                      value={newCertification.title}
+                      onChange={(e) =>
+                        setNewCertification((prev) => ({ ...prev, title: e.target.value }))
+                      }
+                      placeholder="Certification Title"
+                      className="rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500"
+                    />
+                    <input
+                      value={newCertification.issuer}
+                      onChange={(e) =>
+                        setNewCertification((prev) => ({ ...prev, issuer: e.target.value }))
+                      }
+                      placeholder="Issuer"
+                      className="rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500"
+                    />
+                    <input
+                      value={newCertification.year}
+                      onChange={(e) =>
+                        setNewCertification((prev) => ({ ...prev, year: e.target.value }))
+                      }
+                      placeholder="Year"
+                      className="rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500"
+                    />
+                  </div>
+                  <textarea
+                    value={newCertification.description}
+                    onChange={(e) =>
+                      setNewCertification((prev) => ({ ...prev, description: e.target.value }))
+                    }
+                    rows={4}
+                    placeholder="Description"
+                    className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowCertForm(false)}
+                      className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs font-medium text-slate-300"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={addCertification}
+                      className="rounded-lg bg-gradient-to-r from-amber-500 to-orange-400 px-3 py-2 text-xs font-semibold text-white"
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                Experiences
+              </label>
+              {form.experiences.length > 0 && (
+                <div className="space-y-2">
+                  {form.experiences.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-xl border border-white/6 bg-[#101827] px-4 py-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <h3 className="text-sm font-semibold text-white">{item.title}</h3>
+                          <p className="mt-1 text-xs text-amber-300">{item.organization}</p>
+                          <p className="mt-1 text-[11px] text-slate-500">{item.year}</p>
+                          {item.description && (
+                            <p className="mt-2 text-xs text-slate-300">{item.description}</p>
+                          )}
+                        </div>
+                        {!isViewMode && (
+                          <button
+                            type="button"
+                            onClick={() => removeItem("experiences", item.id)}
+                            className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {!isViewMode && !showExpForm && (
+                <button
+                  type="button"
+                  onClick={() => setShowExpForm(true)}
+                  className="w-full rounded-xl border border-dashed border-[#F59E0B]/50 bg-[#F59E0B]/10 px-4 py-3 text-sm font-semibold text-[#FBBF24]"
+                >
+                  + Add Experience
+                </button>
+              )}
+
+              {!isViewMode && showExpForm && (
+                <div className="rounded-xl border border-white/6 bg-[#101827] p-4 space-y-3">
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <input
+                      value={newExperience.title}
+                      onChange={(e) =>
+                        setNewExperience((prev) => ({ ...prev, title: e.target.value }))
+                      }
+                      placeholder="Role Title"
+                      className="rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500"
+                    />
+                    <input
+                      value={newExperience.organization}
+                      onChange={(e) =>
+                        setNewExperience((prev) => ({ ...prev, organization: e.target.value }))
+                      }
+                      placeholder="Organization"
+                      className="rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500"
+                    />
+                    <input
+                      value={newExperience.year}
+                      onChange={(e) =>
+                        setNewExperience((prev) => ({ ...prev, year: e.target.value }))
+                      }
+                      placeholder="Year / Range"
+                      className="rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500"
+                    />
+                  </div>
+                  <textarea
+                    value={newExperience.description}
+                    onChange={(e) =>
+                      setNewExperience((prev) => ({ ...prev, description: e.target.value }))
+                    }
+                    rows={4}
+                    placeholder="Description"
+                    className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowExpForm(false)}
+                      className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs font-medium text-slate-300"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={addExperience}
+                      className="rounded-lg bg-gradient-to-r from-amber-500 to-orange-400 px-3 py-2 text-xs font-semibold text-white"
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div>
@@ -281,14 +533,14 @@ function CoachRequestFormPage() {
                 <button
                   type="button"
                   onClick={() => navigate("/coach-request?mode=edit")}
-                  className="rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-400 px-5 py-3 text-sm font-semibold text-white"
+                  className="rounded-xl bg-gradient-to-r from-amber-500 to-orange-400 px-5 py-3 text-sm font-semibold text-white"
                 >
                   Edit Request
                 </button>
               ) : (
                 <button
                   type="submit"
-                  className="rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-400 px-5 py-3 text-sm font-semibold text-white"
+                  className="rounded-xl bg-gradient-to-r from-amber-500 to-orange-400 px-5 py-3 text-sm font-semibold text-white"
                 >
                   {isEditMode ? "Save Request" : "Submit Request"}
                 </button>

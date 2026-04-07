@@ -2,6 +2,39 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Navbar } from "../components/navbar";
 
+const PRIMARY_GOALS = [
+  "lose weight",
+  "build muscle",
+  "improve endurance",
+  "general wellness",
+];
+const TRAINING_EXPERIENCE_OPTIONS = ["Beginner", "Intermediate", "Advanced"];
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const SESSION_DURATIONS = ["30 minutes", "45 minutes", "60 minutes", "75+ minutes"];
+const EQUIPMENT_OPTIONS = [
+  "No equipment",
+  "Dumbbells",
+  "Barbell",
+  "Resistance bands",
+  "Cardio machines",
+  "Full gym access",
+];
+const DIETARY_OPTIONS = [
+  "No restrictions",
+  "Vegetarian",
+  "Vegan",
+  "Gluten-free",
+  "Dairy-free",
+  "Halal",
+  "Kosher",
+  "Nut allergy",
+];
+const MEAL_PLAN_OPTIONS = [
+  "Use meal library only",
+  "Accept coach meal plan",
+  "Both library and coach plan",
+];
+
 function ProfilePage({ role = "client" }) {
   const navigate = useNavigate();
   const isCoach = role === "coach";
@@ -24,7 +57,14 @@ function ProfilePage({ role = "client" }) {
     bio: "",
     age: "",
     gender: "",
+    primaryGoal: "",
+    trainingExperience: "",
     goals: "",
+    availableDays: [],
+    sessionDuration: "",
+    equipmentAccess: [],
+    dietaryPreferences: [],
+    mealPlanPreference: "",
     weight: "",
     height: "",
     profilePicture: null,
@@ -117,6 +157,18 @@ function ProfilePage({ role = "client" }) {
         const data = await res.json();
         const [firstName = "", ...rest] = (data.name || "").trim().split(/\s+/);
         const lastName = rest.join(" ");
+        const onboardingKey = data.email
+          ? `onboarding:${String(data.email).trim().toLowerCase()}`
+          : "onboarding:current";
+        let onboardingData = null;
+        const onboardingRaw = localStorage.getItem(onboardingKey);
+        if (onboardingRaw) {
+          try {
+            onboardingData = JSON.parse(onboardingRaw);
+          } catch {
+            onboardingData = null;
+          }
+        }
         const requestKey = `coachRequest:${data.id || data.email || "current"}`;
         setCoachRequestStorageKey(requestKey);
 
@@ -137,9 +189,26 @@ function ProfilePage({ role = "client" }) {
           firstName,
           lastName,
           email: data.email || "",
-          age: data.age != null ? String(data.age) : "",
-          gender: data.gender || "",
-          bio: data.bio || "",
+          age:
+            data.age != null
+              ? String(data.age)
+              : onboardingData?.age != null
+                ? String(onboardingData.age)
+                : "",
+          gender: data.gender || onboardingData?.gender || "",
+          bio: data.bio || onboardingData?.bio || "",
+          weight: onboardingData?.weight || "",
+          height: onboardingData?.height || "",
+          primaryGoal: onboardingData?.primaryGoal || "",
+          trainingExperience: onboardingData?.trainingExperience || "",
+          availableDays: onboardingData?.availableDays || [],
+          sessionDuration: onboardingData?.sessionDuration || "",
+          equipmentAccess: onboardingData?.equipmentAccess || [],
+          dietaryPreferences: onboardingData?.dietaryPreferences || [],
+          mealPlanPreference: onboardingData?.mealPlanPreference || "",
+          goals: onboardingData?.trainingExperience
+            ? `Training Experience: ${onboardingData.trainingExperience}`
+            : prev.goals,
           profilePicture: data.pfp_url || null,
         }));
       } catch (err) {
@@ -158,6 +227,15 @@ function ProfilePage({ role = "client" }) {
 
   const handleDeleteAccountRequest = () => {
     alert("Account deletion request submitted.");
+  };
+
+  const toggleProfileList = (field, value) => {
+    setProfile((prev) => ({
+      ...prev,
+      [field]: prev[field].includes(value)
+        ? prev[field].filter((x) => x !== value)
+        : [...prev[field], value],
+    }));
   };
 
   const handleCancelCoachRequest = () => {
@@ -245,6 +323,20 @@ function ProfilePage({ role = "client" }) {
     setter((prev) =>
       prev.map((item) => (item.id === id ? { ...item, [field]: value } : item))
     );
+  };
+
+  const toTitleCase = (value) =>
+    String(value)
+      .split(" ")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+
+  const formatGender = (value) => {
+    if (!value) return "";
+    return value
+      .split("-")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join("-");
   };
 
   return (
@@ -486,7 +578,7 @@ function ProfilePage({ role = "client" }) {
                       label="Phone"
                       value={profile.phone}
                       onChange={(v) => handleProfileChange("phone", v)}
-                      placeholder="+1 (555) 123-4567"
+                      placeholder="555-123-4567"
                     />
                     <Input
                       label="Location"
@@ -494,7 +586,11 @@ function ProfilePage({ role = "client" }) {
                       onChange={(v) => handleProfileChange("location", v)}
                       placeholder="Boston, MA"
                     />
-                    <Input label="Gender" value={profile.gender} onChange={(v) => handleProfileChange("gender", v)} />
+                    <Input
+                      label="Gender"
+                      value={formatGender(profile.gender)}
+                      onChange={(v) => handleProfileChange("gender", v)}
+                    />
                   </div>
 
                   <div className="mt-4">
@@ -517,7 +613,11 @@ function ProfilePage({ role = "client" }) {
                     }} />
                     <Input label="Email" value={profile.email} onChange={(v) => handleProfileChange("email", v)} />
                     <Input label="Age" value={profile.age} onChange={(v) => handleProfileChange("age", v)} />
-                    <Input label="Gender" value={profile.gender} onChange={(v) => handleProfileChange("gender", v)} />
+                    <Input
+                      label="Gender"
+                      value={formatGender(profile.gender)}
+                      onChange={(v) => handleProfileChange("gender", v)}
+                    />
                     <Input
                       label="Weight"
                       value={profile.weight}
@@ -532,14 +632,41 @@ function ProfilePage({ role = "client" }) {
                     />
                   </div>
 
-                  <div className="mt-4">
-                    <TextArea
-                      label="Goals"
-                      value={profile.goals}
-                      onChange={(v) => handleProfileChange("goals", v)}
-                      rows={3}
-                      placeholder="Example: Build strength, improve endurance, and lose 10 lbs."
-                    />
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                        Primary Goal
+                      </label>
+                      <select
+                        value={profile.primaryGoal}
+                        onChange={(e) => handleProfileChange("primaryGoal", e.target.value)}
+                        className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
+                      >
+                        <option value="">Select a primary goal</option>
+                        {PRIMARY_GOALS.map((goal) => (
+                          <option key={goal} value={goal}>
+                            {toTitleCase(goal)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                        Training Experience
+                      </label>
+                      <select
+                        value={profile.trainingExperience}
+                        onChange={(e) => handleProfileChange("trainingExperience", e.target.value)}
+                        className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
+                      >
+                        <option value="">Select training experience</option>
+                        {TRAINING_EXPERIENCE_OPTIONS.map((level) => (
+                          <option key={level} value={level}>
+                            {level}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
                   <div className="mt-4">
@@ -551,6 +678,114 @@ function ProfilePage({ role = "client" }) {
                       placeholder="Example: Training 4x/week and aiming for a half marathon."
                     />
                   </div>
+
+                  <div className="mt-4 space-y-3">
+                    <label className="block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                      Training Constraints
+                    </label>
+                    <p className="text-xs text-slate-500">Available Days</p>
+                    <div className="flex flex-wrap gap-2">
+                      {DAYS.map((day) => {
+                        const selected = profile.availableDays.includes(day);
+                        return (
+                          <button
+                            key={day}
+                            type="button"
+                            onClick={() => toggleProfileList("availableDays", day)}
+                            className="rounded-full border px-3 py-1 text-xs"
+                            style={{
+                              borderColor: selected ? "#3B82F6" : "rgba(255,255,255,0.12)",
+                              backgroundColor: selected
+                                ? "rgba(59,130,246,0.16)"
+                                : "rgba(255,255,255,0.03)",
+                              color: selected ? "#93C5FD" : "#CBD5E1",
+                            }}
+                          >
+                            {day}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <select
+                      value={profile.sessionDuration}
+                      onChange={(e) => handleProfileChange("sessionDuration", e.target.value)}
+                      className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
+                    >
+                      <option value="">Select Session Duration</option>
+                      {SESSION_DURATIONS.map((item) => (
+                        <option key={item} value={item}>
+                          {toTitleCase(item)}
+                        </option>
+                      ))}
+                    </select>
+
+                    <p className="text-xs text-slate-500">Equipment Access</p>
+                    <div className="flex flex-wrap gap-2">
+                      {EQUIPMENT_OPTIONS.map((item) => {
+                        const selected = profile.equipmentAccess.includes(item);
+                        return (
+                          <button
+                            key={item}
+                            type="button"
+                            onClick={() => toggleProfileList("equipmentAccess", item)}
+                            className="rounded-full border px-3 py-1 text-xs"
+                            style={{
+                              borderColor: selected ? "#3B82F6" : "rgba(255,255,255,0.12)",
+                              backgroundColor: selected
+                                ? "rgba(59,130,246,0.16)"
+                                : "rgba(255,255,255,0.03)",
+                              color: selected ? "#93C5FD" : "#CBD5E1",
+                            }}
+                          >
+                            {item}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 space-y-3">
+                    <label className="block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                      Dietary Preferences
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {DIETARY_OPTIONS.map((item) => {
+                        const selected = profile.dietaryPreferences.includes(item);
+                        return (
+                          <button
+                            key={item}
+                            type="button"
+                            onClick={() => toggleProfileList("dietaryPreferences", item)}
+                            className="rounded-full border px-3 py-1 text-xs"
+                            style={{
+                              borderColor: selected ? "#3B82F6" : "rgba(255,255,255,0.12)",
+                              backgroundColor: selected
+                                ? "rgba(59,130,246,0.16)"
+                                : "rgba(255,255,255,0.03)",
+                              color: selected ? "#93C5FD" : "#CBD5E1",
+                            }}
+                          >
+                            {item}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <select
+                      value={profile.mealPlanPreference}
+                      onChange={(e) => handleProfileChange("mealPlanPreference", e.target.value)}
+                      className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
+                    >
+                      <option value="">Select Meal Plan Preference</option>
+                      {MEAL_PLAN_OPTIONS.map((item) => (
+                        <option key={item} value={item}>
+                          {toTitleCase(item)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
                 </>
               )}
             </Panel>
@@ -608,17 +843,12 @@ function ProfilePage({ role = "client" }) {
                 <EditableMetadataSection
                   title="Certifications"
                   items={certifications}
-                  setter={setCertifications}
                   newItem={newCertification}
                   setNewItem={setNewCertification}
                   showForm={showCertForm}
                   setShowForm={setShowCertForm}
                   onAdd={addCertification}
                   onDelete={(id) => deleteItem(setCertifications, id)}
-                  onToggleEdit={(id) => toggleEditItem(setCertifications, id)}
-                  onUpdateField={(id, field, value) =>
-                    updateItemField(setCertifications, id, field, value)
-                  }
                   accent={accent}
                   addLabel="+ Add Certification"
                 />
@@ -626,17 +856,12 @@ function ProfilePage({ role = "client" }) {
                 <EditableMetadataSection
                   title="Experience"
                   items={experiences}
-                  setter={setExperiences}
                   newItem={newExperience}
                   setNewItem={setNewExperience}
                   showForm={showExpForm}
                   setShowForm={setShowExpForm}
                   onAdd={addExperience}
                   onDelete={(id) => deleteItem(setExperiences, id)}
-                  onToggleEdit={(id) => toggleEditItem(setExperiences, id)}
-                  onUpdateField={(id, field, value) =>
-                    updateItemField(setExperiences, id, field, value)
-                  }
                   accent={accent}
                   addLabel="+ Add Experience"
                 />
@@ -739,8 +964,6 @@ function EditableMetadataSection({
   setShowForm,
   onAdd,
   onDelete,
-  onToggleEdit,
-  onUpdateField,
   accent,
   addLabel,
 }) {
@@ -750,70 +973,26 @@ function EditableMetadataSection({
         {items.map((item) => (
           <div
             key={item.id}
-            className="rounded-xl border border-white/6 bg-[#101827] px-4 py-4"
+            className="rounded-xl border border-white/6 bg-[#101827] px-4 py-3"
           >
-            {!item.editing ? (
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h3 className="font-semibold text-white">{item.title}</h3>
-                  <p className="text-xs mt-1" style={{ color: accent }}>
-                    {item.issuer}
-                  </p>
-                  <p className="text-[11px] text-slate-500 mt-1">{item.year}</p>
-                  <p className="text-sm text-slate-300 mt-2">{item.description}</p>
-                </div>
-
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => onToggleEdit(item.id)}
-                    className="rounded-lg border px-3 py-2 text-xs font-semibold text-slate-200"
-                    style={{ borderColor: `${accent}55`, backgroundColor: `${accent}12` }}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => onDelete(item.id)}
-                    className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300"
-                  >
-                    Remove
-                  </button>
-                </div>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-white">{item.title}</h3>
+                <p className="mt-1 text-xs" style={{ color: accent }}>
+                  {item.issuer}
+                </p>
+                <p className="mt-1 text-[11px] text-slate-500">{item.year}</p>
+                {item.description && (
+                  <p className="mt-2 text-xs text-slate-300">{item.description}</p>
+                )}
               </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <Input
-                    label="Title"
-                    value={item.title}
-                    onChange={(v) => onUpdateField(item.id, "title", v)}
-                  />
-                  <Input
-                    label="Issuer / Organization"
-                    value={item.issuer}
-                    onChange={(v) => onUpdateField(item.id, "issuer", v)}
-                  />
-                  <Input
-                    label="Year / Date"
-                    value={item.year}
-                    onChange={(v) => onUpdateField(item.id, "year", v)}
-                  />
-                  <Input
-                    label="Description"
-                    value={item.description}
-                    onChange={(v) => onUpdateField(item.id, "description", v)}
-                  />
-                </div>
-
-                <div className="flex justify-end gap-2">
-                  <button
-                    onClick={() => onToggleEdit(item.id)}
-                    className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs font-medium text-slate-300"
-                  >
-                    Done
-                  </button>
-                </div>
-              </div>
-            )}
+              <button
+                onClick={() => onDelete(item.id)}
+                className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300"
+              >
+                Remove
+              </button>
+            </div>
           </div>
         ))}
 
@@ -827,28 +1006,33 @@ function EditableMetadataSection({
           </button>
         ) : (
           <div className="rounded-xl border border-white/6 bg-[#101827] p-4 space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <Input
                 label="Title"
                 value={newItem.title}
                 onChange={(v) => setNewItem((prev) => ({ ...prev, title: v }))}
+                placeholder="Title"
               />
               <Input
-                label="Issuer / Organization"
+                label="Issuer"
                 value={newItem.issuer}
                 onChange={(v) => setNewItem((prev) => ({ ...prev, issuer: v }))}
+                placeholder="Issuer"
               />
               <Input
-                label="Year / Date"
+                label="Year"
                 value={newItem.year}
                 onChange={(v) => setNewItem((prev) => ({ ...prev, year: v }))}
-              />
-              <Input
-                label="Description"
-                value={newItem.description}
-                onChange={(v) => setNewItem((prev) => ({ ...prev, description: v }))}
+                placeholder="Year"
               />
             </div>
+            <TextArea
+              label="Description"
+              value={newItem.description}
+              onChange={(v) => setNewItem((prev) => ({ ...prev, description: v }))}
+              rows={4}
+              placeholder="Description"
+            />
 
             <div className="flex justify-end gap-2">
               <button

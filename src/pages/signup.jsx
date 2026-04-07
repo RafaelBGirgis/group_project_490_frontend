@@ -75,7 +75,8 @@ export default function SignupPage() {
       const data = await res.json();
       console.log("Signup successful:", data);
       localStorage.setItem("jwt", data.access_token);
-      window.location.href = "/client";
+      localStorage.setItem("active_user_email", formData.email.trim().toLowerCase());
+      window.location.href = "/onboarding";
     } catch (err) {
       console.error(err);
       setError(err.message);
@@ -233,10 +234,10 @@ export default function SignupPage() {
                   required
                 >
                   <option value="">Select gender</option>
-                  <option value="male">Male</option>
-                  <option value="female">Female</option>
-                  <option value="non-binary">Non-binary</option>
-                  <option value="prefer_not_to_say">Prefer not to say</option>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                  <option value="Non-Binary">Non-binary</option>
+                  <option value="Prefer_Not_to_Say">Prefer not to say</option>
                 </select>
               </div>
 

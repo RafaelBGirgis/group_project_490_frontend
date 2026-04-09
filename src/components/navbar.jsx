@@ -24,6 +24,8 @@ export function Navbar({
     navigate(role === "coach" ? "/coach-profile" : "/profile");
   };
 
+  const logo = role === "coach" ? coachLogo : role === "admin" ? adminLogo : clientLogo;
+
   return (
     <nav className="flex items-center justify-between px-6 py-3 bg-[#0B1120] border-b border-white/5">
       {/* Left: Logo + Role Badge */}

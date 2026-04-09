@@ -14,7 +14,7 @@ function App() {
     <BrowserRouter>
       <div className="min-h-screen bg-[#080D19] text-white">
         <Routes>
-          <Route path="/" element={<Navigate to="/login" />} />
+          <Route path="/" element={<Navigate to="/onboarding" />} /> 
           <Route path="/login" element={<LoginPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/signup" element={<SignupPage />} />
@@ -22,7 +22,6 @@ function App() {
           <Route path="/profile" element={<ProfilePage role="client" />} />
           <Route path="/coach-request" element={<CoachRequestFormPage />} />
           <Route path="/coach-profile" element={<ProfilePage role="coach" />} />
-          <Route path="/" element={<Navigate to="/client" />} />
           <Route path="/client" element={<ClientDashboard />} />
           <Route path="/coach" element={<CoachDashboard />} />
           <Route path="/admin" element={<AdminDashboard />} />

@@ -3,12 +3,28 @@ import { Link } from "react-router-dom";
 
 export default function SignupPage() {
   const [formData, setFormData] = useState({
-    fullName: "",
+    name: "",
     email: "",
     password: "",
     confirmPassword: "",
-    role: "client",
+    age: "",
+    gender: "",
+    pfpUrl: "",
+    bio: "",
   });
+  const [error, setError] = useState("");
+
+  // Replace with your backend URL
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
+
+  const getErrorMessage = async (response, fallback) => {
+    try {
+      const errorData = await response.json();
+      return errorData?.detail || fallback;
+    } catch {
+      return fallback;
+    }
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -18,10 +34,53 @@ export default function SignupPage() {
     }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    // connect backend signup logic here later
-    console.log("Signup submitted:", formData);
+    setError("");
+
+    if (formData.password !== formData.confirmPassword) {
+      setError("Passwords do not match");
+      return;
+    }
+
+    const parsedAge = Number(formData.age);
+    if (!Number.isInteger(parsedAge) || parsedAge <= 0) {
+      setError("Please enter a valid age");
+      return;
+    }
+
+    try {
+      const payload = {
+        email: formData.email.trim(),
+        password: formData.password,
+        name: formData.name.trim(),
+        age: parsedAge,
+        gender: formData.gender,
+      };
+
+      if (formData.pfpUrl.trim()) payload.pfp_url = formData.pfpUrl.trim();
+      if (formData.bio.trim()) payload.bio = formData.bio.trim();
+
+      const res = await fetch(`${API_BASE_URL}/auth/signup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const message = await getErrorMessage(res, "Signup failed");
+        throw new Error(message);
+      }
+
+      const data = await res.json();
+      console.log("Signup successful:", data);
+      localStorage.setItem("jwt", data.access_token);
+      localStorage.setItem("active_user_email", formData.email.trim().toLowerCase());
+      window.location.href = "/onboarding";
+    } catch (err) {
+      console.error(err);
+      setError(err.message);
+    }
   };
 
   return (
@@ -46,7 +105,7 @@ export default function SignupPage() {
       <main className="relative z-10 mx-auto grid min-h-[calc(100vh-73px)] max-w-7xl grid-cols-1 items-center gap-10 px-6 py-10 lg:grid-cols-2">
         {/* Left side info panel */}
         <section className="hidden lg:flex">
-          <div className="w-full max-w-xl rounded-[28px] border border-white/8 bg-white/[0.02] p-10 shadow-[0_0_60px_rgba(0,0,0,0.35)] backdrop-blur-sm">
+          <div className="w-full max-w-xl rounded-[28px] border border-white/8 bg-[rgba(255,255,255,0.02)] p-10 shadow-[0_0_60px_rgba(0,0,0,0.35)] backdrop-blur-sm">
             <p className="mb-8 text-lg font-semibold text-blue-400">Start Strong</p>
 
             <h1 className="max-w-md text-5xl font-black leading-tight tracking-tight">
@@ -84,8 +143,8 @@ export default function SignupPage() {
 
         {/* Right side form */}
         <section className="flex justify-center lg:justify-end">
-          <div className="w-full max-w-md rounded-[28px] border border-white/10 bg-white/[0.03] p-8 shadow-[0_0_80px_rgba(37,99,235,0.12)] backdrop-blur-md">
-            <div className="mx-auto mb-6 flex w-fit rounded-xl border border-white/10 bg-white/[0.05] px-30 py-2">
+          <div className="w-full max-w-md rounded-[28px] border border-white/10 bg-[rgba(255,255,255,0.03)] p-8 shadow-[0_0_80px_rgba(37,99,235,0.12)] backdrop-blur-md">
+            <div className="mx-auto mb-6 flex w-fit rounded-xl border border-white/10 bg-[rgba(255,255,255,0.05)] px-30 py-2">
               <button className="text-sm font-semibold text-slate-200">
                 Sign Up
               </button>
@@ -101,7 +160,7 @@ export default function SignupPage() {
             <div className="mt-6">
               <button
                 type="button"
-                className="flex w-full items-center justify-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-white/[0.06]"
+                className="flex w-full items-center justify-center gap-3 rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-[rgba(255,255,255,0.06)]"
               >
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-[10px] font-bold text-white">
                   G
@@ -119,15 +178,16 @@ export default function SignupPage() {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-400">
-                  Full Name
+                  Name
                 </label>
                 <input
                   type="text"
-                  name="fullName"
+                  name="name"
                   placeholder="John Doe"
-                  value={formData.fullName}
+                  value={formData.name}
                   onChange={handleChange}
                   className="w-full rounded-xl border border-white/10 bg-[#0B1220] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-blue-400/60 focus:ring-2 focus:ring-blue-500/20"
+                  required
                 />
               </div>
 
@@ -142,21 +202,42 @@ export default function SignupPage() {
                   value={formData.email}
                   onChange={handleChange}
                   className="w-full rounded-xl border border-white/10 bg-[#0B1220] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-blue-400/60 focus:ring-2 focus:ring-blue-500/20"
+                  required
                 />
               </div>
 
               <div>
                 <label className="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-400">
-                  Role
+                  Age
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  name="age"
+                  placeholder="25"
+                  value={formData.age}
+                  onChange={handleChange}
+                  className="w-full rounded-xl border border-white/10 bg-[#0B1220] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-blue-400/60 focus:ring-2 focus:ring-blue-500/20"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-400">
+                  Gender
                 </label>
                 <select
-                  name="role"
-                  value={formData.role}
+                  name="gender"
+                  value={formData.gender}
                   onChange={handleChange}
                   className="w-full rounded-xl border border-white/10 bg-[#0B1220] px-4 py-3 text-sm text-white outline-none transition focus:border-blue-400/60 focus:ring-2 focus:ring-blue-500/20"
+                  required
                 >
-                  <option value="client">Client</option>
-                  <option value="coach">Coach</option>
+                  <option value="">Select gender</option>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                  <option value="Non-Binary">Non-binary</option>
+                  <option value="Prefer_Not_to_Say">Prefer not to say</option>
                 </select>
               </div>
 
@@ -171,6 +252,7 @@ export default function SignupPage() {
                   value={formData.password}
                   onChange={handleChange}
                   className="w-full rounded-xl border border-white/10 bg-[#0B1220] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-blue-400/60 focus:ring-2 focus:ring-blue-500/20"
+                  required
                 />
               </div>
 
@@ -185,6 +267,35 @@ export default function SignupPage() {
                   value={formData.confirmPassword}
                   onChange={handleChange}
                   className="w-full rounded-xl border border-white/10 bg-[#0B1220] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-blue-400/60 focus:ring-2 focus:ring-blue-500/20"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-400">
+                  Profile Image URL (Optional)
+                </label>
+                <input
+                  type="url"
+                  name="pfpUrl"
+                  placeholder="https://example.com/avatar.png"
+                  value={formData.pfpUrl}
+                  onChange={handleChange}
+                  className="w-full rounded-xl border border-white/10 bg-[#0B1220] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-blue-400/60 focus:ring-2 focus:ring-blue-500/20"
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-400">
+                  Bio (Optional)
+                </label>
+                <textarea
+                  name="bio"
+                  placeholder="Tell us about your fitness goals"
+                  value={formData.bio}
+                  onChange={handleChange}
+                  rows={3}
+                  className="w-full rounded-xl border border-white/10 bg-[#0B1220] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-blue-400/60 focus:ring-2 focus:ring-blue-500/20"
                 />
               </div>
 
@@ -194,6 +305,8 @@ export default function SignupPage() {
               >
                 Create account →
               </button>
+
+              {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
             </form>
 
             <p className="mt-5 text-center text-xs text-slate-500">
@@ -222,3 +335,5 @@ function FeatureCard({ emoji, title, text }) {
     </div>
   );
 }
+
+

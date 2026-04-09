@@ -1,53 +1,105 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Navbar } from "../components/navbar";
+
+const PRIMARY_GOALS = [
+  "Weight Loss",
+  "Maintenance",
+  "Muscle Gain",
+];
+const EMPTY_TRAINING_AVAILABILITY = {
+  Mon: [],
+  Tue: [],
+  Wed: [],
+  Thu: [],
+  Fri: [],
+  Sat: [],
+  Sun: [],
+};
+
+const normalizeTrainingAvailability = (value, fallbackDays = []) => {
+  const base = {
+    Mon: [],
+    Tue: [],
+    Wed: [],
+    Thu: [],
+    Fri: [],
+    Sat: [],
+    Sun: [],
+  };
+
+  if (!value || typeof value !== "object") {
+    fallbackDays.forEach((day) => {
+      if (base[day]) base[day] = [];
+    });
+    return base;
+  }
+
+  Object.keys(base).forEach((day) => {
+    const slots = value[day];
+    base[day] = Array.isArray(slots) ? slots : [];
+  });
+
+  return base;
+};
+
+const normalizeGenderToSignupValue = (value) => {
+  const normalized = String(value || "").trim().toLowerCase().replaceAll("_", "-");
+  if (normalized === "male") return "Male";
+  if (normalized === "female") return "Female";
+  if (normalized === "non-binary" || normalized === "nonbinary") return "Non-Binary";
+  if (normalized === "prefer-not-to-say" || normalized === "prefer not to say") {
+    return "Prefer_Not_to_Say";
+  }
+  return value || "";
+};
 
 function ProfilePage({ role = "client" }) {
   const navigate = useNavigate();
   const isCoach = role === "coach";
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 
   const accent = isCoach ? "#F59E0B" : "#3B82F6";
   const accentSoft = isCoach ? "rgba(245, 158, 11, 0.12)" : "rgba(59, 130, 246, 0.12)";
   const accentBorder = isCoach ? "rgba(245, 158, 11, 0.30)" : "rgba(59, 130, 246, 0.30)";
+  const [loadingProfile, setLoadingProfile] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [coachRequest, setCoachRequest] = useState(null);
+  const [coachRequestStorageKey, setCoachRequestStorageKey] = useState("");
 
   const [profile, setProfile] = useState({
-    firstName: "John",
-    lastName: "Doe",
-    email: "johndoe@gmail.com",
-    phone: "+1 (555) 000-0000",
-    location: "City, Country",
-    bio: "Certified strength & conditioning coach with 8 years experience. Specializing in muscle building and athletic performance for intermediate to advanced athletes.",
-    age: "24",
-    gender: "Male",
-    goals: "Build strength and improve endurance",
-    weight: "165",
-    height: "5'10",
+    firstName: "",
+    lastName: "",
+    email: "",
+    phone: "",
+    location: "",
+    bio: "",
+    age: "",
+    gender: "",
+    primaryGoal: "",
+    trainingAvailability: { ...EMPTY_TRAINING_AVAILABILITY },
+    weight: "",
+    height: "",
     profilePicture: null,
-    pricingInterval: "Monthly",
-    amount: "160.00",
-    openToNewClients: "Yes — accepting clients",
+    pricingInterval: "",
+    amount: "",
+    openToNewClients: "",
   });
 
-  const [coachRequestStatus, setCoachRequestStatus] = useState("not_requested");
-  const [coachRequestReason, setCoachRequestReason] = useState("");
-
   const [selectedAvailability, setSelectedAvailability] = useState(null);
+  const [selectedClientAvailability, setSelectedClientAvailability] = useState(null);
 
   const [availability, setAvailability] = useState({
-    Mon: ["9AM", "10AM", "12PM", "5PM"],
-    Tue: ["8AM", "1PM", "6PM"],
-    Wed: ["10AM", "2PM", "3PM"],
-    Thu: ["9AM", "11AM", "4PM"],
-    Fri: ["1PM", "2PM", "4PM"],
-    Sat: ["10AM"],
+    Mon: [],
+    Tue: [],
+    Wed: [],
+    Thu: [],
+    Fri: [],
+    Sat: [],
     Sun: [],
   });
 
-  const [specializations, setSpecializations] = useState([
-    "Strength Training",
-    "Muscle Building",
-    "Athletic Performance",
-  ]);
+  const [specializations, setSpecializations] = useState([]);
 
   const specializationOptions = [
     "Strength Training",
@@ -62,43 +114,9 @@ function ProfilePage({ role = "client" }) {
     "Rehabilitation",
   ];
 
-  const [certifications, setCertifications] = useState([
-    {
-      id: 1,
-      title: "NSCA - CSCS",
-      issuer: "National Strength & Conditioning Association",
-      year: "2021",
-      description: "Certified Strength and Conditioning Specialist",
-      editing: false,
-    },
-    {
-      id: 2,
-      title: "CPR / AED Certified",
-      issuer: "American Red Cross",
-      year: "2024",
-      description: "Emergency response certification",
-      editing: false,
-    },
-  ]);
+  const [certifications, setCertifications] = useState([]);
 
-  const [experiences, setExperiences] = useState([
-    {
-      id: 1,
-      title: "Head Coach — FitLife Gym",
-      issuer: "FitLife Gym",
-      year: "Jan 2021 – Present",
-      description: "Lead a team of coaches and manage 120+ clients across multiple fitness programs.",
-      editing: false,
-    },
-    {
-      id: 2,
-      title: "Personal Trainer — Equinox",
-      issuer: "Equinox",
-      year: "Jun 2019 – Dec 2020",
-      description: "1-on-1 training focused on strength and body composition.",
-      editing: false,
-    },
-  ]);
+  const [experiences, setExperiences] = useState([]);
 
   const [newCertification, setNewCertification] = useState({
     title: "",
@@ -125,26 +143,111 @@ function ProfilePage({ role = "client" }) {
   const initials = useMemo(() => {
     const f = profile.firstName?.[0] || "";
     const l = profile.lastName?.[0] || "";
-    return `${f}${l}`.toUpperCase() || "RG";
+    return `${f}${l}`.toUpperCase() || "?";
   }, [profile.firstName, profile.lastName]);
+
+  useEffect(() => {
+    const token = localStorage.getItem("jwt");
+    if (!token) {
+      setLoadError("You are not logged in.");
+      setLoadingProfile(false);
+      navigate("/login");
+      return;
+    }
+
+    const loadProfile = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/me`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (!res.ok) {
+          throw new Error("Failed to load profile.");
+        }
+
+        const data = await res.json();
+        const [firstName = "", ...rest] = (data.name || "").trim().split(/\s+/);
+        const lastName = rest.join(" ");
+        const onboardingKey = data.email
+          ? `onboarding:${String(data.email).trim().toLowerCase()}`
+          : "onboarding:current";
+        let onboardingData = null;
+        const onboardingRaw = localStorage.getItem(onboardingKey);
+        if (onboardingRaw) {
+          try {
+            onboardingData = JSON.parse(onboardingRaw);
+          } catch {
+            onboardingData = null;
+          }
+        }
+        const requestKey = `coachRequest:${data.id || data.email || "current"}`;
+        setCoachRequestStorageKey(requestKey);
+
+        const savedRequestRaw =
+          localStorage.getItem(requestKey) || localStorage.getItem("coachRequestDraft");
+        if (savedRequestRaw) {
+          try {
+            setCoachRequest(JSON.parse(savedRequestRaw));
+          } catch {
+            setCoachRequest(null);
+          }
+        } else {
+          setCoachRequest(null);
+        }
+
+        setProfile((prev) => ({
+          ...prev,
+          firstName,
+          lastName,
+          email: data.email || "",
+          age:
+            data.age != null
+              ? String(data.age)
+              : onboardingData?.age != null
+                ? String(onboardingData.age)
+                : "",
+          gender: normalizeGenderToSignupValue(data.gender || onboardingData?.gender || ""),
+          bio: data.bio || onboardingData?.bio || "",
+          weight: onboardingData?.weight || "",
+          height: onboardingData?.height || "",
+          primaryGoal: onboardingData?.primaryGoal || "",
+          trainingAvailability: normalizeTrainingAvailability(
+            onboardingData?.trainingAvailability,
+            onboardingData?.availableDays
+          ),
+          profilePicture: data.pfp_url || null,
+        }));
+      } catch (err) {
+        setLoadError(err.message || "Failed to load profile.");
+      } finally {
+        setLoadingProfile(false);
+      }
+    };
+
+    loadProfile();
+  }, [API_BASE_URL, navigate]);
 
   const handleProfileChange = (field, value) => {
     setProfile((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleRequestCoachRole = (e) => {
-    e.preventDefault();
-    if (!coachRequestReason.trim()) return;
-    setCoachRequestStatus("pending");
+  const handleDeleteAccountRequest = () => {
+    alert("Account deletion request submitted.");
   };
 
   const handleCancelCoachRequest = () => {
-    setCoachRequestStatus("not_requested");
-    setCoachRequestReason("");
+    const key = coachRequestStorageKey || "coachRequestDraft";
+    localStorage.removeItem(key);
+    localStorage.removeItem("coachRequestDraft");
+    setCoachRequest(null);
   };
 
-  const handleDeleteAccountRequest = () => {
-    alert("Account deletion request submitted.");
+  const handleLogout = () => {
+    localStorage.removeItem("jwt");
+    navigate("/login");
   };
 
   const toggleAvailabilitySlot = (day, time) => {
@@ -167,6 +270,41 @@ function ProfilePage({ role = "client" }) {
     }));
     if (selectedAvailability === `${day}-${time}`) {
       setSelectedAvailability(null);
+    }
+  };
+
+  const toggleClientAvailabilitySlot = (day, time) => {
+    setSelectedClientAvailability(`${day}-${time}`);
+  };
+
+  const addClientAvailabilitySlot = (day) => {
+    const time = prompt(`Add a time slot for ${day} (example: 7PM)`);
+    if (!time) return;
+
+    setProfile((prev) => {
+      const daySlots = prev.trainingAvailability[day] || [];
+      if (daySlots.includes(time)) return prev;
+
+      return {
+        ...prev,
+        trainingAvailability: {
+          ...prev.trainingAvailability,
+          [day]: [...daySlots, time],
+        },
+      };
+    });
+  };
+
+  const removeClientAvailabilitySlot = (day, time) => {
+    setProfile((prev) => ({
+      ...prev,
+      trainingAvailability: {
+        ...prev.trainingAvailability,
+        [day]: (prev.trainingAvailability[day] || []).filter((slot) => slot !== time),
+      },
+    }));
+    if (selectedClientAvailability === `${day}-${time}`) {
+      setSelectedClientAvailability(null);
     }
   };
 
@@ -222,6 +360,12 @@ function ProfilePage({ role = "client" }) {
     );
   };
 
+  const toTitleCase = (value) =>
+    String(value)
+      .split(" ")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+
   return (
     <div className="min-h-screen bg-[#080D19] text-white">
       <Navbar
@@ -231,6 +375,18 @@ function ProfilePage({ role = "client" }) {
       />
 
       <div className="max-w-7xl mx-auto px-4 md:px-6 py-6 space-y-6">
+        {loadingProfile && (
+          <div className="rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] px-4 py-3 text-sm text-slate-300">
+            Loading profile...
+          </div>
+        )}
+
+        {!loadingProfile && loadError && (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+            {loadError}
+          </div>
+        )}
+
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold">{isCoach ? "Edit Profile" : "Profile Settings"}</h1>
           {isCoach && (
@@ -251,7 +407,15 @@ function ProfilePage({ role = "client" }) {
                   className="relative flex h-24 w-24 items-center justify-center rounded-full text-3xl font-bold text-white shadow-lg"
                   style={{ backgroundColor: accent }}
                 >
-                  {initials}
+                  {typeof profile.profilePicture === "string" && profile.profilePicture ? (
+                    <img
+                      src={profile.profilePicture}
+                      alt={fullName}
+                      className="h-full w-full rounded-full object-cover"
+                    />
+                  ) : (
+                    initials
+                  )}
                   <span className="absolute bottom-0 right-0 h-5 w-5 rounded-full border-2 border-[#111827]" style={{ backgroundColor: "#FBBF24" }} />
                 </div>
 
@@ -260,7 +424,7 @@ function ProfilePage({ role = "client" }) {
                   {isCoach ? "Coach · Verified" : "Client"}
                 </p>
 
-                <label className="mt-5 w-full cursor-pointer rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-medium text-slate-200 hover:bg-white/[0.05]">
+                <label className="mt-5 w-full cursor-pointer rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] px-4 py-3 text-sm font-medium text-slate-200 hover:bg-[rgba(255,255,255,0.05)]">
                     Upload / Change Profile Picture
                     <input
                     type="file"
@@ -277,10 +441,10 @@ function ProfilePage({ role = "client" }) {
             {isCoach && (
               <SidebarCard title="Account Stats">
                 <div className="grid grid-cols-2 gap-3">
-                  <StatBox label="Clients" value="24" />
-                  <StatBox label="Rating" value="4.9 ★" />
-                  <StatBox label="Reviews" value="47" />
-                  <StatBox label="Coach Since" value="2023" />
+                  <StatBox label="Clients" value="--" />
+                  <StatBox label="Rating" value="--" />
+                  <StatBox label="Reviews" value="--" />
+                  <StatBox label="Coach Since" value="--" />
                 </div>
               </SidebarCard>
             )}
@@ -296,7 +460,7 @@ function ProfilePage({ role = "client" }) {
 
                       <div className="space-y-1">
                         {slots.length === 0 ? (
-                          <div className="rounded-md border border-white/5 bg-white/[0.02] px-1 py-1 text-[10px] text-slate-600">
+                          <div className="rounded-md border border-white/5 bg-[rgba(255,255,255,0.02)] px-1 py-1 text-[10px] text-slate-600">
                             —
                           </div>
                         ) : (
@@ -355,8 +519,9 @@ function ProfilePage({ role = "client" }) {
                 <SidebarCard title="Account Actions">
                   <div className="space-y-3">
                     <button
+                      onClick={() => navigate("/coach-request")}
                       className="w-full rounded-xl px-4 py-3 text-sm font-semibold text-white"
-                      style={{ backgroundColor: accent }}
+                      style={{ backgroundColor: "#F59E0B" }}
                     >
                       Become Coach
                     </button>
@@ -367,33 +532,129 @@ function ProfilePage({ role = "client" }) {
                     >
                       Request Account Deletion
                     </button>
+
+                    <button
+                      type="button"
+                      onClick={handleLogout}
+                      className="w-full rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] px-4 py-3 text-sm font-medium text-slate-300"
+                    >
+                      Log Out
+                    </button>
                   </div>
                 </SidebarCard>
 
-                <SidebarCard title="Coach Role Request Status">
-                  {coachRequestStatus === "not_requested" && (
-                    <p className="text-sm text-slate-400">
-                      No coach-role request has been submitted yet.
-                    </p>
-                  )}
+                <SidebarCard title="Availability">
+                  <div className="grid grid-cols-7 gap-1 text-center">
+                    {Object.entries(profile.trainingAvailability).map(([day, slots]) => (
+                      <div key={day}>
+                        <div className="mb-2 text-[10px] font-semibold uppercase text-slate-500">
+                          {day}
+                        </div>
 
-                  {coachRequestStatus === "pending" && (
-                    <div className="space-y-3">
-                      <span className="inline-flex rounded-full border border-yellow-400/20 bg-yellow-500/10 px-3 py-1 text-xs font-semibold text-yellow-300">
-                        Pending Review
-                      </span>
-                      <p className="text-sm text-slate-400">
-                        Your request is currently under review.
-                      </p>
+                        <div className="space-y-1">
+                          {slots.length === 0 ? (
+                            <div className="rounded-md border border-white/5 bg-[rgba(255,255,255,0.02)] px-1 py-1 text-[10px] text-slate-600">
+                              -
+                            </div>
+                          ) : (
+                            slots.map((time) => {
+                              const active = selectedClientAvailability === `${day}-${time}`;
+                              return (
+                                <button
+                                  key={`${day}-${time}`}
+                                  type="button"
+                                  onClick={() => toggleClientAvailabilitySlot(day, time)}
+                                  className="w-full rounded-md border px-1 py-1 text-[10px] transition"
+                                  style={{
+                                    borderColor: active ? "#3B82F6" : "rgba(255,255,255,0.06)",
+                                    backgroundColor: active
+                                      ? "rgba(59, 130, 246, 0.12)"
+                                      : "rgba(255,255,255,0.02)",
+                                    color: active ? "#fff" : "#94A3B8",
+                                  }}
+                                  title={`${day} ${time}`}
+                                >
+                                  {time}
+                                </button>
+                              );
+                            })
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => addClientAvailabilitySlot(day)}
+                            className="w-full rounded-md border border-dashed px-1 py-1 text-[10px] text-slate-500 hover:text-white"
+                            style={{ borderColor: "rgba(59, 130, 246, 0.30)" }}
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {selectedClientAvailability && (
+                    <div className="mt-3 flex justify-end">
                       <button
-                        onClick={handleCancelCoachRequest}
-                        className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm font-medium"
+                        type="button"
+                        onClick={() => {
+                          const [day, time] = selectedClientAvailability.split("-");
+                          removeClientAvailabilitySlot(day, time);
+                        }}
+                        className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300"
                       >
-                        Cancel Request
+                        Remove Selected Slot
                       </button>
                     </div>
                   )}
                 </SidebarCard>
+
+                {coachRequest && (
+                  <SidebarCard title="Coach Request">
+                    <div className="rounded-xl border border-yellow-400/20 bg-yellow-500/10 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-widest text-yellow-300">
+                        Submitted
+                      </p>
+                      <p className="mt-2 text-xs text-slate-300">
+                        Date: {coachRequest.requestedDate || "-"}
+                      </p>
+                      <p className="text-xs text-slate-300">
+                        Years Experience: {coachRequest.yearsExperience ?? "-"}
+                      </p>
+                      <p className="text-xs text-slate-300">
+                        Specialties:{" "}
+                        {Array.isArray(coachRequest.specializations) &&
+                        coachRequest.specializations.length > 0
+                          ? coachRequest.specializations.join(", ")
+                          : "-"}
+                      </p>
+
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => navigate("/coach-request?mode=view")}
+                          className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs font-medium text-slate-300"
+                        >
+                          View Request
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => navigate("/coach-request?mode=edit")}
+                          className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs font-medium text-slate-300"
+                        >
+                          Edit Request
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCancelCoachRequest}
+                          className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300"
+                        >
+                          Cancel Request
+                        </button>
+                      </div>
+                    </div>
+                  </SidebarCard>
+                )}
               </>
             )}
           </div>
@@ -406,9 +667,34 @@ function ProfilePage({ role = "client" }) {
                     <Input label="First Name" value={profile.firstName} onChange={(v) => handleProfileChange("firstName", v)} />
                     <Input label="Last Name" value={profile.lastName} onChange={(v) => handleProfileChange("lastName", v)} />
                     <Input label="Email" value={profile.email} onChange={(v) => handleProfileChange("email", v)} />
-                    <Input label="Phone" value={profile.phone} onChange={(v) => handleProfileChange("phone", v)} />
-                    <Input label="Location" value={profile.location} onChange={(v) => handleProfileChange("location", v)} />
-                    <Input label="Gender" value={profile.gender} onChange={(v) => handleProfileChange("gender", v)} />
+                    <Input
+                      label="Phone"
+                      value={profile.phone}
+                      onChange={(v) => handleProfileChange("phone", v)}
+                      placeholder="555-123-4567"
+                    />
+                    <Input
+                      label="Location"
+                      value={profile.location}
+                      onChange={(v) => handleProfileChange("location", v)}
+                      placeholder="Boston, MA"
+                    />
+                    <div>
+                      <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                        Gender
+                      </label>
+                      <select
+                        value={normalizeGenderToSignupValue(profile.gender)}
+                        onChange={(e) => handleProfileChange("gender", e.target.value)}
+                        className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
+                      >
+                        <option value="">Select gender</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Non-Binary">Non-binary</option>
+                        <option value="Prefer_Not_to_Say">Prefer not to say</option>
+                      </select>
+                    </div>
                   </div>
 
                   <div className="mt-4">
@@ -417,6 +703,7 @@ function ProfilePage({ role = "client" }) {
                       value={profile.bio}
                       onChange={(v) => handleProfileChange("bio", v)}
                       rows={4}
+                      placeholder="Example: Strength coach focused on hypertrophy and mobility."
                     />
                   </div>
                 </>
@@ -430,18 +717,54 @@ function ProfilePage({ role = "client" }) {
                     }} />
                     <Input label="Email" value={profile.email} onChange={(v) => handleProfileChange("email", v)} />
                     <Input label="Age" value={profile.age} onChange={(v) => handleProfileChange("age", v)} />
-                    <Input label="Gender" value={profile.gender} onChange={(v) => handleProfileChange("gender", v)} />
-                    <Input label="Weight" value={profile.weight} onChange={(v) => handleProfileChange("weight", v)} />
-                    <Input label="Height" value={profile.height} onChange={(v) => handleProfileChange("height", v)} />
+                    <div>
+                      <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                        Gender
+                      </label>
+                      <select
+                        value={normalizeGenderToSignupValue(profile.gender)}
+                        onChange={(e) => handleProfileChange("gender", e.target.value)}
+                        className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
+                      >
+                        <option value="">Select gender</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Non-Binary">Non-binary</option>
+                        <option value="Prefer_Not_to_Say">Prefer not to say</option>
+                      </select>
+                    </div>
+                    <Input
+                      label="Weight"
+                      value={profile.weight}
+                      onChange={(v) => handleProfileChange("weight", v)}
+                      placeholder="165 lbs"
+                    />
+                    <Input
+                      label="Height"
+                      value={profile.height}
+                      onChange={(v) => handleProfileChange("height", v)}
+                      placeholder="5 ft 10 in"
+                    />
                   </div>
 
-                  <div className="mt-4">
-                    <TextArea
-                      label="Goals"
-                      value={profile.goals}
-                      onChange={(v) => handleProfileChange("goals", v)}
-                      rows={3}
-                    />
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                        Primary Goal
+                      </label>
+                      <select
+                        value={profile.primaryGoal}
+                        onChange={(e) => handleProfileChange("primaryGoal", e.target.value)}
+                        className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
+                      >
+                        <option value="">Select a primary goal</option>
+                        {PRIMARY_GOALS.map((goal) => (
+                          <option key={goal} value={goal}>
+                            {toTitleCase(goal)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
                   <div className="mt-4">
@@ -450,8 +773,10 @@ function ProfilePage({ role = "client" }) {
                       value={profile.bio}
                       onChange={(v) => handleProfileChange("bio", v)}
                       rows={4}
+                      placeholder="Example: Training 4x/week and aiming for a half marathon."
                     />
                   </div>
+
                 </>
               )}
             </Panel>
@@ -486,11 +811,13 @@ function ProfilePage({ role = "client" }) {
                       label="Payment Interval"
                       value={profile.pricingInterval}
                       onChange={(v) => handleProfileChange("pricingInterval", v)}
+                      placeholder="Monthly"
                     />
                     <Input
                       label="Amount"
                       value={profile.amount}
                       onChange={(v) => handleProfileChange("amount", v)}
+                      placeholder="$160.00"
                     />
                   </div>
 
@@ -499,6 +826,7 @@ function ProfilePage({ role = "client" }) {
                       label="Open to New Clients"
                       value={profile.openToNewClients}
                       onChange={(v) => handleProfileChange("openToNewClients", v)}
+                      placeholder="Yes - accepting clients"
                     />
                   </div>
                 </Panel>
@@ -506,17 +834,12 @@ function ProfilePage({ role = "client" }) {
                 <EditableMetadataSection
                   title="Certifications"
                   items={certifications}
-                  setter={setCertifications}
                   newItem={newCertification}
                   setNewItem={setNewCertification}
                   showForm={showCertForm}
                   setShowForm={setShowCertForm}
                   onAdd={addCertification}
                   onDelete={(id) => deleteItem(setCertifications, id)}
-                  onToggleEdit={(id) => toggleEditItem(setCertifications, id)}
-                  onUpdateField={(id, field, value) =>
-                    updateItemField(setCertifications, id, field, value)
-                  }
                   accent={accent}
                   addLabel="+ Add Certification"
                 />
@@ -524,60 +847,20 @@ function ProfilePage({ role = "client" }) {
                 <EditableMetadataSection
                   title="Experience"
                   items={experiences}
-                  setter={setExperiences}
                   newItem={newExperience}
                   setNewItem={setNewExperience}
                   showForm={showExpForm}
                   setShowForm={setShowExpForm}
                   onAdd={addExperience}
                   onDelete={(id) => deleteItem(setExperiences, id)}
-                  onToggleEdit={(id) => toggleEditItem(setExperiences, id)}
-                  onUpdateField={(id, field, value) =>
-                    updateItemField(setExperiences, id, field, value)
-                  }
                   accent={accent}
                   addLabel="+ Add Experience"
                 />
               </>
             )}
 
-            {!isCoach && (
-              <Panel title="Request Coach Role" accent={accent}>
-                <p className="text-sm text-slate-400 mb-4">
-                  Submit a form to request coach access.
-                </p>
-
-                <form onSubmit={handleRequestCoachRole} className="space-y-4">
-                  <TextArea
-                    label="Why do you want to become a coach?"
-                    value={coachRequestReason}
-                    onChange={setCoachRequestReason}
-                    rows={4}
-                    placeholder="Describe your experience, certifications, or motivation..."
-                  />
-
-                  <div className="flex gap-3">
-                    <button
-                      type="submit"
-                      className="rounded-xl px-5 py-3 text-sm font-semibold text-white"
-                      style={{ backgroundColor: accent }}
-                    >
-                      Submit Request
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setCoachRequestReason("")}
-                      className="rounded-xl border border-white/10 bg-white/[0.03] px-5 py-3 text-sm font-medium"
-                    >
-                      Clear
-                    </button>
-                  </div>
-                </form>
-              </Panel>
-            )}
-
             <div className="flex justify-end gap-3 pt-2">
-              <button className="rounded-xl border border-white/10 bg-white/[0.03] px-5 py-3 text-sm font-medium text-slate-300">
+              <button className="rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] px-5 py-3 text-sm font-medium text-slate-300">
                 Discard
               </button>
               <button
@@ -587,6 +870,7 @@ function ProfilePage({ role = "client" }) {
                 Save Changes
               </button>
             </div>
+
           </div>
         </div>
       </div>
@@ -671,8 +955,6 @@ function EditableMetadataSection({
   setShowForm,
   onAdd,
   onDelete,
-  onToggleEdit,
-  onUpdateField,
   accent,
   addLabel,
 }) {
@@ -682,70 +964,26 @@ function EditableMetadataSection({
         {items.map((item) => (
           <div
             key={item.id}
-            className="rounded-xl border border-white/6 bg-[#101827] px-4 py-4"
+            className="rounded-xl border border-white/6 bg-[#101827] px-4 py-3"
           >
-            {!item.editing ? (
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h3 className="font-semibold text-white">{item.title}</h3>
-                  <p className="text-xs mt-1" style={{ color: accent }}>
-                    {item.issuer}
-                  </p>
-                  <p className="text-[11px] text-slate-500 mt-1">{item.year}</p>
-                  <p className="text-sm text-slate-300 mt-2">{item.description}</p>
-                </div>
-
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => onToggleEdit(item.id)}
-                    className="rounded-lg border px-3 py-2 text-xs font-semibold text-slate-200"
-                    style={{ borderColor: `${accent}55`, backgroundColor: `${accent}12` }}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => onDelete(item.id)}
-                    className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300"
-                  >
-                    Remove
-                  </button>
-                </div>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-white">{item.title}</h3>
+                <p className="mt-1 text-xs" style={{ color: accent }}>
+                  {item.issuer}
+                </p>
+                <p className="mt-1 text-[11px] text-slate-500">{item.year}</p>
+                {item.description && (
+                  <p className="mt-2 text-xs text-slate-300">{item.description}</p>
+                )}
               </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <Input
-                    label="Title"
-                    value={item.title}
-                    onChange={(v) => onUpdateField(item.id, "title", v)}
-                  />
-                  <Input
-                    label="Issuer / Organization"
-                    value={item.issuer}
-                    onChange={(v) => onUpdateField(item.id, "issuer", v)}
-                  />
-                  <Input
-                    label="Year / Date"
-                    value={item.year}
-                    onChange={(v) => onUpdateField(item.id, "year", v)}
-                  />
-                  <Input
-                    label="Description"
-                    value={item.description}
-                    onChange={(v) => onUpdateField(item.id, "description", v)}
-                  />
-                </div>
-
-                <div className="flex justify-end gap-2">
-                  <button
-                    onClick={() => onToggleEdit(item.id)}
-                    className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs font-medium text-slate-300"
-                  >
-                    Done
-                  </button>
-                </div>
-              </div>
-            )}
+              <button
+                onClick={() => onDelete(item.id)}
+                className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300"
+              >
+                Remove
+              </button>
+            </div>
           </div>
         ))}
 
@@ -759,33 +997,38 @@ function EditableMetadataSection({
           </button>
         ) : (
           <div className="rounded-xl border border-white/6 bg-[#101827] p-4 space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <Input
                 label="Title"
                 value={newItem.title}
                 onChange={(v) => setNewItem((prev) => ({ ...prev, title: v }))}
+                placeholder="Title"
               />
               <Input
-                label="Issuer / Organization"
+                label="Issuer"
                 value={newItem.issuer}
                 onChange={(v) => setNewItem((prev) => ({ ...prev, issuer: v }))}
+                placeholder="Issuer"
               />
               <Input
-                label="Year / Date"
+                label="Year"
                 value={newItem.year}
                 onChange={(v) => setNewItem((prev) => ({ ...prev, year: v }))}
-              />
-              <Input
-                label="Description"
-                value={newItem.description}
-                onChange={(v) => setNewItem((prev) => ({ ...prev, description: v }))}
+                placeholder="Year"
               />
             </div>
+            <TextArea
+              label="Description"
+              value={newItem.description}
+              onChange={(v) => setNewItem((prev) => ({ ...prev, description: v }))}
+              rows={4}
+              placeholder="Description"
+            />
 
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setShowForm(false)}
-                className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs font-medium text-slate-300"
+                className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs font-medium text-slate-300"
               >
                 Cancel
               </button>
@@ -805,3 +1048,7 @@ function EditableMetadataSection({
 }
 
 export default ProfilePage;
+
+
+
+

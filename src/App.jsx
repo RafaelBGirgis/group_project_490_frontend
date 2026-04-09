@@ -6,6 +6,8 @@ import LoginPage from "./pages/login";
 import ForgotPasswordPage from "./pages/forgot_password";
 import SignupPage from "./pages/signup";
 import ProfilePage from "./pages/profile";
+import CoachRequestFormPage from "./pages/coach_request_form";
+import OnboardingPage from "./pages/onboarding";
 
 function App() {
   return (
@@ -16,7 +18,9 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/signup" element={<SignupPage />} />
+          <Route path="/onboarding" element={<OnboardingPage />} />
           <Route path="/profile" element={<ProfilePage role="client" />} />
+          <Route path="/coach-request" element={<CoachRequestFormPage />} />
           <Route path="/coach-profile" element={<ProfilePage role="coach" />} />
           <Route path="/" element={<Navigate to="/client" />} />
           <Route path="/client" element={<ClientDashboard />} />

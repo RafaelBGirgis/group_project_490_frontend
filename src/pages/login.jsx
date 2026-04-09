@@ -4,6 +4,53 @@ import { Link } from "react-router-dom";
 function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+
+  // Replace with your backend URL
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
+
+  const getErrorMessage = async (response, fallback) => {
+    try {
+      const errorData = await response.json();
+      return errorData?.detail || fallback;
+    } catch {
+      return fallback;
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault(); // prevent page reload
+    setError("");
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+
+      if (!res.ok) {
+        const message = await getErrorMessage(res, "Login failed");
+        throw new Error(message);
+      }
+
+      const data = await res.json();
+      console.log("Login successful:", data);
+
+      // Save JWT token from backend
+      localStorage.setItem("jwt", data.access_token);
+
+      const normalizedEmail = email.trim().toLowerCase();
+      localStorage.setItem("active_user_email", normalizedEmail);
+      const hasOnboarded = localStorage.getItem(`onboarding_complete:${normalizedEmail}`) === "true";
+
+      // Redirect to required onboarding unless completed
+      window.location.href = hasOnboarded ? "/client" : "/onboarding";
+    } catch (err) {
+      console.error(err);
+      setError(err.message);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#080D19] text-white overflow-hidden">
@@ -29,7 +76,7 @@ function LoginPage() {
       <main className="relative z-10 mx-auto grid min-h-[calc(100vh-73px)] max-w-7xl grid-cols-1 items-center gap-10 px-6 py-10 lg:grid-cols-2">
         {/* Left panel */}
         <section className="hidden lg:flex">
-          <div className="w-full max-w-xl rounded-[28px] border border-white/8 bg-white/[0.02] p-10 shadow-[0_0_60px_rgba(0,0,0,0.35)] backdrop-blur-sm">
+          <div className="w-full max-w-xl rounded-[28px] border border-white/8 bg-[rgba(255,255,255,0.02)] p-10 shadow-[0_0_60px_rgba(0,0,0,0.35)] backdrop-blur-sm">
             <p className="mb-8 text-lg font-semibold text-blue-400">Till Failure</p>
 
             <h1 className="max-w-md text-5xl font-black leading-tight tracking-tight">
@@ -67,9 +114,9 @@ function LoginPage() {
 
         {/* Right panel */}
         <section className="flex justify-center lg:justify-end">
-            <div className="w-full max-w-md rounded-[28px] border border-white/10 bg-white/[0.03] p-8 shadow-[0_0_80px_rgba(37,99,235,0.12)] backdrop-blur-md">
-            <div className="mx-auto mb-6 flex w-fit rounded-xl border border-white/10 bg-white/[0.05] px-30 py-2">
-            <span className="text-sm font-semibold text-slate-200">Sign In</span>
+          <div className="w-full max-w-md rounded-[28px] border border-white/10 bg-[rgba(255,255,255,0.03)] p-8 shadow-[0_0_80px_rgba(37,99,235,0.12)] backdrop-blur-md">
+            <div className="mx-auto mb-6 flex w-fit rounded-xl border border-white/10 bg-[rgba(255,255,255,0.05)] px-30 py-2">
+              <span className="text-sm font-semibold text-slate-200">Sign In</span>
             </div>
 
             <h2 className="text-4xl font-black tracking-tight">
@@ -82,7 +129,7 @@ function LoginPage() {
             <div className="mt-6">
               <button
                 type="button"
-                className="flex w-full items-center justify-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-white/[0.06]"
+                className="flex w-full items-center justify-center gap-3 rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-[rgba(255,255,255,0.06)]"
               >
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-[10px] font-bold text-white">
                   G
@@ -97,7 +144,7 @@ function LoginPage() {
               <div className="h-px flex-1 bg-white/10" />
             </div>
 
-            <form className="space-y-5">
+            <form className="space-y-5" onSubmit={handleSubmit}>
               <div>
                 <label className="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-400">
                   Email Address
@@ -108,6 +155,7 @@ function LoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full rounded-xl border border-white/10 bg-[#0B1220] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-blue-400/60 focus:ring-2 focus:ring-blue-500/20"
+                  required
                 />
               </div>
 
@@ -121,6 +169,7 @@ function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full rounded-xl border border-white/10 bg-[#0B1220] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-blue-400/60 focus:ring-2 focus:ring-blue-500/20"
+                  required
                 />
               </div>
 
@@ -139,6 +188,8 @@ function LoginPage() {
               >
                 Sign In →
               </button>
+
+              {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
             </form>
 
             <p className="mt-5 text-center text-xs text-slate-500">
@@ -178,3 +229,5 @@ function FeatureCard({ emoji, title, text }) {
 }
 
 export default LoginPage;
+
+

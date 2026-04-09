@@ -2,52 +2,46 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 const PRIMARY_GOALS = [
-  "Lose Weight",
-  "Build Muscle",
-  "Improve Endurance",
-  "General Wellness",
+  "Weight Loss",
+  "Maintenance",
+  "Muscle Gain",
 ];
 
-const TRAINING_EXPERIENCE_OPTIONS = ["Beginner", "Intermediate", "Advanced"];
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const SESSION_DURATIONS = ["30 minutes", "45 minutes", "60 minutes", "75+ minutes"];
-const EQUIPMENT_OPTIONS = [
-  "No equipment",
-  "Dumbbells",
-  "Barbell",
-  "Resistance bands",
-  "Cardio machines",
-  "Full gym access",
-];
-const DIETARY_OPTIONS = [
-  "No restrictions",
-  "Vegetarian",
-  "Vegan",
-  "Gluten-free",
-  "Dairy-free",
-  "Halal",
-  "Kosher",
-  "Nut allergy",
-];
-const MEAL_PLAN_OPTIONS = [
-  "Use meal library only",
-  "Accept coach meal plan",
-  "Both library and coach plan",
-];
-const ACCOUNT_MODE_OPTIONS = [
-  { value: "client_only", label: "Client-only mode" },
-  { value: "client_and_coach", label: "Client + Coach tools" },
-];
-const WORKOUT_LIBRARY = [
-  "Push Day",
-  "Pull Day",
-  "Leg Day",
-  "Upper Body",
-  "Lower Body",
-  "HIIT Cardio",
-  "Core & Mobility",
-  "Full Body Circuit",
-];
+const EMPTY_TRAINING_AVAILABILITY = {
+  Mon: [],
+  Tue: [],
+  Wed: [],
+  Thu: [],
+  Fri: [],
+  Sat: [],
+  Sun: [],
+};
+
+const normalizeTrainingAvailability = (value, fallbackDays = []) => {
+  const base = {
+    Mon: [],
+    Tue: [],
+    Wed: [],
+    Thu: [],
+    Fri: [],
+    Sat: [],
+    Sun: [],
+  };
+
+  if (!value || typeof value !== "object") {
+    fallbackDays.forEach((day) => {
+      if (base[day]) base[day] = [];
+    });
+    return base;
+  }
+
+  Object.keys(base).forEach((day) => {
+    const slots = value[day];
+    base[day] = Array.isArray(slots) ? slots : [];
+  });
+
+  return base;
+};
 
 function OnboardingPage() {
   const navigate = useNavigate();
@@ -59,19 +53,12 @@ function OnboardingPage() {
     name: "",
     email: "",
     primaryGoal: "",
-    trainingExperience: "",
     weight: "",
     height: "",
     age: "",
     gender: "",
     bio: "",
-    availableDays: [],
-    sessionDuration: "",
-    equipmentAccess: [],
-    dietaryPreferences: [],
-    mealPlanPreference: "",
-    accountMode: "",
-    starterWorkouts: [],
+    trainingAvailability: { ...EMPTY_TRAINING_AVAILABILITY },
   });
 
   const onboardingKey = useMemo(() => {
@@ -82,18 +69,11 @@ function OnboardingPage() {
   const isFormValid = useMemo(() => {
     return Boolean(
       form.primaryGoal &&
-        form.trainingExperience &&
         form.weight &&
         form.height &&
         form.age &&
         form.gender &&
-        form.availableDays.length > 0 &&
-        form.sessionDuration &&
-        form.equipmentAccess.length > 0 &&
-        form.dietaryPreferences.length > 0 &&
-        form.mealPlanPreference &&
-        form.accountMode &&
-        form.starterWorkouts.length > 0
+        Object.values(form.trainingAvailability).some((slots) => slots.length > 0)
     );
   }, [form]);
 
@@ -131,12 +111,13 @@ function OnboardingPage() {
         setForm((prev) => ({
           ...prev,
           ...savedData,
+          trainingAvailability: normalizeTrainingAvailability(
+            savedData?.trainingAvailability,
+            savedData?.availableDays
+          ),
           name: account.name || savedData?.name || prev.name,
           email,
-          age:
-            account.age != null
-              ? String(account.age)
-              : savedData?.age || prev.age,
+          age: account.age != null ? String(account.age) : savedData?.age || prev.age,
           gender: account.gender || savedData?.gender || prev.gender,
           bio: account.bio || savedData?.bio || prev.bio,
         }));
@@ -150,20 +131,23 @@ function OnboardingPage() {
     load();
   }, [API_BASE_URL, navigate]);
 
-  const toggleFromList = (field, value) => {
-    setForm((prev) => ({
-      ...prev,
-      [field]: prev[field].includes(value)
-        ? prev[field].filter((x) => x !== value)
-        : [...prev[field], value],
-    }));
-  };
+  const addTrainingAvailabilitySlot = (day) => {
+    const time = prompt(`Add a time slot for ${day} (example: 7PM)`);
+    if (!time) return;
 
-  const toTitleCase = (value) =>
-    String(value)
-      .split(" ")
-      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(" ");
+    setForm((prev) => {
+      const daySlots = prev.trainingAvailability[day] || [];
+      if (daySlots.includes(time)) return prev;
+
+      return {
+        ...prev,
+        trainingAvailability: {
+          ...prev.trainingAvailability,
+          [day]: [...daySlots, time],
+        },
+      };
+    });
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -184,7 +168,6 @@ function OnboardingPage() {
       localStorage.setItem(`onboarding_complete:${form.email}`, "true");
       localStorage.setItem("active_user_email", form.email);
     }
-    localStorage.setItem("dashboard_role_preference", form.accountMode);
 
     navigate("/client");
   };
@@ -250,21 +233,6 @@ function OnboardingPage() {
                   className="rounded-lg border border-white/10 bg-[#0F172A] px-4 py-3 text-sm text-slate-300 outline-none"
                   placeholder="Email"
                 />
-                <select
-                  value={form.trainingExperience}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, trainingExperience: e.target.value }))
-                  }
-                  className="rounded-lg border border-white/10 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
-                  required
-                >
-                  <option value="">Training experience</option>
-                  {TRAINING_EXPERIENCE_OPTIONS.map((level) => (
-                    <option key={level} value={level}>
-                      {level}
-                    </option>
-                  ))}
-                </select>
                 <input
                   type="number"
                   min="1"
@@ -312,167 +280,38 @@ function OnboardingPage() {
 
             <section className="space-y-3">
               <h2 className="text-sm font-bold uppercase tracking-widest text-slate-400">
-                Training Constraints
+                Training Availability
               </h2>
-              <p className="text-xs text-slate-500">Select available days (required)</p>
-              <div className="flex flex-wrap gap-2">
-                {DAYS.map((day) => {
-                  const selected = form.availableDays.includes(day);
-                  return (
-                    <button
-                      key={day}
-                      type="button"
-                      onClick={() => toggleFromList("availableDays", day)}
-                      className="rounded-full border px-3 py-1 text-xs"
-                      style={{
-                        borderColor: selected ? "#3B82F6" : "rgba(255,255,255,0.12)",
-                        backgroundColor: selected
-                          ? "rgba(59,130,246,0.16)"
-                          : "rgba(255,255,255,0.03)",
-                        color: selected ? "#93C5FD" : "#CBD5E1",
-                      }}
-                    >
+              <p className="text-xs text-slate-500">Add your available training time slots</p>
+              <div className="grid grid-cols-7 gap-1 text-center">
+                {Object.entries(form.trainingAvailability).map(([day, slots]) => (
+                  <div key={day}>
+                    <div className="mb-2 text-[10px] font-semibold uppercase text-slate-500">
                       {day}
-                    </button>
-                  );
-                })}
-              </div>
+                    </div>
 
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <select
-                  value={form.sessionDuration}
-                  onChange={(e) => setForm((prev) => ({ ...prev, sessionDuration: e.target.value }))}
-                  className="rounded-lg border border-white/10 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
-                  required
-                >
-                  <option value="">Select Session Duration</option>
-                  {SESSION_DURATIONS.map((d) => (
-                    <option key={d} value={d}>
-                      {toTitleCase(d)}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                    <div className="space-y-1">
+                      {slots.map((time) => (
+                        <div
+                          key={`${day}-${time}`}
+                          className="w-full rounded-md border border-white/6 bg-[rgba(255,255,255,0.02)] px-1 py-1 text-[10px] text-slate-300"
+                          title={`${day} ${time}`}
+                        >
+                          {time}
+                        </div>
+                      ))}
 
-              <p className="text-xs text-slate-500">Equipment access (required)</p>
-              <div className="flex flex-wrap gap-2">
-                {EQUIPMENT_OPTIONS.map((eq) => {
-                  const selected = form.equipmentAccess.includes(eq);
-                  return (
-                    <button
-                      key={eq}
-                      type="button"
-                      onClick={() => toggleFromList("equipmentAccess", eq)}
-                      className="rounded-full border px-3 py-1 text-xs"
-                      style={{
-                        borderColor: selected ? "#3B82F6" : "rgba(255,255,255,0.12)",
-                        backgroundColor: selected
-                          ? "rgba(59,130,246,0.16)"
-                          : "rgba(255,255,255,0.03)",
-                        color: selected ? "#93C5FD" : "#CBD5E1",
-                      }}
-                    >
-                      {eq}
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-
-            <section className="space-y-3">
-              <h2 className="text-sm font-bold uppercase tracking-widest text-slate-400">
-                Dietary Preferences
-              </h2>
-              <p className="text-xs text-slate-500">
-                Choose restrictions/preferences for coaches to see (required).
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {DIETARY_OPTIONS.map((item) => {
-                  const selected = form.dietaryPreferences.includes(item);
-                  return (
-                    <button
-                      key={item}
-                      type="button"
-                      onClick={() => toggleFromList("dietaryPreferences", item)}
-                      className="rounded-full border px-3 py-1 text-xs"
-                      style={{
-                        borderColor: selected ? "#3B82F6" : "rgba(255,255,255,0.12)",
-                        backgroundColor: selected
-                          ? "rgba(59,130,246,0.16)"
-                          : "rgba(255,255,255,0.03)",
-                        color: selected ? "#93C5FD" : "#CBD5E1",
-                      }}
-                    >
-                      {item}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <select
-                value={form.mealPlanPreference}
-                onChange={(e) => setForm((prev) => ({ ...prev, mealPlanPreference: e.target.value }))}
-                className="w-full rounded-lg border border-white/10 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
-                required
-              >
-                <option value="">Select Meal Plan Preference</option>
-                {MEAL_PLAN_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {toTitleCase(option)}
-                  </option>
+                      <button
+                        type="button"
+                        onClick={() => addTrainingAvailabilitySlot(day)}
+                        className="w-full rounded-md border border-dashed px-1 py-1 text-[10px] text-slate-500 hover:text-white"
+                        style={{ borderColor: "rgba(59, 130, 246, 0.30)" }}
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
                 ))}
-              </select>
-            </section>
-
-            <section className="space-y-3">
-              <h2 className="text-sm font-bold uppercase tracking-widest text-slate-400">
-                Coach Tools Interest
-              </h2>
-              <div className="space-y-2">
-                {ACCOUNT_MODE_OPTIONS.map((mode) => (
-                  <label key={mode.value} className="flex items-center gap-3 text-sm text-slate-300">
-                    <input
-                      type="radio"
-                      name="accountMode"
-                      value={mode.value}
-                      checked={form.accountMode === mode.value}
-                      onChange={(e) => setForm((prev) => ({ ...prev, accountMode: e.target.value }))}
-                      required
-                    />
-                    {mode.label}
-                  </label>
-                ))}
-              </div>
-            </section>
-
-            <section className="space-y-3">
-              <h2 className="text-sm font-bold uppercase tracking-widest text-slate-400">
-                Starter Workout Catalog
-              </h2>
-              <p className="text-xs text-slate-500">
-                Pick at least one workout to self-index your initial catalog.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {WORKOUT_LIBRARY.map((workout) => {
-                  const selected = form.starterWorkouts.includes(workout);
-                  return (
-                    <button
-                      key={workout}
-                      type="button"
-                      onClick={() => toggleFromList("starterWorkouts", workout)}
-                      className="rounded-full border px-3 py-1 text-xs"
-                      style={{
-                        borderColor: selected ? "#3B82F6" : "rgba(255,255,255,0.12)",
-                        backgroundColor: selected
-                          ? "rgba(59,130,246,0.16)"
-                          : "rgba(255,255,255,0.03)",
-                        color: selected ? "#93C5FD" : "#CBD5E1",
-                      }}
-                    >
-                      {workout}
-                    </button>
-                  );
-                })}
               </div>
             </section>
 

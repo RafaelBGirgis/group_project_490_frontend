@@ -3,37 +3,56 @@ import { useNavigate } from "react-router-dom";
 import { Navbar } from "../components/navbar";
 
 const PRIMARY_GOALS = [
-  "lose weight",
-  "build muscle",
-  "improve endurance",
-  "general wellness",
+  "Weight Loss",
+  "Maintenance",
+  "Muscle Gain",
 ];
-const TRAINING_EXPERIENCE_OPTIONS = ["Beginner", "Intermediate", "Advanced"];
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const SESSION_DURATIONS = ["30 minutes", "45 minutes", "60 minutes", "75+ minutes"];
-const EQUIPMENT_OPTIONS = [
-  "No equipment",
-  "Dumbbells",
-  "Barbell",
-  "Resistance bands",
-  "Cardio machines",
-  "Full gym access",
-];
-const DIETARY_OPTIONS = [
-  "No restrictions",
-  "Vegetarian",
-  "Vegan",
-  "Gluten-free",
-  "Dairy-free",
-  "Halal",
-  "Kosher",
-  "Nut allergy",
-];
-const MEAL_PLAN_OPTIONS = [
-  "Use meal library only",
-  "Accept coach meal plan",
-  "Both library and coach plan",
-];
+const EMPTY_TRAINING_AVAILABILITY = {
+  Mon: [],
+  Tue: [],
+  Wed: [],
+  Thu: [],
+  Fri: [],
+  Sat: [],
+  Sun: [],
+};
+
+const normalizeTrainingAvailability = (value, fallbackDays = []) => {
+  const base = {
+    Mon: [],
+    Tue: [],
+    Wed: [],
+    Thu: [],
+    Fri: [],
+    Sat: [],
+    Sun: [],
+  };
+
+  if (!value || typeof value !== "object") {
+    fallbackDays.forEach((day) => {
+      if (base[day]) base[day] = [];
+    });
+    return base;
+  }
+
+  Object.keys(base).forEach((day) => {
+    const slots = value[day];
+    base[day] = Array.isArray(slots) ? slots : [];
+  });
+
+  return base;
+};
+
+const normalizeGenderToSignupValue = (value) => {
+  const normalized = String(value || "").trim().toLowerCase().replaceAll("_", "-");
+  if (normalized === "male") return "Male";
+  if (normalized === "female") return "Female";
+  if (normalized === "non-binary" || normalized === "nonbinary") return "Non-Binary";
+  if (normalized === "prefer-not-to-say" || normalized === "prefer not to say") {
+    return "Prefer_Not_to_Say";
+  }
+  return value || "";
+};
 
 function ProfilePage({ role = "client" }) {
   const navigate = useNavigate();
@@ -58,13 +77,7 @@ function ProfilePage({ role = "client" }) {
     age: "",
     gender: "",
     primaryGoal: "",
-    trainingExperience: "",
-    goals: "",
-    availableDays: [],
-    sessionDuration: "",
-    equipmentAccess: [],
-    dietaryPreferences: [],
-    mealPlanPreference: "",
+    trainingAvailability: { ...EMPTY_TRAINING_AVAILABILITY },
     weight: "",
     height: "",
     profilePicture: null,
@@ -74,6 +87,7 @@ function ProfilePage({ role = "client" }) {
   });
 
   const [selectedAvailability, setSelectedAvailability] = useState(null);
+  const [selectedClientAvailability, setSelectedClientAvailability] = useState(null);
 
   const [availability, setAvailability] = useState({
     Mon: [],
@@ -195,20 +209,15 @@ function ProfilePage({ role = "client" }) {
               : onboardingData?.age != null
                 ? String(onboardingData.age)
                 : "",
-          gender: data.gender || onboardingData?.gender || "",
+          gender: normalizeGenderToSignupValue(data.gender || onboardingData?.gender || ""),
           bio: data.bio || onboardingData?.bio || "",
           weight: onboardingData?.weight || "",
           height: onboardingData?.height || "",
           primaryGoal: onboardingData?.primaryGoal || "",
-          trainingExperience: onboardingData?.trainingExperience || "",
-          availableDays: onboardingData?.availableDays || [],
-          sessionDuration: onboardingData?.sessionDuration || "",
-          equipmentAccess: onboardingData?.equipmentAccess || [],
-          dietaryPreferences: onboardingData?.dietaryPreferences || [],
-          mealPlanPreference: onboardingData?.mealPlanPreference || "",
-          goals: onboardingData?.trainingExperience
-            ? `Training Experience: ${onboardingData.trainingExperience}`
-            : prev.goals,
+          trainingAvailability: normalizeTrainingAvailability(
+            onboardingData?.trainingAvailability,
+            onboardingData?.availableDays
+          ),
           profilePicture: data.pfp_url || null,
         }));
       } catch (err) {
@@ -227,15 +236,6 @@ function ProfilePage({ role = "client" }) {
 
   const handleDeleteAccountRequest = () => {
     alert("Account deletion request submitted.");
-  };
-
-  const toggleProfileList = (field, value) => {
-    setProfile((prev) => ({
-      ...prev,
-      [field]: prev[field].includes(value)
-        ? prev[field].filter((x) => x !== value)
-        : [...prev[field], value],
-    }));
   };
 
   const handleCancelCoachRequest = () => {
@@ -270,6 +270,41 @@ function ProfilePage({ role = "client" }) {
     }));
     if (selectedAvailability === `${day}-${time}`) {
       setSelectedAvailability(null);
+    }
+  };
+
+  const toggleClientAvailabilitySlot = (day, time) => {
+    setSelectedClientAvailability(`${day}-${time}`);
+  };
+
+  const addClientAvailabilitySlot = (day) => {
+    const time = prompt(`Add a time slot for ${day} (example: 7PM)`);
+    if (!time) return;
+
+    setProfile((prev) => {
+      const daySlots = prev.trainingAvailability[day] || [];
+      if (daySlots.includes(time)) return prev;
+
+      return {
+        ...prev,
+        trainingAvailability: {
+          ...prev.trainingAvailability,
+          [day]: [...daySlots, time],
+        },
+      };
+    });
+  };
+
+  const removeClientAvailabilitySlot = (day, time) => {
+    setProfile((prev) => ({
+      ...prev,
+      trainingAvailability: {
+        ...prev.trainingAvailability,
+        [day]: (prev.trainingAvailability[day] || []).filter((slot) => slot !== time),
+      },
+    }));
+    if (selectedClientAvailability === `${day}-${time}`) {
+      setSelectedClientAvailability(null);
     }
   };
 
@@ -330,14 +365,6 @@ function ProfilePage({ role = "client" }) {
       .split(" ")
       .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
       .join(" ");
-
-  const formatGender = (value) => {
-    if (!value) return "";
-    return value
-      .split("-")
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join("-");
-  };
 
   return (
     <div className="min-h-screen bg-[#080D19] text-white">
@@ -516,6 +543,72 @@ function ProfilePage({ role = "client" }) {
                   </div>
                 </SidebarCard>
 
+                <SidebarCard title="Availability">
+                  <div className="grid grid-cols-7 gap-1 text-center">
+                    {Object.entries(profile.trainingAvailability).map(([day, slots]) => (
+                      <div key={day}>
+                        <div className="mb-2 text-[10px] font-semibold uppercase text-slate-500">
+                          {day}
+                        </div>
+
+                        <div className="space-y-1">
+                          {slots.length === 0 ? (
+                            <div className="rounded-md border border-white/5 bg-[rgba(255,255,255,0.02)] px-1 py-1 text-[10px] text-slate-600">
+                              -
+                            </div>
+                          ) : (
+                            slots.map((time) => {
+                              const active = selectedClientAvailability === `${day}-${time}`;
+                              return (
+                                <button
+                                  key={`${day}-${time}`}
+                                  type="button"
+                                  onClick={() => toggleClientAvailabilitySlot(day, time)}
+                                  className="w-full rounded-md border px-1 py-1 text-[10px] transition"
+                                  style={{
+                                    borderColor: active ? "#3B82F6" : "rgba(255,255,255,0.06)",
+                                    backgroundColor: active
+                                      ? "rgba(59, 130, 246, 0.12)"
+                                      : "rgba(255,255,255,0.02)",
+                                    color: active ? "#fff" : "#94A3B8",
+                                  }}
+                                  title={`${day} ${time}`}
+                                >
+                                  {time}
+                                </button>
+                              );
+                            })
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => addClientAvailabilitySlot(day)}
+                            className="w-full rounded-md border border-dashed px-1 py-1 text-[10px] text-slate-500 hover:text-white"
+                            style={{ borderColor: "rgba(59, 130, 246, 0.30)" }}
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {selectedClientAvailability && (
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const [day, time] = selectedClientAvailability.split("-");
+                          removeClientAvailabilitySlot(day, time);
+                        }}
+                        className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300"
+                      >
+                        Remove Selected Slot
+                      </button>
+                    </div>
+                  )}
+                </SidebarCard>
+
                 {coachRequest && (
                   <SidebarCard title="Coach Request">
                     <div className="rounded-xl border border-yellow-400/20 bg-yellow-500/10 p-3">
@@ -586,11 +679,22 @@ function ProfilePage({ role = "client" }) {
                       onChange={(v) => handleProfileChange("location", v)}
                       placeholder="Boston, MA"
                     />
-                    <Input
-                      label="Gender"
-                      value={formatGender(profile.gender)}
-                      onChange={(v) => handleProfileChange("gender", v)}
-                    />
+                    <div>
+                      <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                        Gender
+                      </label>
+                      <select
+                        value={normalizeGenderToSignupValue(profile.gender)}
+                        onChange={(e) => handleProfileChange("gender", e.target.value)}
+                        className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
+                      >
+                        <option value="">Select gender</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Non-Binary">Non-binary</option>
+                        <option value="Prefer_Not_to_Say">Prefer not to say</option>
+                      </select>
+                    </div>
                   </div>
 
                   <div className="mt-4">
@@ -613,11 +717,22 @@ function ProfilePage({ role = "client" }) {
                     }} />
                     <Input label="Email" value={profile.email} onChange={(v) => handleProfileChange("email", v)} />
                     <Input label="Age" value={profile.age} onChange={(v) => handleProfileChange("age", v)} />
-                    <Input
-                      label="Gender"
-                      value={formatGender(profile.gender)}
-                      onChange={(v) => handleProfileChange("gender", v)}
-                    />
+                    <div>
+                      <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                        Gender
+                      </label>
+                      <select
+                        value={normalizeGenderToSignupValue(profile.gender)}
+                        onChange={(e) => handleProfileChange("gender", e.target.value)}
+                        className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
+                      >
+                        <option value="">Select gender</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Non-Binary">Non-binary</option>
+                        <option value="Prefer_Not_to_Say">Prefer not to say</option>
+                      </select>
+                    </div>
                     <Input
                       label="Weight"
                       value={profile.weight}
@@ -650,23 +765,6 @@ function ProfilePage({ role = "client" }) {
                         ))}
                       </select>
                     </div>
-                    <div>
-                      <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
-                        Training Experience
-                      </label>
-                      <select
-                        value={profile.trainingExperience}
-                        onChange={(e) => handleProfileChange("trainingExperience", e.target.value)}
-                        className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
-                      >
-                        <option value="">Select training experience</option>
-                        {TRAINING_EXPERIENCE_OPTIONS.map((level) => (
-                          <option key={level} value={level}>
-                            {level}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
                   </div>
 
                   <div className="mt-4">
@@ -677,113 +775,6 @@ function ProfilePage({ role = "client" }) {
                       rows={4}
                       placeholder="Example: Training 4x/week and aiming for a half marathon."
                     />
-                  </div>
-
-                  <div className="mt-4 space-y-3">
-                    <label className="block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
-                      Training Constraints
-                    </label>
-                    <p className="text-xs text-slate-500">Available Days</p>
-                    <div className="flex flex-wrap gap-2">
-                      {DAYS.map((day) => {
-                        const selected = profile.availableDays.includes(day);
-                        return (
-                          <button
-                            key={day}
-                            type="button"
-                            onClick={() => toggleProfileList("availableDays", day)}
-                            className="rounded-full border px-3 py-1 text-xs"
-                            style={{
-                              borderColor: selected ? "#3B82F6" : "rgba(255,255,255,0.12)",
-                              backgroundColor: selected
-                                ? "rgba(59,130,246,0.16)"
-                                : "rgba(255,255,255,0.03)",
-                              color: selected ? "#93C5FD" : "#CBD5E1",
-                            }}
-                          >
-                            {day}
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <select
-                      value={profile.sessionDuration}
-                      onChange={(e) => handleProfileChange("sessionDuration", e.target.value)}
-                      className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
-                    >
-                      <option value="">Select Session Duration</option>
-                      {SESSION_DURATIONS.map((item) => (
-                        <option key={item} value={item}>
-                          {toTitleCase(item)}
-                        </option>
-                      ))}
-                    </select>
-
-                    <p className="text-xs text-slate-500">Equipment Access</p>
-                    <div className="flex flex-wrap gap-2">
-                      {EQUIPMENT_OPTIONS.map((item) => {
-                        const selected = profile.equipmentAccess.includes(item);
-                        return (
-                          <button
-                            key={item}
-                            type="button"
-                            onClick={() => toggleProfileList("equipmentAccess", item)}
-                            className="rounded-full border px-3 py-1 text-xs"
-                            style={{
-                              borderColor: selected ? "#3B82F6" : "rgba(255,255,255,0.12)",
-                              backgroundColor: selected
-                                ? "rgba(59,130,246,0.16)"
-                                : "rgba(255,255,255,0.03)",
-                              color: selected ? "#93C5FD" : "#CBD5E1",
-                            }}
-                          >
-                            {item}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="mt-4 space-y-3">
-                    <label className="block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
-                      Dietary Preferences
-                    </label>
-                    <div className="flex flex-wrap gap-2">
-                      {DIETARY_OPTIONS.map((item) => {
-                        const selected = profile.dietaryPreferences.includes(item);
-                        return (
-                          <button
-                            key={item}
-                            type="button"
-                            onClick={() => toggleProfileList("dietaryPreferences", item)}
-                            className="rounded-full border px-3 py-1 text-xs"
-                            style={{
-                              borderColor: selected ? "#3B82F6" : "rgba(255,255,255,0.12)",
-                              backgroundColor: selected
-                                ? "rgba(59,130,246,0.16)"
-                                : "rgba(255,255,255,0.03)",
-                              color: selected ? "#93C5FD" : "#CBD5E1",
-                            }}
-                          >
-                            {item}
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <select
-                      value={profile.mealPlanPreference}
-                      onChange={(e) => handleProfileChange("mealPlanPreference", e.target.value)}
-                      className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
-                    >
-                      <option value="">Select Meal Plan Preference</option>
-                      {MEAL_PLAN_OPTIONS.map((item) => (
-                        <option key={item} value={item}>
-                          {toTitleCase(item)}
-                        </option>
-                      ))}
-                    </select>
                   </div>
 
                 </>

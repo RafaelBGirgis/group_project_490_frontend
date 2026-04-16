@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import clientLogo from "../assets/Client Logo.svg";
 
 function LoginPage() {
   const [email, setEmail] = useState("");
@@ -64,9 +65,7 @@ function LoginPage() {
       {/* Top brand bar */}
       <header className="relative z-10 border-b border-white/5">
         <div className="mx-auto flex max-w-7xl items-center gap-3 px-6 py-4">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-cyan-400 shadow-[0_0_30px_rgba(59,130,246,0.25)]">
-            <span className="text-lg">🏋️</span>
-          </div>
+          <img src={clientLogo} alt="Till Failure" className="h-9" />
           <div>
             <p className="text-base font-semibold text-blue-300">Till Failure</p>
           </div>

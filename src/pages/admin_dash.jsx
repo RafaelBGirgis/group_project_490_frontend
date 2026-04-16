@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Navbar,
   StatCard,
@@ -6,18 +7,50 @@ import {
   ListRow,
   StatusBadge,
   SectionHeader,
+  Overlay,
+  SkeletonStatCard,
+  SkeletonDashCard,
 } from "../components";
+import { fetchMe } from "../api/client";
+import RoleRequestsDetail from "../components/overlays/role_requests_detail";
+import AccountsDetail from "../components/overlays/accounts_detail";
+import PlansDetail from "../components/overlays/plans_detail";
+import ReportsDetail from "../components/overlays/reports_detail";
 
 const role = "admin";
 
 export default function AdminDash() {
+  const navigate = useNavigate();
 
+  /* ── auth guard ──────────────────────────────────────────────────── */
+  const [authed, setAuthed] = useState(false);
+  useEffect(() => {
+    const token = localStorage.getItem("jwt");
+    if (!token) { navigate("/login"); return; }
+    setAuthed(true);
+  }, [navigate]);
 
+  /* ── overlay state ──────────────────────────────────────────────── */
+  const [overlay, setOverlay] = useState(null); // "requests" | "accounts" | "plans" | "reports"
+  const closeOverlay = () => setOverlay(null);
+
+  /* ── user info ──────────────────────────────────────────────────── */
+  const [initials, setInitials] = useState("?");
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    if (!authed) return;
+    fetchMe()
+      .then((me) => {
+        if (me?.name) setInitials(me.name.split(" ").map((n) => n[0]).join("").toUpperCase());
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [authed]);
+
+  /* ── stats ──────────────────────────────────────────────────────── */
   const [stats, setStats] = useState(null);
   useEffect(() => {
     // TODO: GET /admin/stats
-    // Returns: { total_accounts, total_clients, total_coaches, pending_role_requests }
-    // setStats(data)
     setStats({
       total_accounts: 142,
       total_clients: 98,
@@ -26,27 +59,23 @@ export default function AdminDash() {
     });
   }, []);
 
-
+  /* ── role requests ──────────────────────────────────────────────── */
   const [roleRequests, setRoleRequests] = useState([]);
   useEffect(() => {
     // TODO: GET /admin/role-requests
-    // Returns: [{ id, account_id, account_name, requested_role, is_approved }]
-    // setRoleRequests(data)
     setRoleRequests([
-      { id: 1, account_name: "Marcus Webb",    requested_role: "Coach",  is_approved: null },
-      { id: 2, account_name: "Priya Sharma",   requested_role: "Coach",  is_approved: null },
-      { id: 3, account_name: "Jordan Lee",     requested_role: "Client", is_approved: null },
-      { id: 4, account_name: "Tanya Okonkwo",  requested_role: "Coach",  is_approved: null },
-      { id: 5, account_name: "Sam Rivera",     requested_role: "Client", is_approved: null },
+      { id: 1, account_name: "Marcus Webb",   requested_role: "Coach",  is_approved: null },
+      { id: 2, account_name: "Priya Sharma",  requested_role: "Coach",  is_approved: null },
+      { id: 3, account_name: "Jordan Lee",    requested_role: "Client", is_approved: null },
+      { id: 4, account_name: "Tanya Okonkwo", requested_role: "Coach",  is_approved: null },
+      { id: 5, account_name: "Sam Rivera",    requested_role: "Client", is_approved: null },
     ]);
   }, []);
 
- 
+  /* ── recent accounts ────────────────────────────────────────────── */
   const [recentAccounts, setRecentAccounts] = useState([]);
   useEffect(() => {
     // TODO: GET /admin/accounts?limit=5&sort=created_at:desc
-    // Returns: [{ id, first_name, last_name, email, role, created_at }]
-    // setRecentAccounts(data)
     setRecentAccounts([
       { id: 1, name: "Elena Marks",    email: "elena@mail.com",  role: "client", created_at: "2 mins ago"  },
       { id: 2, name: "David Osei",     email: "david@mail.com",  role: "coach",  created_at: "1 hr ago"   },
@@ -56,12 +85,10 @@ export default function AdminDash() {
     ]);
   }, []);
 
-
+  /* ── pricing plans ──────────────────────────────────────────────── */
   const [pricingPlans, setPricingPlans] = useState([]);
   useEffect(() => {
-    // TODO: GET /admin/pricing-plans?open=true
-    // Returns: [{ id, coach_name, payment_interval, payment_amount, open_to_entry }]
-    // setPricingPlans(data)
+    // TODO: GET /admin/pricing-plans
     setPricingPlans([
       { id: 1, coach_name: "Rafael Girgis", payment_interval: "monthly", payment_amount: 149.99, open_to_entry: true  },
       { id: 2, coach_name: "Sandra Kim",    payment_interval: "weekly",  payment_amount: 49.99,  open_to_entry: true  },
@@ -69,92 +96,90 @@ export default function AdminDash() {
     ]);
   }, []);
 
- 
+  /* ── reports ────────────────────────────────────────────────────── */
   const [reports, setReports] = useState([]);
   useEffect(() => {
     // TODO: GET /admin/reports
-    // Returns: [{ id, reporter_name, reported_name, reason, created_at }]
-    // setReports(data)
     setReports([
-      { id: 1, reporter_name: "Aisha Patel",  reported_name: "Coach X",    reason: "Inappropriate content", created_at: "1 hr ago"  },
-      { id: 2, reporter_name: "Chris Nguyen", reported_name: "Coach Y",    reason: "No show",               created_at: "3 hrs ago" },
+      { id: 1, reporter_name: "Aisha Patel",  reported_name: "Coach X", reason: "Inappropriate content", created_at: "1 hr ago"  },
+      { id: 2, reporter_name: "Chris Nguyen", reported_name: "Coach Y", reason: "No show",               created_at: "3 hrs ago" },
     ]);
   }, []);
 
-
+  /* ── actions ────────────────────────────────────────────────────── */
   const handleApprove = (id) => {
-    // TODO: PUT /admin/role-requests/:id  body: { is_approved: true }
-    setRoleRequests((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, is_approved: true } : r))
-    );
+    setRoleRequests((prev) => prev.map((r) => (r.id === id ? { ...r, is_approved: true } : r)));
   };
-
   const handleReject = (id) => {
-    // TODO: PUT /admin/role-requests/:id  body: { is_approved: false }
-    setRoleRequests((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, is_approved: false } : r))
-    );
+    setRoleRequests((prev) => prev.map((r) => (r.id === id ? { ...r, is_approved: false } : r)));
+  };
+  const handleDismissReport = (id) => {
+    setReports((prev) => prev.filter((r) => r.id !== id));
   };
 
   const pendingRequests = roleRequests.filter((r) => r.is_approved === null);
 
+  /* ── loading skeleton ────────────────────────────────────────────── */
+  if (loading) {
+    return (
+      <div className="min-h-screen" style={{ backgroundColor: "#080D19" }}>
+        <Navbar role={role} userName="?" />
+        <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
+          <div className="h-5 w-40 bg-white/5 rounded animate-pulse" />
+          <div className="grid grid-cols-4 gap-4">
+            <SkeletonStatCard />
+            <SkeletonStatCard />
+            <SkeletonStatCard />
+            <SkeletonStatCard />
+          </div>
+          <div className="h-5 w-40 bg-white/5 rounded animate-pulse" />
+          <div className="grid grid-cols-2 gap-4">
+            <SkeletonDashCard rows={3} />
+            <SkeletonDashCard rows={3} />
+          </div>
+          <div className="h-5 w-40 bg-white/5 rounded animate-pulse" />
+          <div className="grid grid-cols-2 gap-4">
+            <SkeletonDashCard rows={4} />
+            <SkeletonDashCard rows={3} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen" style={{ backgroundColor: "#080D19" }}>
-      <Navbar role={role} />
+      <Navbar role={role} userName={initials} />
 
       <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
 
-        
+        {/* ─── OVERVIEW ───────────────────────────────────────────── */}
         <SectionHeader label="OVERVIEW" role={role} />
 
         <div className="grid grid-cols-4 gap-4">
-          {/* account table */}
-          <StatCard
-            role={role}
-            label="TOTAL ACCOUNTS"
-            value={stats?.total_accounts ?? "—"}
-            sub="all registered users"
-          />
-          {/* client table */}
-          <StatCard
-            role={role}
-            label="ACTIVE CLIENTS"
-            value={stats?.total_clients ?? "—"}
-            sub="across all coaches"
-          />
-          {/* coach table */}
-          <StatCard
-            role={role}
-            label="ACTIVE COACHES"
-            value={stats?.total_coaches ?? "—"}
-            sub="on the platform"
-          />
-          {/* role_promotion_resolution where is_approved = null */}
-          <StatCard
-            role={role}
-            label="PENDING REQUESTS"
-            value={stats?.pending_role_requests ?? "—"}
-            sub="awaiting approval"
-          />
+          <StatCard role={role} label="TOTAL ACCOUNTS" value={stats?.total_accounts ?? "—"} sub="all registered users" />
+          <StatCard role={role} label="ACTIVE CLIENTS" value={stats?.total_clients ?? "—"} sub="across all coaches" />
+          <StatCard role={role} label="ACTIVE COACHES" value={stats?.total_coaches ?? "—"} sub="on the platform" />
+          <StatCard role={role} label="PENDING REQUESTS" value={stats?.pending_role_requests ?? "—"} sub="awaiting approval" />
         </div>
 
-
+        {/* ─── ROLE REQUESTS ──────────────────────────────────────── */}
         <SectionHeader label="ROLE REQUESTS" role={role} />
 
         <div className="grid grid-cols-2 gap-4">
-
-          {/* role_promotion_resolution — pending */}
           <DashboardCard
             role={role}
             title={`Pending Approvals (${pendingRequests.length})`}
+            action={{
+              label: "View all",
+              onClick: () => setOverlay("requests"),
+            }}
           >
             {pendingRequests.length === 0 ? (
-              <p className="text-gray-500 text-sm text-center py-4">
-                No pending requests
-              </p>
+              <p className="text-gray-500 text-sm text-center py-4">No pending requests</p>
             ) : (
               <div className="space-y-2">
-                {pendingRequests.map((req) => (
+                {pendingRequests.slice(0, 3).map((req) => (
                   <ListRow
                     key={req.id}
                     label={req.account_name}
@@ -177,16 +202,18 @@ export default function AdminDash() {
                     }
                   />
                 ))}
+                {pendingRequests.length > 3 && (
+                  <p className="text-gray-500 text-xs text-center pt-1">
+                    +{pendingRequests.length - 3} more pending
+                  </p>
+                )}
               </div>
             )}
           </DashboardCard>
 
-          {/* role_promotion_resolution — resolved */}
           <DashboardCard role={role} title="Recently Resolved">
             {roleRequests.filter((r) => r.is_approved !== null).length === 0 ? (
-              <p className="text-gray-500 text-sm text-center py-4">
-                No resolved requests yet
-              </p>
+              <p className="text-gray-500 text-sm text-center py-4">No resolved requests yet</p>
             ) : (
               <div className="space-y-2">
                 {roleRequests
@@ -208,23 +235,22 @@ export default function AdminDash() {
               </div>
             )}
           </DashboardCard>
-
         </div>
 
+        {/* ─── ACCOUNTS & PLANS ───────────────────────────────────── */}
         <SectionHeader label="ACCOUNTS & PLANS" role={role} />
 
         <div className="grid grid-cols-2 gap-4">
-
-          {/* account table — recent registrations */}
           <DashboardCard
             role={role}
             title="Recent Registrations"
-            action={{ label: "View all", onClick: () => {
-              // TODO: navigate to /admin/accounts
-            }}}
+            action={{
+              label: "View all",
+              onClick: () => setOverlay("accounts"),
+            }}
           >
             <div className="space-y-2">
-              {recentAccounts.map((acc) => (
+              {recentAccounts.slice(0, 4).map((acc) => (
                 <ListRow
                   key={acc.id}
                   label={acc.name}
@@ -233,10 +259,7 @@ export default function AdminDash() {
                     <div className="flex items-center gap-2">
                       <StatusBadge
                         label={acc.role}
-                        variant={
-                          acc.role === "coach" ? "warning" :
-                          acc.role === "admin" ? "danger" : "info"
-                        }
+                        variant={acc.role === "coach" ? "warning" : acc.role === "admin" ? "danger" : "info"}
                       />
                       <span className="text-gray-600 text-[10px]">{acc.created_at}</span>
                     </div>
@@ -246,8 +269,14 @@ export default function AdminDash() {
             </div>
           </DashboardCard>
 
-          {/* pricing_plan table */}
-          <DashboardCard role={role} title="Coach Pricing Plans">
+          <DashboardCard
+            role={role}
+            title="Coach Pricing Plans"
+            action={{
+              label: "View all",
+              onClick: () => setOverlay("plans"),
+            }}
+          >
             <div className="space-y-2">
               {pricingPlans.map((plan) => (
                 <ListRow
@@ -265,19 +294,18 @@ export default function AdminDash() {
               ))}
             </div>
           </DashboardCard>
-
         </div>
 
-
+        {/* ─── REPORTS & FLAGS ────────────────────────────────────── */}
         <SectionHeader label="REPORTS & FLAGS" role={role} />
 
-        {/* report table */}
         <DashboardCard
           role={role}
           title="Active Reports"
-          action={{ label: "View all", onClick: () => {
-            // TODO: navigate to /admin/reports
-          }}}
+          action={{
+            label: "View all",
+            onClick: () => setOverlay("reports"),
+          }}
         >
           {reports.length === 0 ? (
             <p className="text-gray-500 text-sm text-center py-4">No active reports</p>
@@ -299,8 +327,56 @@ export default function AdminDash() {
             </div>
           )}
         </DashboardCard>
-
       </div>
+
+      {/* ═══════════════════════════════════════════════════════════════
+          OVERLAYS
+          ═══════════════════════════════════════════════════════════════ */}
+
+      <Overlay
+        open={overlay === "requests"}
+        onClose={closeOverlay}
+        title="Role Promotion Requests"
+        wide
+      >
+        <RoleRequestsDetail
+          requests={roleRequests}
+          onApprove={handleApprove}
+          onReject={handleReject}
+        />
+      </Overlay>
+
+      <Overlay
+        open={overlay === "accounts"}
+        onClose={closeOverlay}
+        title="All Accounts"
+        wide
+      >
+        <AccountsDetail accounts={recentAccounts} />
+      </Overlay>
+
+      <Overlay
+        open={overlay === "plans"}
+        onClose={closeOverlay}
+        title="Coach Pricing Plans"
+      >
+        <PlansDetail plans={pricingPlans} />
+      </Overlay>
+
+      <Overlay
+        open={overlay === "reports"}
+        onClose={closeOverlay}
+        title="Reports & Flags"
+        wide
+      >
+        <ReportsDetail
+          reports={reports}
+          onDismiss={handleDismissReport}
+          onEscalate={(id) => {
+            // TODO: POST /admin/reports/:id/escalate
+          }}
+        />
+      </Overlay>
     </div>
   );
 }

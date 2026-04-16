@@ -8,6 +8,9 @@ import SignupPage from "./pages/signup";
 import ProfilePage from "./pages/profile";
 import CoachRequestFormPage from "./pages/coach_request_form";
 import OnboardingPage from "./pages/onboarding";
+import ChatPage from "./pages/chat";
+import FindCoachPage from "./pages/find_coach";
+import WorkoutsPage from "./pages/workouts";
 
 function App() {
   return (
@@ -25,6 +28,12 @@ function App() {
           <Route path="/client" element={<ClientDashboard />} />
           <Route path="/coach" element={<CoachDashboard />} />
           <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/chat" element={<ChatPage />} />
+          <Route path="/client/messages" element={<ChatPage />} />
+          <Route path="/find-coach" element={<FindCoachPage />} />
+          <Route path="/workouts" element={<WorkoutsPage />} />
+          {/* Catch-all: redirect unknown routes back to client dashboard */}
+          <Route path="*" element={<Navigate to="/client" />} />
         </Routes>
       </div>
     </BrowserRouter>

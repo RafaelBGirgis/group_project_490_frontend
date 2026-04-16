@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Navbar,
   StatCard,
@@ -9,7 +9,31 @@ import {
   ListRow,
   StatusBadge,
   SectionHeader,
+  Overlay,
+  SkeletonStatCard,
+  SkeletonDashCard,
+  SkeletonGreeting,
+  SkeletonRing,
+  SkeletonAvailability,
 } from "../components";
+import WorkoutDetail from "../components/overlays/workout_detail";
+import CoachProfile from "../components/overlays/coach_profile";
+import AvailabilityDetail from "../components/overlays/availability_detail";
+import MealDetail from "../components/overlays/meal_detail";
+import {
+  fetchMe,
+  fetchClientProfile,
+  fetchTelemetryToday,
+  fetchWorkoutPlan,
+  logWorkoutActivity,
+  fetchCoachInfo,
+  fetchCoachRating,
+  fetchNextSession,
+  fetchAvailability,
+  saveAvailability,
+  fetchMealsToday,
+  logMeal,
+} from "../api/client";
 
 const role = "client";
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -29,197 +53,211 @@ const SlotCell = ({ status, time }) => {
 };
 
 export default function ClientDash() {
-  const [activeDay, setActiveDay] = useState(TODAY_IDX);
-
   const navigate = useNavigate();
 
-  // useEffect(() => {
-  //   const token = localStorage.getItem("jwt");
-  //   if (!token) {
-  //     navigate("/login");
-  //   }
-  // }, []);
+  /* ── auth guard ──────────────────────────────────────────────────── */
+  const [authed, setAuthed] = useState(false);
 
-  const [account, setAccount] = useState(null);
   useEffect(() => {
-    // TODO: GET /api/account/:id
-    // setAccount(data)
-    setAccount({ first_name: "John", last_name: "Doe" });
-  }, []);
+    const token = localStorage.getItem("jwt");
+    if (!token) {
+      navigate("/login");
+      return;
+    }
+    setAuthed(true);
+  }, [navigate]);
 
-  const [stepCount, setStepCount] = useState(null);
-  useEffect(() => {
-    // TODO: GET /api/client/:id/telemetry/today → step_count.count
-    // setStepCount(data.count)
-    setStepCount(8241);
-  }, []);
+  /* ── overlay state ──────────────────────────────────────────────── */
+  const [overlay, setOverlay] = useState(null); // "workout" | "coach" | "availability" | "meals" | null
+  const closeOverlay = () => setOverlay(null);
 
+  /* ── core state ──────────────────────────────────────────────────── */
+  const [account, setAccount]           = useState(null);
+  const [clientId, setClientId]         = useState(null);
+  const [activeDay, setActiveDay]       = useState(TODAY_IDX);
+  const [stepCount, setStepCount]       = useState(null);
   const [caloriesBurned, setCaloriesBurned] = useState(null);
-  useEffect(() => {
-    // TODO: GET /api/client/:id/telemetry/today → SUM(calories_burned)
-    // setCaloriesBurned(data.total)
-    setCaloriesBurned(540);
-  }, []);
-
   const [caloriesConsumed, setCaloriesConsumed] = useState(null);
-  useEffect(() => {
-    // TODO: GET /api/client/:id/telemetry/today → SUM(meal.calories)
-    // setCaloriesConsumed(data.total)
-    setCaloriesConsumed(1438);
-  }, []);
-  const caloriesGoal = 2000;
-
-  const [workoutPlan, setWorkoutPlan] = useState(null);
+  const [caloriesGoal, setCaloriesGoal] = useState(2000);
+  const [workoutPlan, setWorkoutPlan]   = useState(null);
   const [workoutActivities, setWorkoutActivities] = useState([]);
-  useEffect(() => {
-    // TODO: GET /api/client/:id/workout-plan?day=:weekday_id
-    // setWorkoutPlan(data.plan)
-    // setWorkoutActivities(data.activities)
-    setWorkoutPlan({ strata_name: "Push Day" });
-    setWorkoutActivities([
-      {
-        id: 1,
-        name: "Bench Press",
-        suggested_sets: 4,
-        suggested_reps: 6,
-        intensity_value: 185,
-        intensity_measure: "lbs",
-        logged: true,
-      },
-      {
-        id: 2,
-        name: "Incline Dumbbell Press",
-        suggested_sets: 3,
-        suggested_reps: 10,
-        intensity_value: 60,
-        intensity_measure: "lbs",
-        logged: false,
-      },
-      {
-        id: 3,
-        name: "Tricep Pushdown",
-        suggested_sets: 3,
-        suggested_reps: 12,
-        intensity_value: 50,
-        intensity_measure: "lbs",
-        logged: false,
-      },
-      {
-        id: 4,
-        name: "Lateral Raises",
-        suggested_sets: 4,
-        suggested_reps: 15,
-        intensity_value: 25,
-        intensity_measure: "lbs",
-        logged: false,
-      },
-    ]);
-  }, [activeDay]);
+  const [coach, setCoach]               = useState(null);
+  const [coachRating, setCoachRating]   = useState(null);
+  const [nextSession, setNextSession]   = useState(null);
+  const [availabilitySlots, setAvailabilitySlots] = useState([]);
+  const [prescribedMeals, setPrescribedMeals] = useState([]);
+  const [loading, setLoading]           = useState(true);
 
-  const completedCount = workoutActivities.filter((a) => a.logged).length;
-  const totalCount = workoutActivities.length;
-
-  const [coach, setCoach] = useState(null);
+  /* ── load account + client profile ──────────────────────────────── */
   useEffect(() => {
-    // TODO: GET /api/client/:id/coach
-    // setCoach(data)
-    setCoach({ name: "Rafael Girgis", specialty: "Strength & Conditioning" });
-  }, []);
+    if (!authed) return;
 
-  const [coachRating, setCoachRating] = useState(null);
+    (async () => {
+      try {
+        const me = await fetchMe();
+        setAccount(me);
+
+        if (me.client_id) {
+          setClientId(me.client_id);
+          try {
+            await fetchClientProfile();
+          } catch { /* profile fetch optional */ }
+        }
+      } catch {
+        // fetchMe will redirect on 401
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [authed]);
+
+  /* ── load dashboard data once we have a clientId ────────────────── */
   useEffect(() => {
-    // TODO: GET /api/coach/:coachId/rating → AVG(rating_value), COUNT(*)
-    // setCoachRating(data)
-    setCoachRating({ avg: 4.9, review_count: 47 });
+    if (!clientId) return;
+
+    (async () => {
+      const [telemetry, coachInfo, session, availability, meals] =
+        await Promise.all([
+          fetchTelemetryToday(clientId),
+          fetchCoachInfo(clientId),
+          fetchNextSession(clientId),
+          fetchAvailability(clientId),
+          fetchMealsToday(clientId),
+        ]);
+
+      setStepCount(telemetry.step_count);
+      setCaloriesBurned(telemetry.calories_burned);
+      setCaloriesConsumed(telemetry.calories_consumed);
+      if (telemetry.calories_goal) setCaloriesGoal(telemetry.calories_goal);
+
+      setCoach(coachInfo);
+      setNextSession(session);
+      setAvailabilitySlots(availability);
+      setPrescribedMeals(meals);
+    })();
+  }, [clientId]);
+
+  /* ── load coach rating when coach is known ──────────────────────── */
+  useEffect(() => {
+    if (!coach?.coach_id) return;
+    fetchCoachRating(coach.coach_id).then(setCoachRating);
   }, [coach]);
 
-  const [nextSession, setNextSession] = useState(null);
-  useEffect(() => {
-    // TODO: GET /api/client/:id/coach/next-session
-    // setNextSession(data)
-    setNextSession({ weekday: "Monday", start_time: "9:00 AM" });
-  }, []);
+  /* ── load workout plan when day changes ─────────────────────────── */
+  const loadWorkouts = useCallback(async () => {
+    if (!clientId) return;
+    const data = await fetchWorkoutPlan(clientId, activeDay);
+    setWorkoutPlan({ strata_name: data.strata_name });
+    setWorkoutActivities(data.activities ?? []);
+  }, [clientId, activeDay]);
 
-  const [availabilitySlots, setAvailabilitySlots] = useState([]);
-  useEffect(() => {
-    // TODO: GET /api/client/:id/availability
-    // setAvailabilitySlots(data)
-    setAvailabilitySlots([
-      {
-        time: "9AM",
-        slots: [
-          "booked",
-          "booked",
-          "available",
-          "booked",
-          "booked",
-          null,
-          null,
-        ],
-      },
-      {
-        time: "10AM",
-        slots: ["booked", "booked", "booked", "booked", "booked", null, null],
-      },
-      {
-        time: "11AM",
-        slots: ["booked", "booked", "booked", "booked", "booked", null, null],
-      },
-      {
-        time: "12PM",
-        slots: ["booked", "booked", "booked", "booked", "booked", null, null],
-      },
-      {
-        time: "1PM",
-        slots: ["booked", "booked", "booked", "booked", "booked", null, null],
-      },
-      {
-        time: "2PM",
-        slots: ["booked", "booked", "booked", "booked", "booked", null, null],
-      },
-      {
-        time: "3PM",
-        slots: ["booked", "booked", "booked", "booked", "booked", null, null],
-      },
-      {
-        time: "4PM",
-        slots: ["booked", "booked", "booked", "booked", "booked", null, null],
-      },
-    ]);
-  }, []);
+  useEffect(() => { loadWorkouts(); }, [loadWorkouts]);
 
-  const [prescribedMeals, setPrescribedMeals] = useState([]);
-  useEffect(() => {
-    // TODO: GET /api/client/:id/meals/today
-    // setPrescribedMeals(data)
-    setPrescribedMeals([
-      { id: 1, meal_type: "Breakfast", meal_name: "Oats", calories: 380 },
-      { id: 2, meal_type: "Lunch", meal_name: "Chicken Rice", calories: 620 },
-      { id: 3, meal_type: "Snack", meal_name: "Protein Bar", calories: 220 },
-    ]);
-  }, []);
+  /* ── log a workout activity ─────────────────────────────────────── */
+  const handleLogActivity = async (activityId) => {
+    setWorkoutActivities((prev) =>
+      prev.map((a) => (a.id === activityId ? { ...a, logged: true } : a))
+    );
+    try {
+      await logWorkoutActivity(clientId, activityId);
+    } catch {
+      setWorkoutActivities((prev) =>
+        prev.map((a) => (a.id === activityId ? { ...a, logged: false } : a))
+      );
+    }
+  };
 
-  const stepsPercent = pct(stepCount ?? 0, 10000);
-  const calPercent = pct(caloriesConsumed ?? 0, caloriesGoal);
+  /* ── log a meal ─────────────────────────────────────────────────── */
+  const handleLogMeal = async (mealPayload) => {
+    const newMeal = {
+      id: Date.now(),
+      meal_type: mealPayload.meal_type,
+      meal_name: mealPayload.meal_name,
+      calories: mealPayload.calories,
+    };
+    setPrescribedMeals((prev) => [...prev, newMeal]);
+    setCaloriesConsumed((prev) => (prev ?? 0) + mealPayload.calories);
+    try {
+      await logMeal(clientId, mealPayload);
+    } catch {
+      setPrescribedMeals((prev) => prev.filter((m) => m.id !== newMeal.id));
+      setCaloriesConsumed((prev) => (prev ?? 0) - mealPayload.calories);
+    }
+  };
+
+  /* ── derived values ─────────────────────────────────────────────── */
+  const completedCount = workoutActivities.filter((a) => a.logged).length;
+  const totalCount     = workoutActivities.length;
+  const stepsPercent   = pct(stepCount ?? 0, 10000);
+  const calPercent     = pct(caloriesConsumed ?? 0, caloriesGoal);
   const workoutPercent = pct(completedCount, totalCount || 1);
+
+  /* ── greeting based on time of day ──────────────────────────────── */
+  const hour = new Date().getHours();
+  const greeting =
+    hour < 12 ? "Good Morning" : hour < 17 ? "Good Afternoon" : "Good Evening";
+
+  /* ── loading skeleton ────────────────────────────────────────────── */
+  if (loading) {
+    return (
+      <div className="min-h-screen" style={{ backgroundColor: "#080D19" }}>
+        <Navbar role={role} userName="?" />
+        <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
+          <div className="h-5 w-48 bg-white/5 rounded animate-pulse" />
+          <div className="grid grid-cols-4 gap-4">
+            <SkeletonGreeting />
+            <div className="flex flex-col gap-4">
+              <SkeletonStatCard />
+              <SkeletonStatCard />
+            </div>
+            <div className="rounded-2xl border border-white/6 bg-[#0F1729] p-5 flex flex-col items-center justify-center">
+              <SkeletonRing size={120} />
+            </div>
+            <div className="rounded-2xl border border-white/6 bg-[#0F1729] p-5 flex flex-col items-center justify-center">
+              <SkeletonRing size={120} />
+            </div>
+          </div>
+          <div className="h-5 w-48 bg-white/5 rounded animate-pulse" />
+          <div className="grid grid-cols-3 gap-4">
+            <SkeletonDashCard rows={4} />
+            <SkeletonDashCard rows={3} />
+            <SkeletonAvailability />
+          </div>
+          <div className="h-5 w-48 bg-white/5 rounded animate-pulse" />
+          <SkeletonDashCard rows={3} />
+        </div>
+      </div>
+    );
+  }
+
+  /* ── split name for greeting card ───────────────────────────────── */
+  const nameParts = (account?.name ?? "").split(" ");
+  const firstName = nameParts[0] || "—";
+  const lastName  = nameParts.slice(1).join(" ") || "";
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: "#080D19" }}>
-      <Navbar role={role} />
+      <Navbar
+        role={role}
+        userName={
+          account?.name
+            ? account.name.split(" ").map((n) => n[0]).join("").toUpperCase()
+            : "?"
+        }
+      />
 
       <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
-        {/*FITNESS & NUTRITION*/}
+        {/* ─── FITNESS & NUTRITION ────────────────────────────────── */}
         <SectionHeader label="FITNESS & NUTRITION" role={role} />
 
         <div className="grid grid-cols-4 gap-4">
           <DashboardCard role={role} className="min-h-50">
             <p className="text-xs text-gray-500 uppercase tracking-widest mb-1">
-              Good Morning
+              {greeting}
             </p>
             <h2 className="text-4xl font-bold text-white leading-tight">
-              {account?.first_name ?? "—"}
-              <br />
-              {account?.last_name ?? "—"}
+              {firstName}
+              {lastName && <><br />{lastName}</>}
             </h2>
           </DashboardCard>
 
@@ -278,18 +316,26 @@ export default function ClientDash() {
           </DashboardCard>
         </div>
 
+        {/* ─── WORKOUT & COACH ────────────────────────────────────── */}
         <SectionHeader label="WORKOUT & COACH" role={role} />
 
         <div className="grid grid-cols-3 gap-4 items-stretch">
+          {/* Today's Workout */}
           <DashboardCard
             role={role}
             title={`Today's Workout: ${workoutPlan?.strata_name ?? "—"}`}
             action={{
               label: "View all",
-              onClick: () => {
-                // TODO: navigate to /client/plan
-              },
+              onClick: () => setOverlay("workout"),
             }}
+            footer={
+              <button
+                onClick={() => navigate("/workouts?role=client")}
+                className="w-full py-2 rounded-xl border border-blue-500/30 text-blue-400 text-xs font-semibold hover:bg-blue-500/10 transition-colors"
+              >
+                Browse & Build Workouts
+              </button>
+            }
           >
             <DayTabs
               days={WEEKDAYS}
@@ -315,10 +361,7 @@ export default function ClientDash() {
                       ) : (
                         <button
                           className="text-blue-400 text-xs border border-blue-500/50 rounded-full px-3 py-1 hover:bg-blue-500/10 transition-colors"
-                          onClick={() => {
-                            // TODO: POST /api/client/:id/workout-log
-                            // body: { workout_plan_activity_id: activity.id, client_telemetry_id }
-                          }}
+                          onClick={() => handleLogActivity(activity.id)}
                         >
                           Log →
                         </button>
@@ -330,82 +373,97 @@ export default function ClientDash() {
             </div>
           </DashboardCard>
 
-          <DashboardCard
-            role={role}
-            title="My Coach"
-            action={{
-              label: "View Profile",
-              onClick: () => {
-                // TODO: navigate to /client/coach-profile
-              },
-            }}
-            footer={
-              <div className="flex gap-2">
-                <button
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-2 text-sm font-medium transition-colors"
-                  onClick={() => {
-                    // TODO: navigate to /client/messages
-                    // chat_message table: filter by chat_id between client + coach
-                  }}
-                >
-                  💬 Message
-                </button>
-                <button
-                  className="flex-1 border border-gray-700 text-gray-300 hover:bg-gray-800 rounded-xl py-2 text-sm transition-colors"
-                  onClick={() => {
-                    // TODO: navigate to /client/plan
-                  }}
-                >
-                  📋 View Plan
-                </button>
+          {/* My Coach */}
+          {coach ? (
+            <DashboardCard
+              role={role}
+              title="My Coach"
+              action={{
+                label: "View Profile",
+                onClick: () => setOverlay("coach"),
+              }}
+              footer={
+                <div className="flex gap-2">
+                  <button
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-2 text-sm font-medium transition-colors"
+                    onClick={() => navigate("/chat")}
+                  >
+                    💬 Message
+                  </button>
+                  <button
+                    className="flex-1 border border-gray-700 text-gray-300 hover:bg-gray-800 rounded-xl py-2 text-sm transition-colors"
+                    onClick={() => setOverlay("workout")}
+                  >
+                    📋 View Plan
+                  </button>
+                </div>
+              }
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-full bg-blue-900/40 flex items-center justify-center text-blue-400 font-bold shrink-0">
+                  {coach.name
+                    ?.split(" ")
+                    .map((n) => n[0])
+                    .join("") ?? "?"}
+                </div>
+                <div>
+                  <p className="text-white font-bold">{coach.name}</p>
+                  <p className="text-gray-400 text-xs">{coach.specialty}</p>
+                  <p className="text-yellow-400 text-xs mt-0.5">
+                    {coachRating
+                      ? `★ ${coachRating.avg} · ${coachRating.review_count} reviews`
+                      : "—"}
+                  </p>
+                </div>
               </div>
-            }
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-full bg-blue-900/40 flex items-center justify-center text-blue-400 font-bold shrink-0">
-                {coach?.name
-                  ?.split(" ")
-                  .map((n) => n[0])
-                  .join("") ?? "?"}
-              </div>
-              <div>
-                <p className="text-white font-bold">{coach?.name ?? "—"}</p>
-                <p className="text-gray-400 text-xs">
-                  {coach?.specialty ?? "—"}
-                </p>
-                {/* rating table */}
-                <p className="text-yellow-400 text-xs mt-0.5">
-                  {coachRating
-                    ? `★ ${coachRating.avg} · ${coachRating.review_count} reviews`
-                    : "—"}
-                </p>
-              </div>
-            </div>
 
-            <div className="bg-[#0A1020] rounded-xl p-3">
-              <p className="text-[10px] text-gray-500 uppercase tracking-widest">
-                Next Session
-              </p>
-              <div className="flex justify-between items-center mt-1">
-                <p className="text-white text-sm font-medium">
-                  {nextSession
-                    ? `${nextSession.weekday} · ${nextSession.start_time}`
-                    : "—"}
+              <div className="bg-[#0A1020] rounded-xl p-3">
+                <p className="text-[10px] text-gray-500 uppercase tracking-widest">
+                  Next Session
                 </p>
-                <StatusBadge label="Upcoming" variant="warning" />
+                <div className="flex justify-between items-center mt-1">
+                  <p className="text-white text-sm font-medium">
+                    {nextSession
+                      ? `${nextSession.weekday} · ${nextSession.start_time}`
+                      : "—"}
+                  </p>
+                  <StatusBadge label="Upcoming" variant="warning" />
+                </div>
               </div>
-            </div>
-          </DashboardCard>
+            </DashboardCard>
+          ) : (
+            /* ── No Coach — Find a Coach CTA ─────────────────────── */
+            <DashboardCard role={role} title="My Coach">
+              <div className="flex flex-col items-center justify-center py-4 text-center">
+                <div className="w-16 h-16 rounded-full bg-blue-900/20 flex items-center justify-center mb-4">
+                  <svg className="w-8 h-8 text-blue-400/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                      d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                  </svg>
+                </div>
+                <p className="text-white font-semibold text-sm mb-1">
+                  No coach yet
+                </p>
+                <p className="text-gray-500 text-xs leading-relaxed mb-4 max-w-[200px]">
+                  Get paired with a certified coach to unlock personalized workouts, nutrition plans, and 1-on-1 sessions.
+                </p>
+                <button
+                  onClick={() => navigate("/find-coach")}
+                  className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl px-6 py-2.5 text-sm font-medium transition-colors shadow-[0_0_20px_rgba(59,130,246,0.2)]"
+                >
+                  Find a Coach
+                </button>
+              </div>
+            </DashboardCard>
+          )}
 
+          {/* Availability */}
           <DashboardCard
             role={role}
             title="Availability"
             action={{
               label: "Edit Schedule",
-              onClick: () => {
-                // TODO: navigate to /client/schedule
-                // POST/PUT /api/client/:id/availability
-              },
+              onClick: () => setOverlay("availability"),
             }}
           >
             <div className="grid grid-cols-8 gap-1 mb-2">
@@ -455,6 +513,7 @@ export default function ClientDash() {
           </DashboardCard>
         </div>
 
+        {/* ─── NUTRITION DETAIL ───────────────────────────────────── */}
         <SectionHeader label="NUTRITION DETAIL" role={role} />
 
         <DashboardCard
@@ -462,11 +521,7 @@ export default function ClientDash() {
           title="Today's Meals"
           action={{
             label: "Log Meal +",
-            onClick: () => {
-              // TODO: open log meal modal
-              // POST /api/client/:id/meal-log
-              // body: { on_demand_meal_id or client_prescribed_meal_id, client_telemetry_id }
-            },
+            onClick: () => setOverlay("meals"),
           }}
           footer={
             <div className="pt-3 border-t border-white/5 flex justify-between items-center">
@@ -500,6 +555,76 @@ export default function ClientDash() {
           )}
         </DashboardCard>
       </div>
+
+      {/* ═══════════════════════════════════════════════════════════════
+          OVERLAYS — rendered on top of the dashboard
+          ═══════════════════════════════════════════════════════════════ */}
+
+      {/* Workout Detail */}
+      <Overlay
+        open={overlay === "workout"}
+        onClose={closeOverlay}
+        title={`Workout Plan — ${workoutPlan?.strata_name ?? "Today"}`}
+        wide
+      >
+        <WorkoutDetail
+          planName={workoutPlan?.strata_name}
+          activities={workoutActivities}
+          weekdays={WEEKDAYS}
+          activeDay={activeDay}
+          onDayChange={setActiveDay}
+          onLog={handleLogActivity}
+        />
+      </Overlay>
+
+      {/* Coach Profile */}
+      <Overlay
+        open={overlay === "coach"}
+        onClose={closeOverlay}
+        title="Coach Profile"
+      >
+        <CoachProfile
+          coach={coach}
+          rating={coachRating}
+          nextSession={nextSession}
+          onMessage={() => {
+            closeOverlay();
+            // future: open messaging overlay or navigate
+          }}
+        />
+      </Overlay>
+
+      {/* Availability */}
+      <Overlay
+        open={overlay === "availability"}
+        onClose={closeOverlay}
+        title="Your Availability"
+        wide
+      >
+        <AvailabilityDetail
+          slots={availabilitySlots}
+          weekdays={WEEKDAYS}
+          role="client"
+          onSave={async (updatedSlots) => {
+            await saveAvailability(account.client_id, updatedSlots);
+            setAvailabilitySlots(updatedSlots);
+          }}
+        />
+      </Overlay>
+
+      {/* Meals */}
+      <Overlay
+        open={overlay === "meals"}
+        onClose={closeOverlay}
+        title="Today's Nutrition"
+      >
+        <MealDetail
+          meals={prescribedMeals}
+          onLogMeal={handleLogMeal}
+          caloriesConsumed={caloriesConsumed}
+          caloriesGoal={caloriesGoal}
+        />
+      </Overlay>
     </div>
   );
 }

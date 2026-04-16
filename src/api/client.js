@@ -15,6 +15,11 @@ import { apiGet, apiPost } from "./api";
 const WEEKDAY_NAMES = [
   "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
 ];
+const SHORT_WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const DEFAULT_TIME_OPTIONS = [
+  "5AM","6AM","7AM","8AM","9AM","10AM","11AM",
+  "12PM","1PM","2PM","3PM","4PM","5PM","6PM","7PM","8PM","9PM",
+];
 
 function todayWeekday() {
   const d = new Date().getDay();          // 0 = Sun
@@ -111,18 +116,57 @@ export async function fetchNextSession(clientId) {
 /* ─── availability ────────────────────────────────────────────────── */
 
 export async function fetchAvailability(clientId) {
+  const cacheKey = `client_availability_${clientId ?? "me"}`;
+  const cached = localStorage.getItem(cacheKey);
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch {
+      localStorage.removeItem(cacheKey);
+    }
+  }
+
+  const onboardingAvailability = getOnboardingAvailabilityFromStorage();
+  if (onboardingAvailability.length > 0) {
+    localStorage.setItem(cacheKey, JSON.stringify(onboardingAvailability));
+    return onboardingAvailability;
+  }
+
   try {
     return await apiGet(`/roles/client/${clientId}/availability`);
   } catch {
-    return buildMockAvailability();
+    return [];
   }
 }
 
 export async function saveAvailability(clientId, slots) {
+  const cacheKey = `client_availability_${clientId ?? "me"}`;
+  localStorage.setItem(cacheKey, JSON.stringify(slots));
+
+  const token = localStorage.getItem("jwt");
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
   try {
-    return await apiPost(`/roles/client/update_client_information`, {
-      availabilities: slots,
-    });
+    const payload = { availabilities: slots };
+    const routesToTry = [
+      "/roles/client/update_client_information",
+      clientId ? `/roles/client/${clientId}/availability` : null,
+    ].filter(Boolean);
+
+    for (const route of routesToTry) {
+      const res = await fetch(route, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        return await res.json().catch(() => ({ success: true }));
+      }
+    }
+
+    return { success: true };
   } catch {
     return { success: true };
   }
@@ -187,6 +231,68 @@ function buildMockAvailability() {
       "booked","booked","available","booked","booked",null,null,
     ],
   }));
+}
+
+function normalizeTimeLabel(raw) {
+  const value = String(raw || "").trim().toUpperCase().replace(/\s+/g, "");
+  if (!value) return "";
+  return value
+    .replace("A.M.", "AM")
+    .replace("P.M.", "PM")
+    .replace("A.M", "AM")
+    .replace("P.M", "PM");
+}
+
+function sortTimes(times) {
+  return [...times].sort((a, b) => {
+    const ai = DEFAULT_TIME_OPTIONS.indexOf(a);
+    const bi = DEFAULT_TIME_OPTIONS.indexOf(b);
+    if (ai === -1 && bi === -1) return a.localeCompare(b);
+    if (ai === -1) return 1;
+    if (bi === -1) return -1;
+    return ai - bi;
+  });
+}
+
+function convertTrainingAvailabilityToGrid(trainingAvailability) {
+  if (!trainingAvailability || typeof trainingAvailability !== "object") return [];
+
+  const allTimes = new Set();
+  const normalizedByDay = SHORT_WEEKDAY_NAMES.map((day) => {
+    const slots = Array.isArray(trainingAvailability[day]) ? trainingAvailability[day] : [];
+    const normalizedSlots = slots
+      .map((slot) => normalizeTimeLabel(slot))
+      .filter(Boolean);
+    normalizedSlots.forEach((slot) => allTimes.add(slot));
+    return new Set(normalizedSlots);
+  });
+
+  const sortedTimes = sortTimes([...allTimes]);
+  return sortedTimes.map((time) => ({
+    time,
+    slots: normalizedByDay.map((daySet) => (daySet.has(time) ? "available" : null)),
+  }));
+}
+
+function getOnboardingAvailabilityFromStorage() {
+  const email = (localStorage.getItem("active_user_email") || "").trim().toLowerCase();
+  const keysToTry = email
+    ? [`onboarding:${email}`, "onboarding:current"]
+    : ["onboarding:current"];
+
+  for (const key of keysToTry) {
+    const raw = localStorage.getItem(key);
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw);
+      const converted = convertTrainingAvailabilityToGrid(parsed?.trainingAvailability);
+      if (converted.length > 0) return converted;
+    } catch {
+      // Ignore malformed storage and continue.
+    }
+  }
+
+  return [];
 }
 
 /* ─── browse / search coaches ─────────────────────────────────────── */

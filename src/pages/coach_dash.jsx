@@ -329,7 +329,7 @@ export default function CoachDashboard() {
       <Overlay open={overlay === "clients"} onClose={closeOverlay} title="My Clients" wide>
         <ClientsDetail
           clients={clients}
-          onMessage={(id) => { closeOverlay(); navigate(`/chat?client=${id}`); }}
+          onMessage={(id) => { closeOverlay(); navigate(`/coach/messages?client=${id}`); }}
         />
       </Overlay>
 

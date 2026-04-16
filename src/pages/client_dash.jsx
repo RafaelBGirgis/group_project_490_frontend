@@ -386,7 +386,7 @@ export default function ClientDash() {
                 <div className="flex gap-2">
                   <button
                     className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-2 text-sm font-medium transition-colors"
-                    onClick={() => navigate("/chat")}
+                    onClick={() => navigate("/client/messages")}
                   >
                     💬 Message
                   </button>
@@ -606,7 +606,7 @@ export default function ClientDash() {
           weekdays={WEEKDAYS}
           role="client"
           onSave={async (updatedSlots) => {
-            await saveAvailability(account.client_id, updatedSlots);
+            await saveAvailability(clientId, updatedSlots);
             setAvailabilitySlots(updatedSlots);
           }}
         />

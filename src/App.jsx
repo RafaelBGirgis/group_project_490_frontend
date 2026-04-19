@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import ClientDashboard from "./pages/client_dash";
 import CoachDashboard from "./pages/coach_dash";
 import AdminDashboard from "./pages/admin_dash";
+import LandingPage from "./pages/landing";
 import LoginPage from "./pages/login";
 import ForgotPasswordPage from "./pages/forgot_password";
 import SignupPage from "./pages/signup";
@@ -17,7 +18,7 @@ function App() {
     <BrowserRouter>
       <div className="min-h-screen bg-[#080D19] text-white">
         <Routes>
-          <Route path="/" element={<Navigate to="/login" />} /> 
+          <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/signup" element={<SignupPage />} />
@@ -33,8 +34,8 @@ function App() {
           <Route path="/coach/messages" element={<ChatPage />} />
           <Route path="/find-coach" element={<FindCoachPage />} />
           <Route path="/workouts" element={<WorkoutsPage />} />
-          {/* Catch-all: redirect unknown routes back to client dashboard */}
-          <Route path="*" element={<Navigate to="/client" />} />
+          {/* Catch-all: redirect unknown routes back to the landing page */}
+          <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </div>
     </BrowserRouter>

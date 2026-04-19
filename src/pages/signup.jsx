@@ -106,7 +106,7 @@ export default function SignupPage() {
         {/* Left side info panel */}
         <section className="hidden lg:flex">
           <div className="w-full max-w-xl rounded-[28px] border border-white/8 bg-[rgba(255,255,255,0.02)] p-10 shadow-[0_0_60px_rgba(0,0,0,0.35)] backdrop-blur-sm">
-            <p className="mb-8 text-lg font-semibold text-blue-400">Start Strong</p>
+            <p className="mb-8 text-lg font-semibold text-blue-400">Till Failure</p>
 
             <h1 className="max-w-md text-5xl font-black leading-tight tracking-tight">
               Create your{" "}

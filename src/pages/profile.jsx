@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Navbar } from "../components/navbar";
+import AvailabilityDetail from "../components/overlays/availability_detail";
 
 const PRIMARY_GOALS = [
   "Weight Loss",
@@ -16,6 +17,8 @@ const EMPTY_TRAINING_AVAILABILITY = {
   Sat: [],
   Sun: [],
 };
+
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 const normalizeTrainingAvailability = (value, fallbackDays = []) => {
   const base = {
@@ -41,6 +44,37 @@ const normalizeTrainingAvailability = (value, fallbackDays = []) => {
   });
 
   return base;
+};
+
+// Convert from { Mon: ["9AM", "10AM"], ... } to [{ time, slots: [...] }, ...]
+const convertToSlotsFormat = (trainingAvailability) => {
+  const allTimes = new Set();
+  Object.values(trainingAvailability).forEach(slots => {
+    slots.forEach(time => allTimes.add(time));
+  });
+
+  const sortedTimes = Array.from(allTimes).sort((a, b) => {
+    const timeOrder = ["5AM","6AM","7AM","8AM","9AM","10AM","11AM","12PM","1PM","2PM","3PM","4PM","5PM","6PM","7PM","8PM","9PM"];
+    return timeOrder.indexOf(a) - timeOrder.indexOf(b);
+  });
+
+  return sortedTimes.map(time => ({
+    time,
+    slots: WEEKDAYS.map(day => trainingAvailability[day].includes(time) ? "available" : null)
+  }));
+};
+
+// Convert from [{ time, slots: [...] }, ...] to { Mon: ["9AM", "10AM"], ... }
+const convertFromSlotsFormat = (slots) => {
+  const result = { ...EMPTY_TRAINING_AVAILABILITY };
+  slots.forEach(({ time, slots: daySlots }) => {
+    daySlots.forEach((status, dayIndex) => {
+      if (status === "available") {
+        result[WEEKDAYS[dayIndex]].push(time);
+      }
+    });
+  });
+  return result;
 };
 
 const normalizeGenderToSignupValue = (value) => {
@@ -85,9 +119,6 @@ function ProfilePage({ role = "client" }) {
     amount: "",
     openToNewClients: "",
   });
-
-  const [selectedAvailability, setSelectedAvailability] = useState(null);
-  const [selectedClientAvailability, setSelectedClientAvailability] = useState(null);
 
   const [availability, setAvailability] = useState({
     Mon: [],
@@ -250,64 +281,6 @@ function ProfilePage({ role = "client" }) {
     navigate("/login");
   };
 
-  const toggleAvailabilitySlot = (day, time) => {
-    setSelectedAvailability(`${day}-${time}`);
-  };
-
-  const addAvailabilitySlot = (day) => {
-    const time = prompt(`Add a time slot for ${day} (example: 7PM)`);
-    if (!time) return;
-    setAvailability((prev) => ({
-      ...prev,
-      [day]: [...prev[day], time],
-    }));
-  };
-
-  const removeAvailabilitySlot = (day, time) => {
-    setAvailability((prev) => ({
-      ...prev,
-      [day]: prev[day].filter((slot) => slot !== time),
-    }));
-    if (selectedAvailability === `${day}-${time}`) {
-      setSelectedAvailability(null);
-    }
-  };
-
-  const toggleClientAvailabilitySlot = (day, time) => {
-    setSelectedClientAvailability(`${day}-${time}`);
-  };
-
-  const addClientAvailabilitySlot = (day) => {
-    const time = prompt(`Add a time slot for ${day} (example: 7PM)`);
-    if (!time) return;
-
-    setProfile((prev) => {
-      const daySlots = prev.trainingAvailability[day] || [];
-      if (daySlots.includes(time)) return prev;
-
-      return {
-        ...prev,
-        trainingAvailability: {
-          ...prev.trainingAvailability,
-          [day]: [...daySlots, time],
-        },
-      };
-    });
-  };
-
-  const removeClientAvailabilitySlot = (day, time) => {
-    setProfile((prev) => ({
-      ...prev,
-      trainingAvailability: {
-        ...prev.trainingAvailability,
-        [day]: (prev.trainingAvailability[day] || []).filter((slot) => slot !== time),
-      },
-    }));
-    if (selectedClientAvailability === `${day}-${time}`) {
-      setSelectedClientAvailability(null);
-    }
-  };
-
   const toggleSpecialization = (item) => {
     setSpecializations((prev) =>
       prev.includes(item) ? prev.filter((x) => x !== item) : [...prev, item]
@@ -449,71 +422,6 @@ function ProfilePage({ role = "client" }) {
               </SidebarCard>
             )}
 
-            {isCoach && (
-              <SidebarCard title="Availability">
-                <div className="grid grid-cols-7 gap-1 text-center">
-                  {Object.entries(availability).map(([day, slots]) => (
-                    <div key={day}>
-                      <div className="mb-2 text-[10px] font-semibold uppercase text-slate-500">
-                        {day}
-                      </div>
-
-                      <div className="space-y-1">
-                        {slots.length === 0 ? (
-                          <div className="rounded-md border border-white/5 bg-[rgba(255,255,255,0.02)] px-1 py-1 text-[10px] text-slate-600">
-                            —
-                          </div>
-                        ) : (
-                          slots.map((time) => {
-                            const active = selectedAvailability === `${day}-${time}`;
-                            return (
-                              <button
-                                key={`${day}-${time}`}
-                                onClick={() => toggleAvailabilitySlot(day, time)}
-                                className="w-full rounded-md border px-1 py-1 text-[10px] transition"
-                                style={{
-                                  borderColor: active ? accent : "rgba(255,255,255,0.06)",
-                                  backgroundColor: active
-                                    ? accentSoft
-                                    : "rgba(255,255,255,0.02)",
-                                  color: active ? "#fff" : "#94A3B8",
-                                }}
-                                title={`${day} ${time}`}
-                              >
-                                {time}
-                              </button>
-                            );
-                          })
-                        )}
-
-                        <button
-                          onClick={() => addAvailabilitySlot(day)}
-                          className="w-full rounded-md border border-dashed px-1 py-1 text-[10px] text-slate-500 hover:text-white"
-                          style={{ borderColor: accentBorder }}
-                        >
-                          +
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {selectedAvailability && (
-                  <div className="mt-3 flex justify-end">
-                    <button
-                      onClick={() => {
-                        const [day, time] = selectedAvailability.split("-");
-                        removeAvailabilitySlot(day, time);
-                      }}
-                      className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300"
-                    >
-                      Remove Selected Slot
-                    </button>
-                  </div>
-                )}
-              </SidebarCard>
-            )}
-
             {!isCoach && (
               <>
                 <SidebarCard title="Account Actions">
@@ -541,72 +449,6 @@ function ProfilePage({ role = "client" }) {
                       Log Out
                     </button>
                   </div>
-                </SidebarCard>
-
-                <SidebarCard title="Availability">
-                  <div className="grid grid-cols-7 gap-1 text-center">
-                    {Object.entries(profile.trainingAvailability).map(([day, slots]) => (
-                      <div key={day}>
-                        <div className="mb-2 text-[10px] font-semibold uppercase text-slate-500">
-                          {day}
-                        </div>
-
-                        <div className="space-y-1">
-                          {slots.length === 0 ? (
-                            <div className="rounded-md border border-white/5 bg-[rgba(255,255,255,0.02)] px-1 py-1 text-[10px] text-slate-600">
-                              -
-                            </div>
-                          ) : (
-                            slots.map((time) => {
-                              const active = selectedClientAvailability === `${day}-${time}`;
-                              return (
-                                <button
-                                  key={`${day}-${time}`}
-                                  type="button"
-                                  onClick={() => toggleClientAvailabilitySlot(day, time)}
-                                  className="w-full rounded-md border px-1 py-1 text-[10px] transition"
-                                  style={{
-                                    borderColor: active ? "#3B82F6" : "rgba(255,255,255,0.06)",
-                                    backgroundColor: active
-                                      ? "rgba(59, 130, 246, 0.12)"
-                                      : "rgba(255,255,255,0.02)",
-                                    color: active ? "#fff" : "#94A3B8",
-                                  }}
-                                  title={`${day} ${time}`}
-                                >
-                                  {time}
-                                </button>
-                              );
-                            })
-                          )}
-
-                          <button
-                            type="button"
-                            onClick={() => addClientAvailabilitySlot(day)}
-                            className="w-full rounded-md border border-dashed px-1 py-1 text-[10px] text-slate-500 hover:text-white"
-                            style={{ borderColor: "rgba(59, 130, 246, 0.30)" }}
-                          >
-                            +
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {selectedClientAvailability && (
-                    <div className="mt-3 flex justify-end">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const [day, time] = selectedClientAvailability.split("-");
-                          removeClientAvailabilitySlot(day, time);
-                        }}
-                        className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300"
-                      >
-                        Remove Selected Slot
-                      </button>
-                    </div>
-                  )}
                 </SidebarCard>
 
                 {coachRequest && (
@@ -780,6 +622,35 @@ function ProfilePage({ role = "client" }) {
                 </>
               )}
             </Panel>
+
+            {!isCoach && (
+              <Panel title="Availability" accent={accent}>
+                <AvailabilityDetail
+                  slots={convertToSlotsFormat(profile.trainingAvailability)}
+                  weekdays={WEEKDAYS}
+                  onSave={(updatedSlots) => {
+                    setProfile((prev) => ({
+                      ...prev,
+                      trainingAvailability: convertFromSlotsFormat(updatedSlots)
+                    }));
+                  }}
+                  role="client"
+                />
+              </Panel>
+            )}
+
+            {isCoach && (
+              <Panel title="Availability" accent={accent}>
+                <AvailabilityDetail
+                  slots={convertToSlotsFormat(availability)}
+                  weekdays={WEEKDAYS}
+                  onSave={(updatedSlots) => {
+                    setAvailability(convertFromSlotsFormat(updatedSlots));
+                  }}
+                  role="coach"
+                />
+              </Panel>
+            )}
 
             {isCoach && (
               <>

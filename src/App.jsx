@@ -9,17 +9,20 @@ import SignupPage from "./pages/signup";
 import ProfilePage from "./pages/profile";
 import CoachRequestFormPage from "./pages/coach_request_form";
 import OnboardingPage from "./pages/onboarding";
+import ChatPage from "./pages/chat";
+import CoachChatPage from "./pages/coach_chat";
+import ClientChatPage from "./pages/client_chat";
+import FindCoachPage from "./pages/find_coach";
+import WorkoutsPage from "./pages/workouts";
 
 function App() {
   return (
     <BrowserRouter>
       <div className="min-h-screen bg-[#080D19] text-white">
         <Routes>
-<<<<<<< HEAD
-          <Route path="/" element={<Navigate to="/login" />} />
-=======
+          {/* Catch-all: redirect unknown routes back to the landing page */}
+          <Route path="*" element={<Navigate to="/" />} />
           <Route path="/" element={<LandingPage />} />
->>>>>>> 61bba7a (created landing page)
           <Route path="/login" element={<LoginPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/signup" element={<SignupPage />} />
@@ -27,20 +30,16 @@ function App() {
           <Route path="/profile" element={<ProfilePage role="client" />} />
           <Route path="/coach-request" element={<CoachRequestFormPage />} />
           <Route path="/coach-profile" element={<ProfilePage role="coach" />} />
-          <Route path="/" element={<Navigate to="/client" />} />
           <Route path="/client" element={<ClientDashboard />} />
           <Route path="/coach" element={<CoachDashboard />} />
           <Route path="/admin" element={<AdminDashboard />} />
-<<<<<<< HEAD
-=======
           <Route path="/chat" element={<ChatPage />} />
-          <Route path="/client/messages" element={<ChatPage />} />
-          <Route path="/coach/messages" element={<ChatPage />} />
+          <Route path="/coach-chat" element={<CoachChatPage />} />
+          <Route path="/client-chat" element={<ClientChatPage />} />
+          <Route path="/client/messages" element={<ClientChatPage />} />
+          <Route path="/coach/messages" element={<CoachChatPage />} />
           <Route path="/find-coach" element={<FindCoachPage />} />
           <Route path="/workouts" element={<WorkoutsPage />} />
-          {/* Catch-all: redirect unknown routes back to the landing page */}
-          <Route path="*" element={<Navigate to="/" />} />
->>>>>>> 61bba7a (created landing page)
         </Routes>
       </div>
     </BrowserRouter>

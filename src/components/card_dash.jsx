@@ -1,13 +1,14 @@
 import { ROLE_THEMES } from "./theme";
 
-export function DashboardCard({ title, action, role = "client", children, className = "" }) {
+export function DashboardCard({ title, action, footer, role = "client", children, className = "" }) {
   const theme = ROLE_THEMES[role];
 
   return (
     <div
       className={`
         relative overflow-hidden
-        bg-[#0F1729] border border-white/6 rounded-2xl p-5
+        bg-[#0F1729] border border-white/6 rounded-2xl
+        flex flex-col h-full
         transition-all duration-300 ease-out
         hover:border-transparent
         hover:-translate-y-1
@@ -34,10 +35,10 @@ export function DashboardCard({ title, action, role = "client", children, classN
         style={{ backgroundColor: theme.accent }}
       />
 
-      {/* Content */}
-      <div className="relative z-10">
+      {/* Header + Body */}
+      <div className="relative z-10 p-5 flex flex-col gap-4 flex-1">
         {(title || action) && (
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between">
             {title && (
               <h3 className="text-white font-semibold text-base group-hover:translate-x-1 transition-transform duration-300">
                 {title}
@@ -56,6 +57,13 @@ export function DashboardCard({ title, action, role = "client", children, classN
         )}
         {children}
       </div>
+
+      {/* Footer — always pinned to bottom */}
+      {footer && (
+        <div className="relative z-10 px-5 pb-5">
+          {footer}
+        </div>
+      )}
     </div>
   );
 }

@@ -151,6 +151,8 @@ function ProfilePage({ role = "client" }) {
 
   const [experiences, setExperiences] = useState([]);
 
+  const [paymentMethods, setPaymentMethods] = useState([]);
+
   const [newCertification, setNewCertification] = useState({
     title: "",
     issuer: "",
@@ -167,6 +169,14 @@ function ProfilePage({ role = "client" }) {
 
   const [showCertForm, setShowCertForm] = useState(false);
   const [showExpForm, setShowExpForm] = useState(false);
+
+  const [newPaymentMethod, setNewPaymentMethod] = useState({
+    type: "",
+    lastFour: "",
+    expiryMonth: "",
+    expiryYear: "",
+  });
+  const [showPaymentForm, setShowPaymentForm] = useState(false);
 
   const fullName = useMemo(
     () => `${profile.firstName} ${profile.lastName}`.trim(),
@@ -363,6 +373,19 @@ function ProfilePage({ role = "client" }) {
     ]);
     setNewExperience({ title: "", issuer: "", year: "", description: "" });
     setShowExpForm(false);
+  };
+
+  const addPaymentMethod = () => {
+    if (!newPaymentMethod.type || !newPaymentMethod.lastFour || !newPaymentMethod.expiryMonth || !newPaymentMethod.expiryYear) return;
+    setPaymentMethods((prev) => [
+      ...prev,
+      {
+        id: Date.now(),
+        ...newPaymentMethod,
+      },
+    ]);
+    setNewPaymentMethod({ type: "", lastFour: "", expiryMonth: "", expiryYear: "" });
+    setShowPaymentForm(false);
   };
 
   const deleteItem = (setter, id) => {
@@ -707,6 +730,110 @@ function ProfilePage({ role = "client" }) {
                 </>
               )}
             </Panel>
+
+            {!isCoach && (
+              <Panel title="Payment Methods" accent={accent}>
+                <div className="space-y-3">
+                  {paymentMethods.map((method) => (
+                    <div
+                      key={method.id}
+                      className="rounded-xl border border-white/6 bg-[#101827] px-4 py-3"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="text-2xl">
+                            {method.type === "credit" ? "💳" : method.type === "debit" ? "💳" : "🏦"}
+                          </div>
+                          <div>
+                            <h3 className="text-sm font-semibold text-white">
+                              {method.type.charAt(0).toUpperCase() + method.type.slice(1)} Card
+                            </h3>
+                            <p className="text-xs text-slate-400">
+                              **** **** **** {method.lastFour}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              Expires {method.expiryMonth}/{method.expiryYear}
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => deleteItem(setPaymentMethods, method.id)}
+                          className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+
+                  {!showPaymentForm ? (
+                    <button
+                      onClick={() => setShowPaymentForm(true)}
+                      className="w-full rounded-xl border border-dashed px-4 py-3 text-sm font-semibold transition"
+                      style={{ borderColor: `${accent}55`, color: accent, backgroundColor: `${accent}08` }}
+                    >
+                      + Add Payment Method
+                    </button>
+                  ) : (
+                    <div className="rounded-xl border border-white/6 bg-[#101827] p-4 space-y-3">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                            Card Type
+                          </label>
+                          <select
+                            value={newPaymentMethod.type}
+                            onChange={(e) => setNewPaymentMethod((prev) => ({ ...prev, type: e.target.value }))}
+                            className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
+                          >
+                            <option value="">Select card type</option>
+                            <option value="credit">Credit Card</option>
+                            <option value="debit">Debit Card</option>
+                          </select>
+                        </div>
+                        <Input
+                          label="Last 4 Digits"
+                          value={newPaymentMethod.lastFour}
+                          onChange={(v) => setNewPaymentMethod((prev) => ({ ...prev, lastFour: v }))}
+                          placeholder="1234"
+                          maxLength="4"
+                        />
+                        <Input
+                          label="Expiry Month"
+                          value={newPaymentMethod.expiryMonth}
+                          onChange={(v) => setNewPaymentMethod((prev) => ({ ...prev, expiryMonth: v }))}
+                          placeholder="12"
+                          maxLength="2"
+                        />
+                        <Input
+                          label="Expiry Year"
+                          value={newPaymentMethod.expiryYear}
+                          onChange={(v) => setNewPaymentMethod((prev) => ({ ...prev, expiryYear: v }))}
+                          placeholder="2025"
+                          maxLength="4"
+                        />
+                      </div>
+
+                      <div className="flex justify-end gap-2">
+                        <button
+                          onClick={() => setShowPaymentForm(false)}
+                          className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs font-medium text-slate-300"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={addPaymentMethod}
+                          className="rounded-lg px-3 py-2 text-xs font-semibold text-white"
+                          style={{ backgroundColor: accent }}
+                        >
+                          Add Payment Method
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </Panel>
+            )}
 
             {!isCoach && (
               <Panel title="Availability" accent={accent}>

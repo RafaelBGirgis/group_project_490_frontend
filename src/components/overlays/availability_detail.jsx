@@ -233,6 +233,7 @@ export default function AvailabilityDetail({
             return (
               <div key={d} className="text-center">
                 <button
+                  type="button"
                   onClick={() => dayHasSlots ? clearDay(dayIdx) : setDayAvailable(dayIdx)}
                   className="text-xs text-gray-400 font-semibold hover:text-white transition-colors"
                   title={dayHasSlots ? `Clear all ${d}` : `Set all ${d} available`}
@@ -337,6 +338,7 @@ export default function AvailabilityDetail({
       {/* ── Action Buttons ───────────────────────────────────────── */}
       <div className="flex items-center gap-3 pt-2 border-t border-white/5">
         <button
+          type="button"
           onClick={clearAll}
           className="text-xs text-gray-500 hover:text-red-400 transition-colors"
         >

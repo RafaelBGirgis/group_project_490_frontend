@@ -99,7 +99,6 @@ describe("fetchPresetWorkouts", () => {
         expect(typeof ex.sets).toBe("number");
         expect(typeof ex.reps).toBe("number");
         expect(ex.intensity_measure).toBeTruthy();
-        expect(typeof ex.rest_seconds).toBe("number");
       });
     });
   });

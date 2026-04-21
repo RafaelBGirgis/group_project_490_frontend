@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Navbar } from "../components/navbar";
 import AvailabilityDetail from "../components/overlays/availability_detail";
+import { deactivateAccount, deleteAccount } from "../api/client";
+import { deactivateCoachAccount, deleteCoachAccount } from "../api/coach";
 
 const PRIMARY_GOALS = [
   "Weight Loss",
@@ -265,8 +267,56 @@ function ProfilePage({ role = "client" }) {
     setProfile((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleDeleteAccountRequest = () => {
-    alert("Account deletion request submitted.");
+  const handleDeleteAccountRequest = async () => {
+    if (window.confirm("Are you sure you want to request deletion of your account? This action cannot be undone.")) {
+      try {
+        await deleteAccount();
+        alert("Account deletion requested successfully.");
+        localStorage.removeItem("jwt");
+        navigate("/login");
+      } catch (error) {
+        alert("Failed to request account deletion. Please try again.");
+      }
+    }
+  };
+
+  const handleDeactivateAccount = async () => {
+    if (window.confirm("Are you sure you want to deactivate your account? This action cannot be undone.")) {
+      try {
+        await deactivateAccount();
+        alert("Account deactivated successfully.");
+        localStorage.removeItem("jwt");
+        navigate("/login");
+      } catch (error) {
+        alert("Failed to deactivate account. Please try again.");
+      }
+    }
+  };
+
+  const handleDeactivateCoachAccount = async () => {
+    if (window.confirm("Are you sure you want to deactivate your coach account? This action cannot be undone.")) {
+      try {
+        await deactivateCoachAccount();
+        alert("Coach account deactivated successfully.");
+        localStorage.removeItem("jwt");
+        navigate("/login");
+      } catch (error) {
+        alert("Failed to deactivate coach account. Please try again.");
+      }
+    }
+  };
+
+  const handleDeleteCoachAccount = async () => {
+    if (window.confirm("Are you sure you want to request deletion of your coach account? This action cannot be undone.")) {
+      try {
+        await deleteCoachAccount();
+        alert("Coach account deletion requested successfully.");
+        localStorage.removeItem("jwt");
+        navigate("/login");
+      } catch (error) {
+        alert("Failed to request coach account deletion. Please try again.");
+      }
+    }
   };
 
   const handleCancelCoachRequest = () => {
@@ -422,6 +472,34 @@ function ProfilePage({ role = "client" }) {
               </SidebarCard>
             )}
 
+            {isCoach && (
+              <SidebarCard title="Account Actions">
+                <div className="space-y-3">
+                  <button
+                    onClick={handleDeleteCoachAccount}
+                    className="w-full rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-300"
+                  >
+                    Delete Coach Account
+                  </button>
+
+                  <button
+                    onClick={handleDeactivateCoachAccount}
+                    className="w-full rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm font-semibold text-orange-300"
+                  >
+                    Deactivate Coach Account
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="w-full rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] px-4 py-3 text-sm font-medium text-slate-300"
+                  >
+                    Log Out
+                  </button>
+                </div>
+              </SidebarCard>
+            )}
+
             {!isCoach && (
               <>
                 <SidebarCard title="Account Actions">
@@ -435,10 +513,17 @@ function ProfilePage({ role = "client" }) {
                     </button>
 
                     <button
+                      onClick={handleDeactivateAccount}
+                      className="w-full rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm font-semibold text-orange-300"
+                    >
+                      Deactivate Account
+                    </button>
+
+                    <button
                       onClick={handleDeleteAccountRequest}
                       className="w-full rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-300"
                     >
-                      Request Account Deletion
+                      Delete Account
                     </button>
 
                     <button
@@ -711,6 +796,8 @@ function ProfilePage({ role = "client" }) {
                   setShowForm={setShowCertForm}
                   onAdd={addCertification}
                   onDelete={(id) => deleteItem(setCertifications, id)}
+                  onToggleEdit={(id) => toggleEditItem(setCertifications, id)}
+                  onUpdateField={(id, field, value) => updateItemField(setCertifications, id, field, value)}
                   accent={accent}
                   addLabel="+ Add Certification"
                 />
@@ -724,6 +811,8 @@ function ProfilePage({ role = "client" }) {
                   setShowForm={setShowExpForm}
                   onAdd={addExperience}
                   onDelete={(id) => deleteItem(setExperiences, id)}
+                  onToggleEdit={(id) => toggleEditItem(setExperiences, id)}
+                  onUpdateField={(id, field, value) => updateItemField(setExperiences, id, field, value)}
                   accent={accent}
                   addLabel="+ Add Experience"
                 />
@@ -826,6 +915,8 @@ function EditableMetadataSection({
   setShowForm,
   onAdd,
   onDelete,
+  onToggleEdit,
+  onUpdateField,
   accent,
   addLabel,
 }) {
@@ -837,24 +928,79 @@ function EditableMetadataSection({
             key={item.id}
             className="rounded-xl border border-white/6 bg-[#101827] px-4 py-3"
           >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-semibold text-white">{item.title}</h3>
-                <p className="mt-1 text-xs" style={{ color: accent }}>
-                  {item.issuer}
-                </p>
-                <p className="mt-1 text-[11px] text-slate-500">{item.year}</p>
-                {item.description && (
-                  <p className="mt-2 text-xs text-slate-300">{item.description}</p>
-                )}
+            {item.editing ? (
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <Input
+                    label="Title"
+                    value={item.title}
+                    onChange={(v) => onUpdateField(item.id, "title", v)}
+                    placeholder="Title"
+                  />
+                  <Input
+                    label="Issuer"
+                    value={item.issuer}
+                    onChange={(v) => onUpdateField(item.id, "issuer", v)}
+                    placeholder="Issuer"
+                  />
+                  <Input
+                    label="Year"
+                    value={item.year}
+                    onChange={(v) => onUpdateField(item.id, "year", v)}
+                    placeholder="Year"
+                  />
+                </div>
+                <TextArea
+                  label="Description"
+                  value={item.description}
+                  onChange={(v) => onUpdateField(item.id, "description", v)}
+                  rows={4}
+                  placeholder="Description"
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={() => onToggleEdit(item.id)}
+                    className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs font-medium text-slate-300"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => onToggleEdit(item.id)}
+                    className="rounded-lg px-3 py-2 text-xs font-semibold text-white"
+                    style={{ backgroundColor: accent }}
+                  >
+                    Save
+                  </button>
+                </div>
               </div>
-              <button
-                onClick={() => onDelete(item.id)}
-                className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300"
-              >
-                Remove
-              </button>
-            </div>
+            ) : (
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-white">{item.title}</h3>
+                  <p className="mt-1 text-xs" style={{ color: accent }}>
+                    {item.issuer}
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-500">{item.year}</p>
+                  {item.description && (
+                    <p className="mt-2 text-xs text-slate-300">{item.description}</p>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => onToggleEdit(item.id)}
+                    className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs font-medium text-slate-300"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => onDelete(item.id)}
+                    className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         ))}
 

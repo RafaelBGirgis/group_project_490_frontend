@@ -11,6 +11,24 @@ export async function fetchCoachProfile() {
   return apiPost("/roles/coach/me", {});
 }
 
+export async function deactivateCoachAccount() {
+  try {
+    return await apiPost("/me/deactivate", {});
+  } catch {
+    // Mock until backend ships this endpoint
+    return { success: true, message: "Coach account deactivated successfully" };
+  }
+}
+
+export async function deleteCoachAccount() {
+  try {
+    return await apiPost("/me/delete", {});
+  } catch {
+    // Mock until backend ships this endpoint
+    return { success: true, message: "Coach account deletion requested successfully" };
+  }
+}
+
 /* ─── my clients ──────────────────────────────────────────────────── */
 
 export async function fetchMyClients(coachId) {

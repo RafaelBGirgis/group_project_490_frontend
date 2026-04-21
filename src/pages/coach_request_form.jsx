@@ -48,6 +48,8 @@ function CoachRequestFormPage() {
     year: "",
     description: "",
   });
+  const [editingCertification, setEditingCertification] = useState(null);
+  const [editingExperience, setEditingExperience] = useState(null);
   const [showCertForm, setShowCertForm] = useState(false);
   const [showExpForm, setShowExpForm] = useState(false);
 
@@ -166,10 +168,24 @@ function CoachRequestFormPage() {
   const addCertification = () => {
     if (isViewMode) return;
     if (!newCertification.title || !newCertification.issuer || !newCertification.year) return;
-    setForm((prev) => ({
-      ...prev,
-      certifications: [...prev.certifications, { id: Date.now(), ...newCertification }],
-    }));
+    
+    if (editingCertification) {
+      // Update existing certification
+      setForm((prev) => ({
+        ...prev,
+        certifications: prev.certifications.map((cert) =>
+          cert.id === editingCertification.id ? { ...cert, ...newCertification } : cert
+        ),
+      }));
+      setEditingCertification(null);
+    } else {
+      // Add new certification
+      setForm((prev) => ({
+        ...prev,
+        certifications: [...prev.certifications, { id: Date.now(), ...newCertification }],
+      }));
+    }
+    
     setNewCertification({ title: "", issuer: "", year: "", description: "" });
     setShowCertForm(false);
   };
@@ -177,10 +193,24 @@ function CoachRequestFormPage() {
   const addExperience = () => {
     if (isViewMode) return;
     if (!newExperience.title || !newExperience.organization || !newExperience.year) return;
-    setForm((prev) => ({
-      ...prev,
-      experiences: [...prev.experiences, { id: Date.now(), ...newExperience }],
-    }));
+    
+    if (editingExperience) {
+      // Update existing experience
+      setForm((prev) => ({
+        ...prev,
+        experiences: prev.experiences.map((exp) =>
+          exp.id === editingExperience.id ? { ...exp, ...newExperience } : exp
+        ),
+      }));
+      setEditingExperience(null);
+    } else {
+      // Add new experience
+      setForm((prev) => ({
+        ...prev,
+        experiences: [...prev.experiences, { id: Date.now(), ...newExperience }],
+      }));
+    }
+    
     setNewExperience({ title: "", organization: "", year: "", description: "" });
     setShowExpForm(false);
   };
@@ -191,6 +221,28 @@ function CoachRequestFormPage() {
       ...prev,
       [field]: prev[field].filter((item) => item.id !== id),
     }));
+  };
+
+  const startEditingCertification = (cert) => {
+    setEditingCertification(cert);
+    setNewCertification({
+      title: cert.title,
+      issuer: cert.issuer,
+      year: cert.year,
+      description: cert.description || "",
+    });
+    setShowCertForm(true);
+  };
+
+  const startEditingExperience = (exp) => {
+    setEditingExperience(exp);
+    setNewExperience({
+      title: exp.title,
+      organization: exp.organization,
+      year: exp.year,
+      description: exp.description || "",
+    });
+    setShowExpForm(true);
   };
 
   return (
@@ -311,8 +363,8 @@ function CoachRequestFormPage() {
                       key={item.id}
                       className="rounded-xl border border-white/6 bg-[#101827] px-4 py-3"
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
+                      <div className="flex items-start gap-3">
+                        <div className="flex-1">
                           <h3 className="text-sm font-semibold text-white">{item.title}</h3>
                           <p className="mt-1 text-xs text-amber-300">{item.issuer}</p>
                           <p className="mt-1 text-[11px] text-slate-500">{item.year}</p>
@@ -321,13 +373,22 @@ function CoachRequestFormPage() {
                           )}
                         </div>
                         {!isViewMode && (
-                          <button
-                            type="button"
-                            onClick={() => removeItem("certifications", item.id)}
-                            className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300"
-                          >
-                            Remove
-                          </button>
+                          <div className="flex flex-col gap-2">
+                            <button
+                              type="button"
+                              onClick={() => startEditingCertification(item)}
+                              className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs font-semibold text-blue-300"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removeItem("certifications", item.id)}
+                              className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300"
+                            >
+                              Remove
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -385,7 +446,11 @@ function CoachRequestFormPage() {
                   <div className="flex justify-end gap-2">
                     <button
                       type="button"
-                      onClick={() => setShowCertForm(false)}
+                      onClick={() => {
+                        setShowCertForm(false);
+                        setEditingCertification(null);
+                        setNewCertification({ title: "", issuer: "", year: "", description: "" });
+                      }}
                       className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs font-medium text-slate-300"
                     >
                       Cancel
@@ -413,8 +478,8 @@ function CoachRequestFormPage() {
                       key={item.id}
                       className="rounded-xl border border-white/6 bg-[#101827] px-4 py-3"
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
+                      <div className="flex items-start gap-3">
+                        <div className="flex-1">
                           <h3 className="text-sm font-semibold text-white">{item.title}</h3>
                           <p className="mt-1 text-xs text-amber-300">{item.organization}</p>
                           <p className="mt-1 text-[11px] text-slate-500">{item.year}</p>
@@ -423,13 +488,22 @@ function CoachRequestFormPage() {
                           )}
                         </div>
                         {!isViewMode && (
-                          <button
-                            type="button"
-                            onClick={() => removeItem("experiences", item.id)}
-                            className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300"
-                          >
-                            Remove
-                          </button>
+                          <div className="flex flex-col gap-2">
+                            <button
+                              type="button"
+                              onClick={() => startEditingExperience(item)}
+                              className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs font-semibold text-blue-300"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removeItem("experiences", item.id)}
+                              className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300"
+                            >
+                              Remove
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -487,7 +561,11 @@ function CoachRequestFormPage() {
                   <div className="flex justify-end gap-2">
                     <button
                       type="button"
-                      onClick={() => setShowExpForm(false)}
+                      onClick={() => {
+                        setShowExpForm(false);
+                        setEditingExperience(null);
+                        setNewExperience({ title: "", organization: "", year: "", description: "" });
+                      }}
                       className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs font-medium text-slate-300"
                     >
                       Cancel

@@ -103,10 +103,10 @@ export default function ClientDash() {
             await fetchClientProfile();
           } catch { /* profile fetch optional */ }
         }
-      } catch {
-        // fetchMe will redirect on 401
-      } finally {
         setLoading(false);
+      } catch {
+        // fetchMe will redirect on 401 — keep loading=true so skeleton
+        // stays visible during the redirect instead of flashing empty content
       }
     })();
   }, [authed]);
@@ -116,24 +116,29 @@ export default function ClientDash() {
     if (!clientId) return;
 
     (async () => {
-      const [telemetry, coachInfo, session, availability, meals] =
-        await Promise.all([
-          fetchTelemetryToday(clientId),
-          fetchCoachInfo(clientId),
-          fetchNextSession(clientId),
-          fetchAvailability(clientId),
-          fetchMealsToday(clientId),
-        ]);
+      try {
+        const [telemetry, coachInfo, session, availability, meals] =
+          await Promise.all([
+            fetchTelemetryToday(clientId),
+            fetchCoachInfo(clientId),
+            fetchNextSession(clientId),
+            fetchAvailability(clientId),
+            fetchMealsToday(clientId),
+          ]);
 
-      setStepCount(telemetry.step_count);
-      setCaloriesBurned(telemetry.calories_burned);
-      setCaloriesConsumed(telemetry.calories_consumed);
-      if (telemetry.calories_goal) setCaloriesGoal(telemetry.calories_goal);
+        setStepCount(telemetry.step_count);
+        setCaloriesBurned(telemetry.calories_burned);
+        setCaloriesConsumed(telemetry.calories_consumed);
+        if (telemetry.calories_goal) setCaloriesGoal(telemetry.calories_goal);
 
-      setCoach(coachInfo);
-      setNextSession(session);
-      setAvailabilitySlots(availability);
-      setPrescribedMeals(meals);
+        setCoach(coachInfo);
+        setNextSession(session);
+        setAvailabilitySlots(availability);
+        setPrescribedMeals(meals);
+      } catch {
+        // Individual fetchers have their own fallbacks; if something still
+        // throws (e.g. 401 redirect in progress) just stay on skeleton
+      }
     })();
   }, [clientId]);
 
@@ -616,14 +621,9 @@ export default function ClientDash() {
       <Overlay
         open={overlay === "meals"}
         onClose={closeOverlay}
-        title="Today's Nutrition"
+        title="Today's Meals"
       >
-        <MealDetail
-          meals={prescribedMeals}
-          onLogMeal={handleLogMeal}
-          caloriesConsumed={caloriesConsumed}
-          caloriesGoal={caloriesGoal}
-        />
+        <MealDetail meals={prescribedMeals} onLog={handleLogMeal} />
       </Overlay>
     </div>
   );

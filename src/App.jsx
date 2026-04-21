@@ -20,8 +20,6 @@ function App() {
     <BrowserRouter>
       <div className="min-h-screen bg-[#080D19] text-white">
         <Routes>
-          {/* Catch-all: redirect unknown routes back to the landing page */}
-          <Route path="*" element={<Navigate to="/" />} />
           <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
@@ -36,10 +34,11 @@ function App() {
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/coach-chat" element={<CoachChatPage />} />
           <Route path="/client-chat" element={<ClientChatPage />} />
-          <Route path="/client/messages" element={<ClientChatPage />} />
-          <Route path="/coach/messages" element={<CoachChatPage />} />
+          <Route path="/client/messages" element={<ChatPage />} />
           <Route path="/find-coach" element={<FindCoachPage />} />
           <Route path="/workouts" element={<WorkoutsPage />} />
+          {/* Catch-all: redirect unknown routes back to the landing page */}
+          <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </div>
     </BrowserRouter>

@@ -521,7 +521,7 @@ export default function LandingPage() {
             <Link to="/signup?role=coach"
               className="rounded-2xl px-8 py-4 text-base font-bold text-white transition-all duration-300 hover:scale-105 hover:brightness-110"
               style={{ background:`linear-gradient(135deg, ${O}, ${O3})`, boxShadow:`0 10px 40px ${O}35` }}>
-              Join as Coach
+              Become a Coach
             </Link>
           </div>
           <p className="mt-10 text-slate-600 text-sm">

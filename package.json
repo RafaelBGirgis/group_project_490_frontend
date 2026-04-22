@@ -12,6 +12,7 @@
     "test:watch": "npx vitest"
   },
   "dependencies": {
+    "@heroicons/react": "^2.2.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.13.2"

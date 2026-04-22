@@ -10,6 +10,8 @@ import ProfilePage from "./pages/profile";
 import CoachRequestFormPage from "./pages/coach_request_form";
 import OnboardingPage from "./pages/onboarding";
 import ChatPage from "./pages/chat";
+import CoachChatPage from "./pages/coach_chat";
+import ClientChatPage from "./pages/client_chat";
 import FindCoachPage from "./pages/find_coach";
 import WorkoutsPage from "./pages/workouts";
 
@@ -30,6 +32,8 @@ function App() {
           <Route path="/coach" element={<CoachDashboard />} />
           <Route path="/admin" element={<AdminDashboard />} />
           <Route path="/chat" element={<ChatPage />} />
+          <Route path="/coach-chat" element={<CoachChatPage />} />
+          <Route path="/client-chat" element={<ClientChatPage />} />
           <Route path="/client/messages" element={<ChatPage />} />
           <Route path="/coach/messages" element={<ChatPage />} />
           <Route path="/find-coach" element={<FindCoachPage />} />

@@ -13,6 +13,8 @@ import {
   assignWorkout,
   fetchAssignableClients,
   fetchAssignedWorkouts,
+  fetchWeeklyPlan,
+  saveWeeklyPlan,
   EXERCISE_DATABASE,
   MUSCLE_GROUPS,
 } from "../api/workouts";
@@ -32,9 +34,15 @@ const CATEGORY_ICONS = {
   General:  "💪",
 };
 
+const EQUIPMENT_OPTIONS = ["Barbell", "Dumbbell", "Cable", "Machine", "Bodyweight", "Bands", "Kettlebell", "Other"];
+
 const EMPTY_EXERCISE = {
-  name: "", sets: 3, reps: 10, weight: 0, intensity_measure: "lbs", rest_seconds: 60, notes: "",
+  name: "", sets: 3, reps: 10, weight: 0, intensity_measure: "lbs", notes: "",
+  equipment: "", estimated_calories_per_unit_frequency: 0,
 };
+
+const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const WEEKDAY_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 /* ─── page ───────────────────────────────────────────────────────────── */
 
@@ -59,6 +67,14 @@ export default function WorkoutsPage() {
   const [search, setSearch] = useState("");
   const [filterGroup, setFilterGroup] = useState("All");
   const [filterDifficulty, setFilterDifficulty] = useState("All");
+
+  // Weekly plan
+  const [weeklyPlan, setWeeklyPlan] = useState({
+    monday: null, tuesday: null, wednesday: null, thursday: null,
+    friday: null, saturday: null, sunday: null,
+  });
+  const [weeklyDirty, setWeeklyDirty] = useState(false);
+  const [weeklySaving, setWeeklySaving] = useState(false);
 
   // Overlays
   const [viewWorkout, setViewWorkout] = useState(null);
@@ -92,12 +108,14 @@ export default function WorkoutsPage() {
     (async () => {
       setLoading(true);
       const rid = role === "coach" ? account.coach_id : account.client_id;
-      const [p, mw] = await Promise.all([
+      const [p, mw, wp] = await Promise.all([
         fetchPresetWorkouts(),
         fetchMyWorkouts(role, rid),
+        fetchWeeklyPlan(role, rid),
       ]);
       setPresets(p);
       setMyWorkouts(mw);
+      setWeeklyPlan(wp);
 
       if (role === "coach" && account.coach_id) {
         const [aw, cl] = await Promise.all([
@@ -157,6 +175,28 @@ export default function WorkoutsPage() {
     setEditWorkout(null);
   };
 
+  const handleSetDay = (dayKey, workout) => {
+    setWeeklyPlan((prev) => ({ ...prev, [dayKey]: workout }));
+    setWeeklyDirty(true);
+  };
+
+  const handleClearDay = (dayKey) => {
+    setWeeklyPlan((prev) => ({ ...prev, [dayKey]: null }));
+    setWeeklyDirty(true);
+  };
+
+  const handleSaveWeeklyPlan = async () => {
+    setWeeklySaving(true);
+    // Save just the workout IDs per day
+    const planPayload = {};
+    for (const day of ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]) {
+      planPayload[day] = weeklyPlan[day]?.id ?? null;
+    }
+    await saveWeeklyPlan(role, roleId, planPayload);
+    setWeeklyDirty(false);
+    setWeeklySaving(false);
+  };
+
   const handleAssign = async () => {
     if (!assignOverlay || selectedClients.length === 0) return;
     await assignWorkout(account.coach_id, assignOverlay.id, selectedClients);
@@ -173,6 +213,7 @@ export default function WorkoutsPage() {
   const tabs = [
     { key: "my",      label: "My Workouts" },
     { key: "presets", label: "Preset Library" },
+    { key: "weekly",  label: "Weekly Plan" },
     ...(role === "coach" ? [{ key: "assigned", label: "Assigned" }] : []),
   ];
 
@@ -224,8 +265,8 @@ export default function WorkoutsPage() {
           ))}
         </div>
 
-        {/* Search + Filters (not for assigned tab) */}
-        {tab !== "assigned" && (
+        {/* Search + Filters (not for assigned/weekly tabs) */}
+        {tab !== "assigned" && tab !== "weekly" && (
           <div className="space-y-4 mb-6">
             <input
               type="text"
@@ -273,6 +314,18 @@ export default function WorkoutsPage() {
               <SkeletonDashCard key={i} />
             ))}
           </div>
+        ) : tab === "weekly" ? (
+          /* ── Weekly planner ───────────────────────────────────── */
+          <WeeklyPlanner
+            weeklyPlan={weeklyPlan}
+            allWorkouts={[...myWorkouts, ...presets]}
+            theme={theme}
+            onSetDay={handleSetDay}
+            onClearDay={handleClearDay}
+            onSave={handleSaveWeeklyPlan}
+            dirty={weeklyDirty}
+            saving={weeklySaving}
+          />
         ) : tab === "assigned" ? (
           /* ── Assigned workouts tab (coach only) ────────────────── */
           <div className="space-y-4">
@@ -444,6 +497,10 @@ function WorkoutCard({ workout, theme, role, onView, onEdit, onDuplicate, onAssi
         <div className="flex gap-4 text-xs text-gray-500 mb-4">
           <span>{w.exercises?.length ?? 0} exercises</span>
           <span>{w.est_duration_min ?? "—"} min</span>
+          {(() => {
+            const cal = (w.exercises ?? []).reduce((s, e) => s + (e.estimated_calories_per_unit_frequency ?? 0) * e.sets * e.reps, 0);
+            return cal > 0 ? <span className="text-orange-400">~{cal} kcal</span> : null;
+          })()}
           {w.type === "custom" && <span className="ml-auto text-gray-600">Custom</span>}
           {w.type === "preset" && <span className="ml-auto text-gray-600">Preset</span>}
         </div>
@@ -490,6 +547,9 @@ function WorkoutView({ workout, theme, onEdit, onDelete, onDuplicate, onAssign }
   const w = workout;
   const totalVolume = (w.exercises ?? []).reduce((sum, e) => sum + e.sets * e.reps * (e.weight || 0), 0);
   const totalSets = (w.exercises ?? []).reduce((sum, e) => sum + e.sets, 0);
+  const totalCalories = (w.exercises ?? []).reduce(
+    (sum, e) => sum + (e.estimated_calories_per_unit_frequency ?? 0) * e.sets * e.reps, 0
+  );
 
   return (
     <div className="space-y-5">
@@ -501,6 +561,7 @@ function WorkoutView({ workout, theme, onEdit, onDelete, onDuplicate, onAssign }
         <span className="text-xs text-gray-500">{w.est_duration_min} min</span>
         <span className="text-xs text-gray-500">{totalSets} total sets</span>
         {totalVolume > 0 && <span className="text-xs text-gray-500">{totalVolume.toLocaleString()} lbs volume</span>}
+        {totalCalories > 0 && <span className="text-xs text-orange-400 font-semibold">🔥 ~{totalCalories} kcal</span>}
       </div>
 
       <p className="text-gray-300 text-sm leading-relaxed">{w.description}</p>
@@ -517,21 +578,29 @@ function WorkoutView({ workout, theme, onEdit, onDelete, onDuplicate, onAssign }
       {/* Exercise list */}
       <div className="space-y-2">
         <p className="text-xs text-gray-500 uppercase tracking-widest font-semibold">Exercises</p>
-        {(w.exercises ?? []).map((ex, i) => (
-          <div key={i} className="flex items-center justify-between bg-[#0A1020] rounded-xl px-4 py-3 border border-white/5">
-            <div className="flex-1 min-w-0">
-              <p className="text-white font-semibold text-sm">{ex.name}</p>
-              <div className="flex gap-3 mt-1 text-xs text-gray-400">
-                <span>{ex.sets} sets</span>
-                <span>{ex.reps} reps</span>
-                {ex.weight > 0 && <span style={{ color: theme.accentText }}>{ex.weight} {ex.intensity_measure}</span>}
-                {ex.rest_seconds > 0 && <span>{ex.rest_seconds}s rest</span>}
+        {(w.exercises ?? []).map((ex, i) => {
+          const exCal = (ex.estimated_calories_per_unit_frequency ?? 0) * ex.sets * ex.reps;
+          return (
+            <div key={i} className="flex items-center justify-between bg-[#0A1020] rounded-xl px-4 py-3 border border-white/5">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <p className="text-white font-semibold text-sm">{ex.name}</p>
+                  {ex.equipment && (
+                    <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-white/5 text-gray-400">{ex.equipment}</span>
+                  )}
+                </div>
+                <div className="flex gap-3 mt-1 text-xs text-gray-400">
+                  <span>{ex.sets} sets</span>
+                  <span>{ex.reps} reps</span>
+                  {ex.weight > 0 && <span style={{ color: theme.accentText }}>{ex.weight} {ex.intensity_measure}</span>}
+                  {exCal > 0 && <span className="text-orange-400">~{exCal} kcal</span>}
+                </div>
+                {ex.notes && <p className="text-gray-600 text-xs mt-1 italic">{ex.notes}</p>}
               </div>
-              {ex.notes && <p className="text-gray-600 text-xs mt-1 italic">{ex.notes}</p>}
+              <span className="text-gray-600 text-xs font-bold ml-3">#{i + 1}</span>
             </div>
-            <span className="text-gray-600 text-xs font-bold ml-3">#{i + 1}</span>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Action bar */}
@@ -625,7 +694,7 @@ function WorkoutBuilder({ initial, theme, onSave, onCancel }) {
   };
 
   const pickExercise = (idx, dbExercise) => {
-    updateExercise(idx, "name", dbExercise.name);
+    setExercises((prev) => prev.map((e, i) => i === idx ? { ...e, name: dbExercise.name, equipment: dbExercise.equipment } : e));
     setShowExerciseSearch(null);
     setExSearch("");
   };
@@ -820,26 +889,43 @@ function WorkoutBuilder({ initial, theme, onSave, onCancel }) {
                 </div>
               </div>
               <div>
-                <label className="text-[10px] text-gray-600 uppercase">Rest (s)</label>
+                <label className="text-[10px] text-gray-600 uppercase">Cal/rep</label>
                 <input
                   type="number"
-                  value={ex.rest_seconds}
-                  onChange={(e) => updateExercise(idx, "rest_seconds", Number(e.target.value))}
+                  value={ex.estimated_calories_per_unit_frequency ?? 0}
+                  onChange={(e) => updateExercise(idx, "estimated_calories_per_unit_frequency", Number(e.target.value))}
                   className="w-full bg-[#080D19] border border-white/10 rounded-lg px-2 py-1.5 text-sm text-white focus:outline-none"
                   min={0}
-                  step={15}
                 />
               </div>
             </div>
 
-            {/* Notes */}
-            <input
-              type="text"
-              placeholder="Notes (optional)"
-              value={ex.notes}
-              onChange={(e) => updateExercise(idx, "notes", e.target.value)}
-              className="w-full bg-[#080D19] border border-white/10 rounded-lg px-3 py-1.5 text-xs text-gray-300 placeholder-gray-600 focus:outline-none"
-            />
+            {/* Equipment + Notes */}
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] text-gray-600 uppercase">Equipment</label>
+                <select
+                  value={ex.equipment ?? ""}
+                  onChange={(e) => updateExercise(idx, "equipment", e.target.value)}
+                  className="w-full bg-[#080D19] border border-white/10 rounded-lg px-2 py-1.5 text-sm text-gray-300 focus:outline-none"
+                >
+                  <option value="">None</option>
+                  {EQUIPMENT_OPTIONS.map((eq) => (
+                    <option key={eq} value={eq}>{eq}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] text-gray-600 uppercase">Notes</label>
+                <input
+                  type="text"
+                  placeholder="Optional"
+                  value={ex.notes}
+                  onChange={(e) => updateExercise(idx, "notes", e.target.value)}
+                  className="w-full bg-[#080D19] border border-white/10 rounded-lg px-2 py-1.5 text-sm text-gray-300 placeholder-gray-600 focus:outline-none"
+                />
+              </div>
+            </div>
           </div>
         ))}
 
@@ -868,6 +954,212 @@ function WorkoutBuilder({ initial, theme, onSave, onCancel }) {
           {saving ? "Saving..." : initial.id ? "Save Changes" : "Create Workout"}
         </button>
       </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   WEEKLY PLANNER — assign workouts to each day of the week
+   ═══════════════════════════════════════════════════════════════════════ */
+
+function WeeklyPlanner({ weeklyPlan, allWorkouts, theme, onSetDay, onClearDay, onSave, dirty, saving }) {
+  const [pickerDay, setPickerDay] = useState(null); // day key currently being assigned
+  const [pickerSearch, setPickerSearch] = useState("");
+
+  const dayKeys = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+
+  const filteredPicker = pickerSearch
+    ? allWorkouts.filter((w) => w.name.toLowerCase().includes(pickerSearch.toLowerCase()))
+    : allWorkouts;
+
+  // Compute weekly totals
+  const weekTotals = dayKeys.reduce(
+    (acc, day) => {
+      const w = weeklyPlan[day];
+      if (!w) return acc;
+      const exs = w.exercises ?? [];
+      acc.exercises += exs.length;
+      acc.duration += w.est_duration_min ?? 0;
+      acc.calories += exs.reduce((s, e) => s + (e.estimated_calories_per_unit_frequency ?? 0) * e.sets * e.reps, 0);
+      acc.days += 1;
+      return acc;
+    },
+    { exercises: 0, duration: 0, calories: 0, days: 0 }
+  );
+
+  return (
+    <div className="space-y-5">
+      {/* Weekly summary bar */}
+      <div className="bg-[#0D1424] border border-white/5 rounded-2xl p-4 flex items-center justify-between">
+        <div className="flex gap-6">
+          <div>
+            <p className="text-[10px] text-gray-500 uppercase tracking-widest">Training Days</p>
+            <p className="text-white font-bold text-lg">{weekTotals.days} <span className="text-gray-500 text-xs font-normal">/ 7</span></p>
+          </div>
+          <div>
+            <p className="text-[10px] text-gray-500 uppercase tracking-widest">Total Exercises</p>
+            <p className="text-white font-bold text-lg">{weekTotals.exercises}</p>
+          </div>
+          <div>
+            <p className="text-[10px] text-gray-500 uppercase tracking-widest">Est. Duration</p>
+            <p className="text-white font-bold text-lg">{weekTotals.duration} <span className="text-gray-500 text-xs font-normal">min</span></p>
+          </div>
+          <div>
+            <p className="text-[10px] text-gray-500 uppercase tracking-widest">Est. Calories</p>
+            <p className="text-orange-400 font-bold text-lg">~{weekTotals.calories} <span className="text-xs font-normal">kcal</span></p>
+          </div>
+        </div>
+        <button
+          onClick={onSave}
+          disabled={!dirty || saving}
+          className="px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-colors disabled:opacity-30"
+          style={{ backgroundColor: theme.accent }}
+        >
+          {saving ? "Saving..." : dirty ? "Save Plan" : "Saved ✓"}
+        </button>
+      </div>
+
+      {/* Day grid */}
+      <div className="grid grid-cols-7 gap-3">
+        {dayKeys.map((day, idx) => {
+          const workout = weeklyPlan[day];
+          const isRest = !workout;
+          const dayCal = workout
+            ? (workout.exercises ?? []).reduce((s, e) => s + (e.estimated_calories_per_unit_frequency ?? 0) * e.sets * e.reps, 0)
+            : 0;
+
+          return (
+            <div
+              key={day}
+              className={`rounded-2xl border p-4 flex flex-col min-h-[220px] transition-colors ${
+                isRest
+                  ? "border-dashed border-white/10 bg-[#080D19]"
+                  : "border-white/10 bg-[#0D1424]"
+              }`}
+            >
+              {/* Day header */}
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">{WEEKDAY_SHORT[idx]}</p>
+                {workout && (
+                  <button
+                    onClick={() => onClearDay(day)}
+                    className="text-red-400/50 hover:text-red-400 text-xs transition-colors"
+                    title="Remove workout"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+
+              {workout ? (
+                /* ── Workout assigned ────── */
+                <div className="flex-1 flex flex-col">
+                  <p className="text-white font-semibold text-sm mb-1 leading-tight">{workout.name}</p>
+                  <span className={`self-start px-1.5 py-0.5 rounded text-[9px] font-bold uppercase mb-2 ${DIFFICULTY_COLORS[workout.difficulty] ?? "text-gray-400 bg-white/5"}`}>
+                    {workout.difficulty}
+                  </span>
+
+                  <div className="space-y-1 flex-1">
+                    {(workout.exercises ?? []).slice(0, 3).map((ex, i) => (
+                      <div key={i} className="flex items-center gap-1.5">
+                        <span className="w-1 h-1 rounded-full shrink-0" style={{ backgroundColor: theme.accent }} />
+                        <p className="text-[10px] text-gray-400 truncate">{ex.name}</p>
+                      </div>
+                    ))}
+                    {(workout.exercises ?? []).length > 3 && (
+                      <p className="text-[10px] text-gray-600">+{workout.exercises.length - 3} more</p>
+                    )}
+                  </div>
+
+                  <div className="mt-2 pt-2 border-t border-white/5 flex justify-between text-[10px] text-gray-500">
+                    <span>{workout.est_duration_min}m</span>
+                    {dayCal > 0 && <span className="text-orange-400">~{dayCal}</span>}
+                    <span>{(workout.exercises ?? []).length} ex</span>
+                  </div>
+
+                  {/* Swap button */}
+                  <button
+                    onClick={() => { setPickerDay(day); setPickerSearch(""); }}
+                    className="mt-2 w-full py-1.5 rounded-lg text-[10px] font-semibold border border-white/10 text-gray-400 hover:bg-white/5 transition-colors"
+                  >
+                    Swap
+                  </button>
+                </div>
+              ) : (
+                /* ── Rest / empty day ────── */
+                <div className="flex-1 flex flex-col items-center justify-center">
+                  <p className="text-gray-600 text-xs mb-3">Rest Day</p>
+                  <button
+                    onClick={() => { setPickerDay(day); setPickerSearch(""); }}
+                    className="px-4 py-2 rounded-xl text-xs font-semibold border border-dashed transition-colors"
+                    style={{ borderColor: `${theme.accent}40`, color: theme.accentText }}
+                  >
+                    + Add Workout
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ── Workout picker modal ──────────────────────────────────────── */}
+      {pickerDay && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setPickerDay(null)}>
+          <div
+            className="w-full max-w-md bg-[#0D1424] border border-white/10 rounded-2xl shadow-2xl p-5 space-y-4 max-h-[80vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <p className="text-white font-bold">
+                Pick workout for <span style={{ color: theme.accentText }}>{pickerDay.charAt(0).toUpperCase() + pickerDay.slice(1)}</span>
+              </p>
+              <button onClick={() => setPickerDay(null)} className="text-gray-500 hover:text-white text-sm">✕</button>
+            </div>
+
+            <input
+              type="text"
+              placeholder="Search workouts..."
+              value={pickerSearch}
+              onChange={(e) => setPickerSearch(e.target.value)}
+              className="w-full bg-[#080D19] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none"
+              autoFocus
+            />
+
+            <div className="flex-1 overflow-y-auto space-y-2 min-h-0">
+              {filteredPicker.length === 0 ? (
+                <p className="text-gray-500 text-sm text-center py-8">No workouts found. Create one first!</p>
+              ) : (
+                filteredPicker.map((w) => {
+                  const cal = (w.exercises ?? []).reduce(
+                    (s, e) => s + (e.estimated_calories_per_unit_frequency ?? 0) * e.sets * e.reps, 0
+                  );
+                  return (
+                    <button
+                      key={w.id}
+                      onClick={() => { onSetDay(pickerDay, w); setPickerDay(null); }}
+                      className="w-full text-left bg-[#0A1020] border border-white/5 rounded-xl px-4 py-3 hover:border-white/15 transition-colors"
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="text-white font-semibold text-sm">{w.name}</p>
+                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${DIFFICULTY_COLORS[w.difficulty] ?? "text-gray-400 bg-white/5"}`}>
+                          {w.difficulty}
+                        </span>
+                      </div>
+                      <div className="flex gap-3 text-[10px] text-gray-500">
+                        <span>{w.exercises?.length ?? 0} exercises</span>
+                        <span>{w.est_duration_min} min</span>
+                        <span className="capitalize">{w.type}</span>
+                        {cal > 0 && <span className="text-orange-400">~{cal} kcal</span>}
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

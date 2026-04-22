@@ -79,12 +79,12 @@ const PRESET_WORKOUTS = [
     est_duration_min: 60,
     muscle_groups: ["Chest", "Shoulders", "Arms"],
     exercises: [
-      { name: "Bench Press",            sets: 4, reps: 6,  weight: 185, intensity_measure: "lbs", rest_seconds: 180, notes: "Warm up with bar first" },
-      { name: "Incline Dumbbell Press", sets: 3, reps: 10, weight: 60,  intensity_measure: "lbs", rest_seconds: 90,  notes: "" },
-      { name: "Overhead Press",         sets: 3, reps: 8,  weight: 95,  intensity_measure: "lbs", rest_seconds: 120, notes: "" },
-      { name: "Lateral Raises",         sets: 4, reps: 15, weight: 25,  intensity_measure: "lbs", rest_seconds: 60,  notes: "Control the negative" },
-      { name: "Tricep Pushdown",        sets: 3, reps: 12, weight: 50,  intensity_measure: "lbs", rest_seconds: 60,  notes: "" },
-      { name: "Cable Flyes",            sets: 3, reps: 12, weight: 30,  intensity_measure: "lbs", rest_seconds: 60,  notes: "Squeeze at peak" },
+      { name: "Bench Press",            sets: 4, reps: 6,  weight: 185, intensity_measure: "lbs", notes: "Warm up with bar first", equipment: "Barbell", estimated_calories_per_unit_frequency: 8 },
+      { name: "Incline Dumbbell Press", sets: 3, reps: 10, weight: 60,  intensity_measure: "lbs",  notes: "", equipment: "Dumbbell", estimated_calories_per_unit_frequency: 7 },
+      { name: "Overhead Press",         sets: 3, reps: 8,  weight: 95,  intensity_measure: "lbs", notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 6 },
+      { name: "Lateral Raises",         sets: 4, reps: 15, weight: 25,  intensity_measure: "lbs",  notes: "Control the negative", equipment: "Dumbbell", estimated_calories_per_unit_frequency: 4 },
+      { name: "Tricep Pushdown",        sets: 3, reps: 12, weight: 50,  intensity_measure: "lbs",  notes: "", equipment: "Cable", estimated_calories_per_unit_frequency: 5 },
+      { name: "Cable Flyes",            sets: 3, reps: 12, weight: 30,  intensity_measure: "lbs",  notes: "Squeeze at peak", equipment: "Cable", estimated_calories_per_unit_frequency: 5 },
     ],
   },
   {
@@ -97,12 +97,12 @@ const PRESET_WORKOUTS = [
     est_duration_min: 55,
     muscle_groups: ["Back", "Arms"],
     exercises: [
-      { name: "Barbell Row",       sets: 4, reps: 8,  weight: 155, intensity_measure: "lbs", rest_seconds: 120, notes: "" },
-      { name: "Lat Pulldown",      sets: 3, reps: 10, weight: 120, intensity_measure: "lbs", rest_seconds: 90,  notes: "" },
-      { name: "Seated Cable Row",  sets: 3, reps: 10, weight: 100, intensity_measure: "lbs", rest_seconds: 90,  notes: "" },
-      { name: "Face Pulls",        sets: 3, reps: 15, weight: 30,  intensity_measure: "lbs", rest_seconds: 60,  notes: "" },
-      { name: "Bicep Curls",       sets: 3, reps: 12, weight: 35,  intensity_measure: "lbs", rest_seconds: 60,  notes: "" },
-      { name: "Hammer Curls",      sets: 3, reps: 12, weight: 30,  intensity_measure: "lbs", rest_seconds: 60,  notes: "" },
+      { name: "Barbell Row",       sets: 4, reps: 8,  weight: 155, intensity_measure: "lbs", notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 8 },
+      { name: "Lat Pulldown",      sets: 3, reps: 10, weight: 120, intensity_measure: "lbs",  notes: "", equipment: "Cable", estimated_calories_per_unit_frequency: 6 },
+      { name: "Seated Cable Row",  sets: 3, reps: 10, weight: 100, intensity_measure: "lbs",  notes: "", equipment: "Cable", estimated_calories_per_unit_frequency: 6 },
+      { name: "Face Pulls",        sets: 3, reps: 15, weight: 30,  intensity_measure: "lbs",  notes: "", equipment: "Cable", estimated_calories_per_unit_frequency: 4 },
+      { name: "Bicep Curls",       sets: 3, reps: 12, weight: 35,  intensity_measure: "lbs",  notes: "", equipment: "Dumbbell", estimated_calories_per_unit_frequency: 4 },
+      { name: "Hammer Curls",      sets: 3, reps: 12, weight: 30,  intensity_measure: "lbs",  notes: "", equipment: "Dumbbell", estimated_calories_per_unit_frequency: 4 },
     ],
   },
   {
@@ -115,12 +115,12 @@ const PRESET_WORKOUTS = [
     est_duration_min: 65,
     muscle_groups: ["Legs", "Core"],
     exercises: [
-      { name: "Barbell Squat",         sets: 4, reps: 6,  weight: 225, intensity_measure: "lbs", rest_seconds: 180, notes: "Hit depth" },
-      { name: "Romanian Deadlift",     sets: 3, reps: 10, weight: 185, intensity_measure: "lbs", rest_seconds: 120, notes: "" },
-      { name: "Leg Press",             sets: 3, reps: 12, weight: 360, intensity_measure: "lbs", rest_seconds: 90,  notes: "" },
-      { name: "Leg Curl",              sets: 3, reps: 12, weight: 80,  intensity_measure: "lbs", rest_seconds: 60,  notes: "" },
-      { name: "Calf Raises",           sets: 4, reps: 15, weight: 90,  intensity_measure: "lbs", rest_seconds: 60,  notes: "" },
-      { name: "Hanging Leg Raises",    sets: 3, reps: 12, weight: 0,   intensity_measure: "bw",  rest_seconds: 60,  notes: "" },
+      { name: "Barbell Squat",         sets: 4, reps: 6,  weight: 225, intensity_measure: "lbs", notes: "Hit depth", equipment: "Barbell", estimated_calories_per_unit_frequency: 10 },
+      { name: "Romanian Deadlift",     sets: 3, reps: 10, weight: 185, intensity_measure: "lbs", notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 9 },
+      { name: "Leg Press",             sets: 3, reps: 12, weight: 360, intensity_measure: "lbs",  notes: "", equipment: "Machine", estimated_calories_per_unit_frequency: 7 },
+      { name: "Leg Curl",              sets: 3, reps: 12, weight: 80,  intensity_measure: "lbs",  notes: "", equipment: "Machine", estimated_calories_per_unit_frequency: 5 },
+      { name: "Calf Raises",           sets: 4, reps: 15, weight: 90,  intensity_measure: "lbs",  notes: "", equipment: "Machine", estimated_calories_per_unit_frequency: 4 },
+      { name: "Hanging Leg Raises",    sets: 3, reps: 12, weight: 0,   intensity_measure: "bw",   notes: "", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 5 },
     ],
   },
   {
@@ -133,12 +133,12 @@ const PRESET_WORKOUTS = [
     est_duration_min: 70,
     muscle_groups: ["Chest", "Back", "Shoulders", "Arms"],
     exercises: [
-      { name: "Bench Press",        sets: 5, reps: 5,  weight: 205, intensity_measure: "lbs", rest_seconds: 180, notes: "" },
-      { name: "Barbell Row",        sets: 5, reps: 5,  weight: 175, intensity_measure: "lbs", rest_seconds: 180, notes: "" },
-      { name: "Overhead Press",     sets: 4, reps: 6,  weight: 115, intensity_measure: "lbs", rest_seconds: 150, notes: "" },
-      { name: "Pull-ups",           sets: 4, reps: 8,  weight: 0,   intensity_measure: "bw",  rest_seconds: 120, notes: "Add weight if possible" },
-      { name: "Dumbbell Flyes",     sets: 3, reps: 12, weight: 40,  intensity_measure: "lbs", rest_seconds: 60,  notes: "" },
-      { name: "Skull Crushers",     sets: 3, reps: 10, weight: 55,  intensity_measure: "lbs", rest_seconds: 60,  notes: "" },
+      { name: "Bench Press",        sets: 5, reps: 5,  weight: 205, intensity_measure: "lbs", notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 9 },
+      { name: "Barbell Row",        sets: 5, reps: 5,  weight: 175, intensity_measure: "lbs", notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 9 },
+      { name: "Overhead Press",     sets: 4, reps: 6,  weight: 115, intensity_measure: "lbs", notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 7 },
+      { name: "Pull-ups",           sets: 4, reps: 8,  weight: 0,   intensity_measure: "bw",  notes: "Add weight if possible", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 8 },
+      { name: "Dumbbell Flyes",     sets: 3, reps: 12, weight: 40,  intensity_measure: "lbs",  notes: "", equipment: "Dumbbell", estimated_calories_per_unit_frequency: 5 },
+      { name: "Skull Crushers",     sets: 3, reps: 10, weight: 55,  intensity_measure: "lbs",  notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 5 },
     ],
   },
   {
@@ -151,11 +151,11 @@ const PRESET_WORKOUTS = [
     est_duration_min: 45,
     muscle_groups: ["Chest", "Back", "Legs", "Core"],
     exercises: [
-      { name: "Barbell Squat",     sets: 3, reps: 8,  weight: 95,  intensity_measure: "lbs", rest_seconds: 120, notes: "Start light, get the form right" },
-      { name: "Bench Press",       sets: 3, reps: 8,  weight: 95,  intensity_measure: "lbs", rest_seconds: 120, notes: "" },
-      { name: "Barbell Row",       sets: 3, reps: 8,  weight: 85,  intensity_measure: "lbs", rest_seconds: 120, notes: "" },
-      { name: "Overhead Press",    sets: 3, reps: 8,  weight: 65,  intensity_measure: "lbs", rest_seconds: 90,  notes: "" },
-      { name: "Plank",             sets: 3, reps: 30, weight: 0,   intensity_measure: "sec", rest_seconds: 60,  notes: "Hold for time" },
+      { name: "Barbell Squat",     sets: 3, reps: 8,  weight: 95,  intensity_measure: "lbs", notes: "Start light, get the form right", equipment: "Barbell", estimated_calories_per_unit_frequency: 8 },
+      { name: "Bench Press",       sets: 3, reps: 8,  weight: 95,  intensity_measure: "lbs", notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 7 },
+      { name: "Barbell Row",       sets: 3, reps: 8,  weight: 85,  intensity_measure: "lbs", notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 7 },
+      { name: "Overhead Press",    sets: 3, reps: 8,  weight: 65,  intensity_measure: "lbs",  notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 6 },
+      { name: "Plank",             sets: 3, reps: 30, weight: 0,   intensity_measure: "sec",  notes: "Hold for time", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 3 },
     ],
   },
   {
@@ -168,11 +168,11 @@ const PRESET_WORKOUTS = [
     est_duration_min: 30,
     muscle_groups: ["Cardio", "Core"],
     exercises: [
-      { name: "Jump Rope",         sets: 5, reps: 60,  weight: 0, intensity_measure: "sec", rest_seconds: 30,  notes: "60s on, 30s off" },
-      { name: "Russian Twists",    sets: 3, reps: 20,  weight: 15, intensity_measure: "lbs", rest_seconds: 30, notes: "" },
-      { name: "Push-ups",          sets: 3, reps: 15,  weight: 0, intensity_measure: "bw",  rest_seconds: 30,  notes: "" },
-      { name: "Rowing Machine",    sets: 4, reps: 90,  weight: 0, intensity_measure: "sec", rest_seconds: 45,  notes: "90s all-out effort" },
-      { name: "Hanging Leg Raises", sets: 3, reps: 12, weight: 0, intensity_measure: "bw",  rest_seconds: 30,  notes: "" },
+      { name: "Jump Rope",         sets: 5, reps: 60,  weight: 0, intensity_measure: "sec",  notes: "60s on, 30s off", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 12 },
+      { name: "Russian Twists",    sets: 3, reps: 20,  weight: 15, intensity_measure: "lbs", notes: "", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 5 },
+      { name: "Push-ups",          sets: 3, reps: 15,  weight: 0, intensity_measure: "bw",   notes: "", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 6 },
+      { name: "Rowing Machine",    sets: 4, reps: 90,  weight: 0, intensity_measure: "sec",  notes: "90s all-out effort", equipment: "Machine", estimated_calories_per_unit_frequency: 14 },
+      { name: "Hanging Leg Raises", sets: 3, reps: 12, weight: 0, intensity_measure: "bw",   notes: "", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 5 },
     ],
   },
   {
@@ -185,10 +185,10 @@ const PRESET_WORKOUTS = [
     est_duration_min: 25,
     muscle_groups: ["Core", "Legs"],
     exercises: [
-      { name: "Plank",              sets: 3, reps: 45, weight: 0, intensity_measure: "sec", rest_seconds: 30, notes: "Engage core fully" },
-      { name: "Ab Rollout",         sets: 3, reps: 10, weight: 0, intensity_measure: "bw",  rest_seconds: 45, notes: "Slow and controlled" },
-      { name: "Bulgarian Split Squat", sets: 2, reps: 10, weight: 0, intensity_measure: "bw", rest_seconds: 60, notes: "Per leg — go light" },
-      { name: "Hip Thrust",         sets: 3, reps: 12, weight: 0, intensity_measure: "bw",  rest_seconds: 45, notes: "Focus on glute squeeze" },
+      { name: "Plank",              sets: 3, reps: 45, weight: 0, intensity_measure: "sec", notes: "Engage core fully", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 3 },
+      { name: "Ab Rollout",         sets: 3, reps: 10, weight: 0, intensity_measure: "bw",  notes: "Slow and controlled", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 5 },
+      { name: "Bulgarian Split Squat", sets: 2, reps: 10, weight: 0, intensity_measure: "bw", notes: "Per leg — go light", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 6 },
+      { name: "Hip Thrust",         sets: 3, reps: 12, weight: 0, intensity_measure: "bw",  notes: "Focus on glute squeeze", equipment: "Barbell", estimated_calories_per_unit_frequency: 6 },
     ],
   },
 ];
@@ -224,11 +224,11 @@ export async function fetchMyWorkouts(role, roleId) {
         muscle_groups: ["Chest", "Arms"],
         created_at: "2026-04-10T14:30:00Z",
         exercises: [
-          { name: "Bench Press",            sets: 4, reps: 8,  weight: 175, intensity_measure: "lbs", rest_seconds: 120, notes: "" },
-          { name: "Incline Dumbbell Press", sets: 3, reps: 10, weight: 55,  intensity_measure: "lbs", rest_seconds: 90,  notes: "" },
-          { name: "Cable Flyes",            sets: 3, reps: 12, weight: 25,  intensity_measure: "lbs", rest_seconds: 60,  notes: "" },
-          { name: "Tricep Pushdown",        sets: 3, reps: 12, weight: 45,  intensity_measure: "lbs", rest_seconds: 60,  notes: "" },
-          { name: "Skull Crushers",         sets: 3, reps: 10, weight: 50,  intensity_measure: "lbs", rest_seconds: 60,  notes: "" },
+          { name: "Bench Press",            sets: 4, reps: 8,  weight: 175, intensity_measure: "lbs", notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 8 },
+          { name: "Incline Dumbbell Press", sets: 3, reps: 10, weight: 55,  intensity_measure: "lbs",  notes: "", equipment: "Dumbbell", estimated_calories_per_unit_frequency: 7 },
+          { name: "Cable Flyes",            sets: 3, reps: 12, weight: 25,  intensity_measure: "lbs",  notes: "", equipment: "Cable", estimated_calories_per_unit_frequency: 5 },
+          { name: "Tricep Pushdown",        sets: 3, reps: 12, weight: 45,  intensity_measure: "lbs",  notes: "", equipment: "Cable", estimated_calories_per_unit_frequency: 5 },
+          { name: "Skull Crushers",         sets: 3, reps: 10, weight: 50,  intensity_measure: "lbs",  notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 5 },
         ],
       },
     ];
@@ -276,6 +276,34 @@ export async function duplicatePreset(role, roleId, presetId) {
       type: "custom",
       name: `${preset.name} (Copy)`,
     };
+  }
+}
+
+/* ─── weekly plan ────────────────────────────────────────────────────── */
+
+/** Fetch the user's weekly plan (workouts assigned to days) */
+export async function fetchWeeklyPlan(role, roleId) {
+  try {
+    return await apiGet(`/roles/${role}/${roleId}/weekly-plan`);
+  } catch {
+    return {
+      monday:    null,
+      tuesday:   null,
+      wednesday: null,
+      thursday:  null,
+      friday:    null,
+      saturday:  null,
+      sunday:    null,
+    };
+  }
+}
+
+/** Save the user's weekly plan */
+export async function saveWeeklyPlan(role, roleId, plan) {
+  try {
+    return await apiPost(`/roles/${role}/${roleId}/weekly-plan`, plan);
+  } catch {
+    return { success: true };
   }
 }
 

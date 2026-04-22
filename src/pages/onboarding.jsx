@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import AvailabilityDetail from "../components/overlays/availability_detail";
 
 const PRIMARY_GOALS = [
   "Weight Loss",
@@ -16,6 +17,8 @@ const EMPTY_TRAINING_AVAILABILITY = {
   Sat: [],
   Sun: [],
 };
+
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 const normalizeTrainingAvailability = (value, fallbackDays = []) => {
   const base = {
@@ -41,6 +44,37 @@ const normalizeTrainingAvailability = (value, fallbackDays = []) => {
   });
 
   return base;
+};
+
+// Convert from { Mon: ["9AM", "10AM"], ... } to [{ time, slots: [...] }, ...]
+const convertToSlotsFormat = (trainingAvailability) => {
+  const allTimes = new Set();
+  Object.values(trainingAvailability).forEach(slots => {
+    slots.forEach(time => allTimes.add(time));
+  });
+
+  const sortedTimes = Array.from(allTimes).sort((a, b) => {
+    const timeOrder = ["5AM","6AM","7AM","8AM","9AM","10AM","11AM","12PM","1PM","2PM","3PM","4PM","5PM","6PM","7PM","8PM","9PM"];
+    return timeOrder.indexOf(a) - timeOrder.indexOf(b);
+  });
+
+  return sortedTimes.map(time => ({
+    time,
+    slots: WEEKDAYS.map(day => trainingAvailability[day].includes(time) ? "available" : null)
+  }));
+};
+
+// Convert from [{ time, slots: [...] }, ...] to { Mon: ["9AM", "10AM"], ... }
+const convertFromSlotsFormat = (slots) => {
+  const result = { ...EMPTY_TRAINING_AVAILABILITY };
+  slots.forEach(({ time, slots: daySlots }) => {
+    daySlots.forEach((status, dayIndex) => {
+      if (status === "available") {
+        result[WEEKDAYS[dayIndex]].push(time);
+      }
+    });
+  });
+  return result;
 };
 
 function OnboardingPage() {
@@ -130,24 +164,6 @@ function OnboardingPage() {
 
     load();
   }, [API_BASE_URL, navigate]);
-
-  const addTrainingAvailabilitySlot = (day) => {
-    const time = prompt(`Add a time slot for ${day} (example: 7PM)`);
-    if (!time) return;
-
-    setForm((prev) => {
-      const daySlots = prev.trainingAvailability[day] || [];
-      if (daySlots.includes(time)) return prev;
-
-      return {
-        ...prev,
-        trainingAvailability: {
-          ...prev.trainingAvailability,
-          [day]: [...daySlots, time],
-        },
-      };
-    });
-  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -282,37 +298,18 @@ function OnboardingPage() {
               <h2 className="text-sm font-bold uppercase tracking-widest text-slate-400">
                 Training Availability
               </h2>
-              <p className="text-xs text-slate-500">Add your available training time slots</p>
-              <div className="grid grid-cols-7 gap-1 text-center">
-                {Object.entries(form.trainingAvailability).map(([day, slots]) => (
-                  <div key={day}>
-                    <div className="mb-2 text-[10px] font-semibold uppercase text-slate-500">
-                      {day}
-                    </div>
-
-                    <div className="space-y-1">
-                      {slots.map((time) => (
-                        <div
-                          key={`${day}-${time}`}
-                          className="w-full rounded-md border border-white/6 bg-[rgba(255,255,255,0.02)] px-1 py-1 text-[10px] text-slate-300"
-                          title={`${day} ${time}`}
-                        >
-                          {time}
-                        </div>
-                      ))}
-
-                      <button
-                        type="button"
-                        onClick={() => addTrainingAvailabilitySlot(day)}
-                        className="w-full rounded-md border border-dashed px-1 py-1 text-[10px] text-slate-500 hover:text-white"
-                        style={{ borderColor: "rgba(59, 130, 246, 0.30)" }}
-                      >
-                        +
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <p className="text-xs text-slate-500">Set your available training time slots</p>
+              <AvailabilityDetail
+                slots={convertToSlotsFormat(form.trainingAvailability)}
+                weekdays={WEEKDAYS}
+                onSave={(updatedSlots) => {
+                  setForm((prev) => ({
+                    ...prev,
+                    trainingAvailability: convertFromSlotsFormat(updatedSlots)
+                  }));
+                }}
+                role="client"
+              />
             </section>
 
             <div className="flex justify-end">

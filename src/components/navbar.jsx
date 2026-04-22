@@ -146,7 +146,7 @@ export function Navbar({ role = "client", userName = "JD", onMessage, onNotifica
 
           {/* Message Button */}
           <button
-            onClick={onMessage || (() => navigate(messagesRoute))}
+            onClick={onMessage || (() => navigate(`/${role}-chat`))}
             className="relative w-10 h-10 flex items-center justify-center rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] text-slate-400 hover:bg-[rgba(255,255,255,0.06)] hover:text-white transition-colors"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -206,7 +206,7 @@ export function Navbar({ role = "client", userName = "JD", onMessage, onNotifica
                         onClick={() => {
                           markOneRead(n.id);
                           // Navigate based on type
-                          if (n.type === "message") { setShowNotifs(false); navigate(messagesRoute); }
+                          if (n.type === "message") { setShowNotifs(false); navigate(`/${role}-chat`); }
                           else if (n.type === "workout" || n.type === "session") { setShowNotifs(false); navigate(`/${role}`); }
                         }}
                         className={`w-full text-left px-4 py-3 flex items-start gap-3 border-b border-white/3 transition-colors hover:bg-white/3 ${

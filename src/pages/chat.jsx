@@ -47,6 +47,7 @@ export default function ChatPage() {
   /* ── determine role from account ─────────────────────────────────── */
   const role = account && 'coach_id' in account ? "coach" : "client";
   const theme = ROLE_THEMES[role] || ROLE_THEMES.client;
+  const roleTheme = CHAT_THEME[role];
 
   useEffect(() => {
     if (loading || !account) return;

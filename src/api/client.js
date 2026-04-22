@@ -153,7 +153,7 @@ export async function fetchAvailability(clientId) {
   try {
     return await apiGet(`/roles/client/${clientId}/availability`);
   } catch {
-    return [];
+    return buildMockAvailability();
   }
 }
 

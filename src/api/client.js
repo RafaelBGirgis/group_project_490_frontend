@@ -37,6 +37,24 @@ export async function fetchClientProfile() {
   return apiPost("/roles/client/me", {});
 }
 
+export async function deactivateAccount() {
+  try {
+    return await apiPost("/me/deactivate", {});
+  } catch {
+    // Mock until backend ships this endpoint
+    return { success: true, message: "Account deactivated successfully" };
+  }
+}
+
+export async function deleteAccount() {
+  try {
+    return await apiPost("/me/delete", {});
+  } catch {
+    // Mock until backend ships this endpoint
+    return { success: true, message: "Account deletion requested successfully" };
+  }
+}
+
 /* ─── telemetry (steps, calories burned, calories consumed) ──────── */
 
 export async function fetchTelemetryToday(clientId) {

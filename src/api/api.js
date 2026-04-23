@@ -10,9 +10,11 @@ export async function apiFetch(path, opts = {}) {
   const headers = { "Content-Type": "application/json", ...opts.headers };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(`${API_BASE}${path}`, { ...opts, headers });
+  const { skipAuthRedirect, ...fetchOpts } = opts;
 
-  if (res.status === 401) {
+  const res = await fetch(`${API_BASE}${path}`, { ...fetchOpts, headers });
+
+  if (res.status === 401 && !skipAuthRedirect) {
     // Token expired or invalid — redirect to login
     localStorage.removeItem("jwt");
     window.location.href = "/login";
@@ -26,6 +28,9 @@ export async function apiFetch(path, opts = {}) {
 
   return res.json();
 }
+
+/** Like apiGet but won't auto-redirect on 401 — lets callers fall back to mock data */
+export const apiGetSafe = (path) => apiFetch(path, { skipAuthRedirect: true });
 
 /** Convenience wrappers */
 export const apiGet    = (path) => apiFetch(path);

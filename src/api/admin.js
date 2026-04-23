@@ -3,7 +3,7 @@
  * Same pattern: real endpoint first, mock fallback.
  */
 
-import { apiGet, apiPost } from "./api";
+import { apiGet, apiGetSafe, apiPost } from "./api";
 
 /* ═══════════════════════════════════════════════════════════════════════
    ADMIN STATS
@@ -11,7 +11,7 @@ import { apiGet, apiPost } from "./api";
 
 export async function fetchAdminStats() {
   try {
-    return await apiGet("/admin/stats");
+    return await apiGetSafe("/admin/stats");
   } catch {
     return {
       total_accounts: 142,
@@ -35,7 +35,7 @@ export async function fetchAdminStats() {
 
 export async function fetchAllUsers() {
   try {
-    return await apiGet("/admin/users");
+    return await apiGetSafe("/admin/users");
   } catch {
     return [
       { id: 1,  name: "Elena Marks",    email: "elena@mail.com",   role: "client", status: "active",    created_at: "2026-04-14", last_active: "2 min ago" },
@@ -81,7 +81,7 @@ export async function deleteUser(userId) {
 
 export async function fetchExerciseBank() {
   try {
-    return await apiGet("/admin/exercises");
+    return await apiGetSafe("/admin/exercises");
   } catch {
     return [
       { id: 1,  name: "Bench Press",            muscle_group: "Chest",     equipment: "Barbell",    created_by: "System" },
@@ -166,7 +166,7 @@ export async function resolveCoachRequest(coachRequestId, isApproved) {
 
 export async function fetchAnalytics() {
   try {
-    return await apiGet("/admin/analytics");
+    return await apiGetSafe("/admin/analytics");
   } catch {
     // Generate realistic mock engagement data
     const now = new Date();

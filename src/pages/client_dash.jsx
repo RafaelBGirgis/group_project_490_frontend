@@ -611,7 +611,7 @@ export default function ClientDash() {
           weekdays={WEEKDAYS}
           role="client"
           onSave={async (updatedSlots) => {
-            await saveAvailability(account.client_id, updatedSlots);
+            await saveAvailability(clientId, updatedSlots);
             setAvailabilitySlots(updatedSlots);
           }}
         />

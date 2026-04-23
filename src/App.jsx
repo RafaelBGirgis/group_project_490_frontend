@@ -35,6 +35,7 @@ function App() {
           <Route path="/coach-chat" element={<CoachChatPage />} />
           <Route path="/client-chat" element={<ClientChatPage />} />
           <Route path="/client/messages" element={<ChatPage />} />
+          <Route path="/coach/messages" element={<ChatPage />} />
           <Route path="/find-coach" element={<FindCoachPage />} />
           <Route path="/workouts" element={<WorkoutsPage />} />
           {/* Catch-all: redirect unknown routes back to the landing page */}

@@ -3,7 +3,7 @@
  * All client/coach/admin modules import `apiFetch` from here.
  */
 
-const API_BASE = "";  // Vite proxy handles routing
+const API_BASE = import.meta.env.PROD ? "https://api.till-failure.us" : "";  // Prod hits real backend, dev uses Vite proxy
 
 export async function apiFetch(path, opts = {}) {
   const token = localStorage.getItem("jwt");

@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import clientLogo from "../assets/Client Logo.svg";
 
+const API_BASE_URL = import.meta.env.PROD ? "https://api.till-failure.us" : "";
+
 export default function SignupPage() {
   const [formData, setFormData] = useState({
     name: "",
@@ -14,9 +16,6 @@ export default function SignupPage() {
     bio: "",
   });
   const [error, setError] = useState("");
-
-  // Replace with your backend URL
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 
   const getErrorMessage = async (response, fallback) => {
     try {
@@ -161,6 +160,7 @@ export default function SignupPage() {
             <div className="mt-6">
               <button
                 type="button"
+                onClick={() => { window.location.href = `${API_BASE_URL}/auth/google`; }}
                 className="flex w-full items-center justify-center gap-3 rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-[rgba(255,255,255,0.06)]"
               >
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-[10px] font-bold text-white">

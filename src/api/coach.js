@@ -3,7 +3,7 @@
  * Same pattern as client.js — real endpoint first, mock fallback.
  */
 
-import { apiGet, apiPost } from "./api";
+import { apiGet, apiPost, apiPatch } from "./api";
 
 /* ─── coach profile ───────────────────────────────────────────────── */
 
@@ -65,7 +65,9 @@ export async function fetchUpcomingSessions(coachId) {
 
 export async function fetchCoachAvailability(coachId) {
   try {
-    return await apiGet(`/roles/coach/${coachId}/availability`);
+    // Backend: GET /roles/coach/coach_availability/{coach_id}
+    const data = await apiGet(`/roles/coach/coach_availability/${coachId}`);
+    return data.coach_availabilities ?? data;
   } catch {
     const times = ["9AM","10AM","11AM","12PM","1PM","2PM","3PM","4PM"];
     return times.map((time) => ({
@@ -77,7 +79,8 @@ export async function fetchCoachAvailability(coachId) {
 
 export async function saveCoachAvailability(coachId, slots) {
   try {
-    return await apiPost(`/roles/coach/${coachId}/availability`, {
+    // Backend: PATCH /roles/coach/information with availabilities field
+    return await apiPatch("/roles/coach/information", {
       availabilities: slots,
     });
   } catch {
@@ -127,5 +130,86 @@ export async function fetchCoachWorkoutPlans(coachId) {
       { id: 2, strata_name: "Advanced Strength",       client_count: 1, last_updated: "1 week ago" },
       { id: 3, strata_name: "Fat Loss HIIT Program",   client_count: 2, last_updated: "3 days ago" },
     ];
+  }
+}
+
+/* ─── client requests (accept / deny) ────────────────────────────── */
+
+export async function fetchClientRequests() {
+  try {
+    // Backend: GET /roles/coach/client_requests → [{client_id, request_id}, ...]
+    return await apiGet("/roles/coach/client_requests");
+  } catch {
+    return [];
+  }
+}
+
+export async function lookupClient(clientId) {
+  try {
+    // Backend: GET /roles/coach/lookup_client/{client_id}
+    return await apiGet(`/roles/coach/lookup_client/${clientId}`);
+  } catch {
+    return null;
+  }
+}
+
+export async function acceptClient(requestId) {
+  // Backend: POST /roles/coach/accept_client/{request_id}
+  return apiPost(`/roles/coach/accept_client/${requestId}`, {});
+}
+
+export async function denyClient(requestId) {
+  // Backend: POST /roles/coach/deny_client/{request_id}
+  return apiPost(`/roles/coach/deny_client/${requestId}`, {});
+}
+
+/* ─── coach request creation (client → coach role) ───────────────── */
+
+export async function requestCoachCreation(payload) {
+  // Backend: POST /roles/coach/request_coach_creation
+  // payload: { availabilities, experiences, certifications, payment_interval, price_cents, specialties? }
+  return apiPost("/roles/coach/request_coach_creation", payload);
+}
+
+/* ─── update coach info ──────────────────────────────────────────── */
+
+export async function updateCoachInfo(payload) {
+  // Backend: PATCH /roles/coach/information
+  // payload: { availabilities?, experiences?, certifications?, specialties? }
+  return apiPatch("/roles/coach/information", payload);
+}
+
+/* ─── workout creation (coach-only) ──────────────────────────────── */
+
+export async function createCoachWorkout(workoutData) {
+  // Backend: POST /roles/coach/create_workout
+  return apiPost("/roles/coach/create_workout", workoutData);
+}
+
+export async function createWorkoutActivity(activityData) {
+  // Backend: POST /roles/coach/create_workout_activity
+  return apiPost("/roles/coach/create_workout_activity", activityData);
+}
+
+export async function createWorkoutPlan(planData) {
+  // Backend: POST /roles/coach/create_workout_plan
+  return apiPost("/roles/coach/create_workout_plan", planData);
+}
+
+/* ─── coach reports on clients ───────────────────────────────────── */
+
+export async function submitClientReport(clientId, reportSummary) {
+  try {
+    return await apiPost(`/roles/coach/client_review/${clientId}`, { report_summary: reportSummary });
+  } catch {
+    return { report_id: Date.now() };
+  }
+}
+
+export async function fetchClientReports(clientId) {
+  try {
+    return await apiGet(`/roles/coach/reports/${clientId}`);
+  } catch {
+    return { reports: [] };
   }
 }

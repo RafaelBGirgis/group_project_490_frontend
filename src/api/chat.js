@@ -1,14 +1,33 @@
 /**
  * Chat API calls.
  * Same pattern — real endpoint first, mock fallback.
+ *
+ * Backend endpoints (under /roles/shared/chat):
+ *   POST /new_chat         — create a new chat for a relationship
+ *   POST /send_message/{chatId} — send a message (query param: message_text)
+ *   GET  /get_messages/{chatId} — paginated messages
  */
 
-import { apiGet, apiPost } from "./api";
+import { apiGet, apiPost, apiPatch, apiDelete } from "./api";
+
+/* ─── create a new chat ─────────────────────────────────────────── */
+
+export async function createChat(relationshipId) {
+  try {
+    // Backend: POST /roles/shared/chat/new_chat → { chat_id }
+    return await apiPost("/roles/shared/chat/new_chat", {
+      relationship_id: relationshipId,
+    });
+  } catch {
+    return { chat_id: Date.now() };
+  }
+}
 
 /* ─── conversations list ─────────────────────────────────────────── */
 
 export async function fetchConversations(accountId, role = "client") {
   try {
+    // No direct "list conversations" endpoint in backend — keep mock for now
     return await apiGet(`/chat/conversations?account_id=${accountId}`);
   } catch {
     // Mock data based on role
@@ -43,7 +62,6 @@ export async function fetchConversations(accountId, role = "client") {
         },
       ];
     } else {
-      // Client conversations
       return [
         {
           id: 1,
@@ -70,9 +88,14 @@ export async function fetchConversations(accountId, role = "client") {
 
 /* ─── messages for a conversation ────────────────────────────────── */
 
-export async function fetchMessages(chatId) {
+export async function fetchMessages(chatId, skip = 0, limit = 50) {
   try {
-    return await apiGet(`/chat/${chatId}/messages`);
+    // Backend: GET /roles/shared/chat/get_messages/{chat_id}?skip=&limit=
+    const data = await apiGet(
+      `/roles/shared/chat/get_messages/${chatId}?skip=${skip}&limit=${limit}`
+    );
+    // Backend returns { messages: [...] }
+    return data.messages ?? data;
   } catch {
     const now = new Date();
     const t = (mins) => {
@@ -80,9 +103,7 @@ export async function fetchMessages(chatId) {
       return d.toISOString();
     };
 
-    // Mock messages based on chatId
     if (chatId === 1) {
-      // Coach conversation with client (John Doe)
       return [
         { id: 1, from_account_id: 201, content: "Hey Coach! How's my progress looking?", created_at: t(120), is_read: true },
         { id: 2, from_account_id: 0,   content: "Looking great! You're hitting all your targets.", created_at: t(115), is_read: true },
@@ -93,26 +114,15 @@ export async function fetchMessages(chatId) {
         { id: 7, from_account_id: 0,   content: "Great work today! Keep it up.", created_at: t(5), is_read: false },
       ];
     } else if (chatId === 2) {
-      // Coach conversation with client (Sarah Chen)
       return [
         { id: 1, from_account_id: 202, content: "Hit a new PR today!", created_at: t(1440), is_read: true },
         { id: 2, from_account_id: 0,   content: "Congratulations! That's excellent progress.", created_at: t(1435), is_read: true },
       ];
-    } else if (chatId === 3) {
-      // Coach conversation with client (Mike Johnson)
-      return [
-        { id: 1, from_account_id: 203, content: "Question about my diet plan", created_at: t(30), is_read: false },
-      ];
     } else {
-      // Client conversations with coaches
       return [
         { id: 1, from_account_id: 101, content: "Hey! How's your training going this week?", created_at: t(120), is_read: true },
         { id: 2, from_account_id: 0,   content: "Pretty good! Hit a new PR on bench press 195 lbs.", created_at: t(115), is_read: true },
         { id: 3, from_account_id: 101, content: "That's awesome! You've been making great progress.", created_at: t(110), is_read: true },
-        { id: 4, from_account_id: 101, content: "I updated your program for next week. Added some volume on the accessories.", created_at: t(60), is_read: true },
-        { id: 5, from_account_id: 0,   content: "Sounds good, I'll check it out.", created_at: t(55), is_read: true },
-        { id: 6, from_account_id: 101, content: "Also, make sure you're hitting your protein target at least 160g.", created_at: t(30), is_read: false },
-        { id: 7, from_account_id: 101, content: "Great work today! Keep it up.", created_at: t(5), is_read: false },
       ];
     }
   }
@@ -122,7 +132,13 @@ export async function fetchMessages(chatId) {
 
 export async function sendMessage(chatId, content) {
   try {
-    return await apiPost(`/chat/${chatId}/messages`, { content });
+    // Backend: POST /roles/shared/chat/send_message/{chat_id}?message_text=...
+    // The backend takes message_text as a query parameter
+    const encoded = encodeURIComponent(content);
+    return await apiPost(
+      `/roles/shared/chat/send_message/${chatId}?message_text=${encoded}`,
+      {}
+    );
   } catch {
     return {
       id: Date.now(),
@@ -132,4 +148,53 @@ export async function sendMessage(chatId, content) {
       is_read: true,
     };
   }
+}
+
+/* ─── relationship management ────────────────────────────────────── */
+
+export async function deleteCoachRequest(requestId) {
+  try {
+    return await apiDelete(`/roles/shared/client_coach_relationship/delete_coach_request/${requestId}`);
+  } catch {
+    return { message: "Request deleted successfully" };
+  }
+}
+
+export async function terminateRelationship(relationshipId) {
+  try {
+    return await apiPost(
+      `/roles/shared/client_coach_relationship/terminate_relationship/${relationshipId}`,
+      {}
+    );
+  } catch {
+    return { details: "success" };
+  }
+}
+
+/* ─── shared account updates ─────────────────────────────────────── */
+
+export async function updateAccount(payload) {
+  try {
+    // Backend: PATCH /roles/shared/account/update
+    // payload: { age?, email?, bio?, pfp_url?, gender? }
+    return await apiPatch("/roles/shared/account/update", payload);
+  } catch {
+    return null;
+  }
+}
+
+export async function uploadProfilePicture(file) {
+  const token = localStorage.getItem("jwt");
+  const API_BASE = import.meta.env.PROD ? "https://api.till-failure.us" : "";
+  const formData = new FormData();
+  formData.append("file", file);
+  const headers = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${API_BASE}/roles/shared/account/update_pfp`, {
+    method: "POST",
+    headers,
+    body: formData,
+  });
+  if (!res.ok) throw new Error("Upload failed");
+  return res.json();
 }

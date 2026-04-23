@@ -139,6 +139,31 @@ export async function deleteExercise(exerciseId) {
    ANALYTICS — daily/weekly/monthly active users over time
    ═══════════════════════════════════════════════════════════════════════ */
 
+/* ═══════════════════════════════════════════════════════════════════════
+   COACH REQUESTS — admin reviews pending coach applications
+   ═══════════════════════════════════════════════════════════════════════ */
+
+export async function fetchCoachRequests(skip = 0, limit = 20) {
+  try {
+    // Backend: GET /roles/admin/query/coach_requests?skip=&limit=
+    return await apiGet(`/roles/admin/query/coach_requests?skip=${skip}&limit=${limit}`);
+  } catch {
+    return [];
+  }
+}
+
+export async function resolveCoachRequest(coachRequestId, isApproved) {
+  // Backend: POST /roles/admin/resolve_coach_request
+  return apiPost("/roles/admin/resolve_coach_request", {
+    coach_request_id: coachRequestId,
+    is_approved: isApproved,
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ANALYTICS — daily/weekly/monthly active users over time
+   ═══════════════════════════════════════════════════════════════════════ */
+
 export async function fetchAnalytics() {
   try {
     return await apiGet("/admin/analytics");

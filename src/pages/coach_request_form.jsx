@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Navbar } from "../components/navbar";
+import { requestCoachCreation } from "../api/coach";
 
 const SPECIALIZATION_OPTIONS = [
   "Strength Training",
@@ -18,7 +19,7 @@ const SPECIALIZATION_OPTIONS = [
 function CoachRequestFormPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
+  const API_BASE_URL = import.meta.env.PROD ? "https://api.till-failure.us" : "";
   const mode = searchParams.get("mode") || "create";
   const isViewMode = mode === "view";
   const isEditMode = mode === "edit";
@@ -128,7 +129,9 @@ function CoachRequestFormPage() {
     }));
   };
 
-  const handleSubmit = (e) => {
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitMessage("");
 
@@ -154,15 +157,42 @@ function CoachRequestFormPage() {
     }
 
     setError("");
-    const payload = {
-      ...form,
-      yearsExperience: Number(form.yearsExperience),
-      status: "submitted",
-      submittedAt: new Date().toISOString(),
+    setSubmitting(true);
+
+    // Build backend-compatible payload
+    const backendPayload = {
+      availabilities: [],  // User can fill in availability later
+      experiences: form.experiences.map((exp) => ({
+        title: exp.title,
+        organization: exp.organization,
+        description: exp.description || "",
+      })),
+      certifications: form.certifications.map((cert) => ({
+        name: cert.title,
+        issuer: cert.issuer,
+        description: cert.description || "",
+      })),
+      payment_interval: "monthly",   // Default, can be made configurable
+      price_cents: 0,                // Default, admin can adjust later
+      specialties: form.specializations,
     };
-    const key = requestStorageKey || "coachRequestDraft";
-    localStorage.setItem(key, JSON.stringify(payload));
-    setSubmitMessage(isEditMode ? "Coach request updated." : "Coach request form submitted.");
+
+    try {
+      await requestCoachCreation(backendPayload);
+      // Also save locally as a backup
+      const key = requestStorageKey || "coachRequestDraft";
+      localStorage.setItem(key, JSON.stringify({
+        ...form,
+        yearsExperience: Number(form.yearsExperience),
+        status: "submitted",
+        submittedAt: new Date().toISOString(),
+      }));
+      setSubmitMessage(isEditMode ? "Coach request updated." : "Coach request submitted successfully! An admin will review your application.");
+    } catch (err) {
+      setError(err.message || "Failed to submit coach request. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const addCertification = () => {
@@ -618,9 +648,10 @@ function CoachRequestFormPage() {
               ) : (
                 <button
                   type="submit"
-                  className="rounded-xl bg-gradient-to-r from-amber-500 to-orange-400 px-5 py-3 text-sm font-semibold text-white"
+                  disabled={submitting}
+                  className="rounded-xl bg-gradient-to-r from-amber-500 to-orange-400 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {isEditMode ? "Save Request" : "Submit Request"}
+                  {submitting ? "Submitting..." : isEditMode ? "Save Request" : "Submit Request"}
                 </button>
               )}
             </div>

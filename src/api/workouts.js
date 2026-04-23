@@ -361,3 +361,65 @@ export async function fetchAssignedWorkouts(coachId) {
     ];
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SHARED FITNESS ENDPOINTS — search workouts, activities, equipment
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/** Search workouts in the backend database */
+export async function searchWorkouts({ text, workout_type, equiptment_id, skip = 0, limit = 20 } = {}) {
+  try {
+    const params = new URLSearchParams();
+    if (text)           params.set("text", text);
+    if (workout_type)   params.set("workout_type", workout_type);
+    if (equiptment_id)  params.set("equiptment_id", equiptment_id);
+    params.set("skip", skip);
+    params.set("limit", limit);
+    return await apiGet(`/roles/shared/fitness/query/workout?${params}`);
+  } catch {
+    return [];
+  }
+}
+
+/** Get activities for a workout */
+export async function fetchWorkoutActivities(workoutId, skip = 0, limit = 50) {
+  try {
+    return await apiGet(`/roles/shared/fitness/query/activity?workout_id=${workoutId}&skip=${skip}&limit=${limit}`);
+  } catch {
+    return [];
+  }
+}
+
+/** Get supported equipment list */
+export async function fetchSupportedEquipment(skip = 0, limit = 50) {
+  try {
+    return await apiGet(`/roles/shared/fitness/query/supported_equiptment?skip=${skip}&limit=${limit}`);
+  } catch {
+    return [];
+  }
+}
+
+/** Create a workout plan (shared — any authenticated user) */
+export async function createWorkoutPlan(planData) {
+  // Backend: POST /roles/shared/fitness/plan
+  // planData: { strata_name, activities: [{workout_activity_id, planned_duration?, planned_reps?, planned_sets?}] }
+  return apiPost("/roles/shared/fitness/plan", planData);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   COACH FITNESS ENDPOINTS — create workouts & activities
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/** Create a new workout (coach-only) via the fitness endpoint */
+export async function createFitnessWorkout(payload) {
+  // Backend: POST /roles/coach/fitness/workout
+  // payload: { name, description, instructions, workout_type, equipment: [{equiptment_id?, name?, description?, is_required, is_recommended}] }
+  return apiPost("/roles/coach/fitness/workout", payload);
+}
+
+/** Create a workout activity (coach-only) via the fitness endpoint */
+export async function createFitnessActivity(payload) {
+  // Backend: POST /roles/coach/fitness/activity
+  // payload: { workout_id, intensity_measure?, intensity_value?, estimated_calories_per_unit_frequency }
+  return apiPost("/roles/coach/fitness/activity", payload);
+}

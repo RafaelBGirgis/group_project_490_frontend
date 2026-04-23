@@ -28,8 +28,12 @@ export async function apiFetch(path, opts = {}) {
 }
 
 /** Convenience wrappers */
-export const apiGet  = (path) => apiFetch(path);
-export const apiPost = (path, body) =>
+export const apiGet    = (path) => apiFetch(path);
+export const apiPost   = (path, body) =>
   apiFetch(path, { method: "POST", body: JSON.stringify(body) });
-export const apiPut  = (path, body) =>
+export const apiPut    = (path, body) =>
   apiFetch(path, { method: "PUT", body: JSON.stringify(body) });
+export const apiPatch  = (path, body) =>
+  apiFetch(path, { method: "PATCH", body: JSON.stringify(body) });
+export const apiDelete = (path) =>
+  apiFetch(path, { method: "DELETE" });

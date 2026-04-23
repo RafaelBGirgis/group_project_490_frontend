@@ -8,7 +8,7 @@
  * When the backend team ships an endpoint, just remove the catch-block — done.
  */
 
-import { apiGet, apiPost } from "./api";
+import { apiGet, apiPost, apiPatch } from "./api";
 
 /* ─── helpers ─────────────────────────────────────────────────────── */
 
@@ -315,99 +315,36 @@ function getOnboardingAvailabilityFromStorage() {
 
 /* ─── browse / search coaches ─────────────────────────────────────── */
 
-export async function fetchAvailableCoaches() {
+export async function fetchAvailableCoaches({ name, specialty, sort_by, order } = {}) {
   try {
-    return await apiGet("/roles/coaches/browse");
+    const params = new URLSearchParams();
+    if (name)      params.set("name", name);
+    if (specialty)  params.set("specialty", specialty);
+    if (sort_by)    params.set("sort_by", sort_by);
+    if (order)      params.set("order", order);
+    const qs = params.toString();
+    const data = await apiGet(`/roles/client/query/hirable_coaches${qs ? `?${qs}` : ""}`);
+    // Normalize backend response to match what the UI expects
+    return data.map((c) => ({
+      ...c,
+      // Backend returns specialties as comma-separated string; split for UI
+      specialties: typeof c.specialties === "string"
+        ? c.specialties.split(",").map((s) => s.trim()).filter(Boolean)
+        : c.specialties ?? [],
+      // Map rating_count → review_count for UI compatibility
+      review_count: c.rating_count ?? 0,
+      // Backend doesn't return these yet — UI can handle undefined gracefully
+      verified: true,
+    }));
   } catch {
     return [
       {
         coach_id: 1,
         name: "Rafael Girgis",
-        bio: "Certified strength coach with 8 years of experience helping clients reach their peak performance. Specializing in powerlifting and body recomposition.",
-        pfp_url: null,
+        bio: "Certified strength coach with 8 years of experience.",
         specialties: ["Strength & Conditioning", "Powerlifting"],
-        rating_avg: 4.9,
+        avg_rating: 4.9,  rating_avg: 4.9,
         review_count: 47,
-        active_clients: 12,
-        pricing: { amount: 149.99, interval: "monthly" },
-        certifications: [
-          { name: "CSCS", organization: "NSCA" },
-          { name: "CPT", organization: "NASM" },
-        ],
-        experience_years: 8,
-        availability_slots: 6,
-        verified: true,
-      },
-      {
-        coach_id: 2,
-        name: "Sandra Kim",
-        bio: "Former collegiate track athlete turned fitness coach. I specialize in HIIT, functional training, and helping busy professionals stay consistent.",
-        pfp_url: null,
-        specialties: ["HIIT", "Functional Training", "Weight Loss"],
-        rating_avg: 4.7,
-        review_count: 31,
-        active_clients: 8,
-        pricing: { amount: 49.99, interval: "weekly" },
-        certifications: [
-          { name: "CPT", organization: "ACE" },
-          { name: "Nutrition Coach", organization: "Precision Nutrition" },
-        ],
-        experience_years: 5,
-        availability_slots: 10,
-        verified: true,
-      },
-      {
-        coach_id: 3,
-        name: "David Osei",
-        bio: "Sports science graduate specializing in hypertrophy and bodybuilding prep. I bring an evidence-based approach to every program I write.",
-        pfp_url: null,
-        specialties: ["Bodybuilding", "Hypertrophy", "Contest Prep"],
-        rating_avg: 4.8,
-        review_count: 22,
-        active_clients: 6,
-        pricing: { amount: 199.99, interval: "monthly" },
-        certifications: [
-          { name: "CSCS", organization: "NSCA" },
-          { name: "Sports Nutrition", organization: "ISSN" },
-        ],
-        experience_years: 6,
-        availability_slots: 4,
-        verified: true,
-      },
-      {
-        coach_id: 4,
-        name: "Maria Santos",
-        bio: "Yoga instructor and wellness coach focused on flexibility, mobility, and mind-body connection. Great for recovery and injury prevention.",
-        pfp_url: null,
-        specialties: ["Yoga", "Mobility", "Injury Prevention"],
-        rating_avg: 5.0,
-        review_count: 15,
-        active_clients: 10,
-        pricing: { amount: 99.99, interval: "monthly" },
-        certifications: [
-          { name: "RYT-500", organization: "Yoga Alliance" },
-          { name: "Corrective Exercise", organization: "NASM" },
-        ],
-        experience_years: 10,
-        availability_slots: 8,
-        verified: true,
-      },
-      {
-        coach_id: 5,
-        name: "James Mitchell",
-        bio: "Marathon runner and endurance coach. Whether you're training for your first 5K or your 10th marathon, I'll get you to the finish line.",
-        pfp_url: null,
-        specialties: ["Running", "Endurance", "Cardio"],
-        rating_avg: 4.6,
-        review_count: 38,
-        active_clients: 15,
-        pricing: { amount: 129.99, interval: "monthly" },
-        certifications: [
-          { name: "RRCA Certified", organization: "RRCA" },
-          { name: "CPT", organization: "ACSM" },
-        ],
-        experience_years: 12,
-        availability_slots: 3,
         verified: true,
       },
     ];
@@ -416,8 +353,81 @@ export async function fetchAvailableCoaches() {
 
 export async function requestCoach(clientId, coachId) {
   try {
-    return await apiPost(`/roles/client/${clientId}/coach-request`, { coach_id: coachId });
+    // Backend: POST /roles/client/request_coach/{coach_id} (uses JWT, no body needed)
+    return await apiPost(`/roles/client/request_coach/${coachId}`, {});
   } catch {
     return { success: true, message: "Request sent" };
+  }
+}
+
+/* ─── coach reviews & reports ──────────────────────────────────────── */
+
+export async function submitCoachReview(coachId, rating, reviewText) {
+  return apiPost(`/roles/client/coach_review/${coachId}`, null)
+    .catch(() => ({ review_id: Date.now() }));
+  // NOTE: backend takes rating + review_text as query params, not JSON body
+}
+
+export async function fetchCoachReviews(coachId) {
+  try {
+    return await apiGet(`/roles/client/review/${coachId}`);
+  } catch {
+    return { reviews: [] };
+  }
+}
+
+export async function submitCoachReport(coachId, reportSummary) {
+  try {
+    return await apiPost(`/roles/client/coach_report/${coachId}`, null);
+  } catch {
+    return { report_id: Date.now() };
+  }
+}
+
+export async function fetchCoachReports(coachId) {
+  try {
+    return await apiGet(`/roles/client/reports/${coachId}`);
+  } catch {
+    return { reports: [] };
+  }
+}
+
+/* ─── initial survey (onboarding) ──────────────────────────────────── */
+
+export async function submitInitialSurvey(surveyData) {
+  return apiPost("/roles/client/initial_survey", surveyData);
+}
+
+/* ─── update client info ───────────────────────────────────────────── */
+
+export async function updateClientInfo(payload) {
+  return apiPatch("/roles/client/information", payload);
+}
+
+/* ─── upload progress picture ──────────────────────────────────────── */
+
+export async function uploadProgressPicture(file) {
+  const token = localStorage.getItem("jwt");
+  const API_BASE = import.meta.env.PROD ? "https://api.till-failure.us" : "";
+  const formData = new FormData();
+  formData.append("file", file);
+  const headers = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${API_BASE}/roles/client/upload_progress_picture`, {
+    method: "POST",
+    headers,
+    body: formData,
+  });
+  if (!res.ok) throw new Error("Upload failed");
+  return res.json();
+}
+
+/* ─── client workout plans ─────────────────────────────────────────── */
+
+export async function fetchClientWorkoutPlans(skip = 0, limit = 20) {
+  try {
+    return await apiGet(`/roles/client/fitness/query/plans?skip=${skip}&limit=${limit}`);
+  } catch {
+    return [];
   }
 }

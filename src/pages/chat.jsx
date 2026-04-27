@@ -45,7 +45,7 @@ export default function ChatPage() {
   }, [navigate]);
 
   /* ── determine role from account ─────────────────────────────────── */
-  const role = account && 'coach_id' in account ? "coach" : "client";
+  const role = account?.coach_id ? "coach" : "client";
   const theme = ROLE_THEMES[role] || ROLE_THEMES.client;
   const roleTheme = CHAT_THEME[role];
 
@@ -62,7 +62,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!account) return;
-    fetchConversations(account.id)
+    fetchConversations(account.id, role)
       .then((convos) => {
         const scopedConversations = convos.filter(
           (convo) => convo.partner_role === roleTheme.partnerRole

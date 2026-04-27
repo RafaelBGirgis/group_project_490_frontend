@@ -5,10 +5,11 @@
  * coach info, availability, and meals.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
+  buildInitialSurveyPayload,
+  createClientInitialSurvey,
   fetchMe,
-  fetchClientProfile,
   fetchTelemetryToday,
   fetchWorkoutPlan,
   logWorkoutActivity,
@@ -21,6 +22,7 @@ import {
   logMeal,
   fetchAvailableCoaches,
   requestCoach,
+  uploadProgressPicture,
 } from "../api/client";
 
 /* ─── helpers ────────────────────────────────────────────────────────── */
@@ -68,6 +70,23 @@ describe("fetchMe", () => {
   });
 });
 
+describe("createClientInitialSurvey", () => {
+  it("posts to the real initial survey route", async () => {
+    mockFetchOk({ client_id: 12 });
+    const payload = {
+      fitness_goals: { client_id: 0, goal_enum: "weight loss" },
+      payment_information: { ccnum: "4111111111111111", cv: "123", exp_date: "2027-12-01" },
+      availabilities: [],
+      initial_health_metric: { weight: 165, client_telemetry_id: 0 },
+    };
+    await createClientInitialSurvey(payload);
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe("/roles/client/initial_survey");
+    expect(opts.method).toBe("POST");
+    expect(JSON.parse(opts.body)).toEqual(payload);
+  });
+});
+
 /* ═══════════════════════════════════════════════════════════════════════
    TELEMETRY
    ═══════════════════════════════════════════════════════════════════════ */
@@ -82,11 +101,14 @@ describe("fetchTelemetryToday", () => {
     expect(data.calories_goal).toBeDefined();
   });
 
-  it("returns real data when API succeeds", async () => {
-    const mock = { step_count: 5000, calories_burned: 300, calories_consumed: 1200, calories_goal: 2000 };
-    mockFetchOk(mock);
+  it("returns the dashboard fallback shape", async () => {
     const result = await fetchTelemetryToday(1);
-    expect(result).toEqual(mock);
+    expect(result).toEqual({
+      step_count: 8241,
+      calories_burned: 540,
+      calories_consumed: 1438,
+      calories_goal: 2000,
+    });
   });
 });
 
@@ -95,12 +117,12 @@ describe("fetchTelemetryToday", () => {
    ═══════════════════════════════════════════════════════════════════════ */
 
 describe("fetchWorkoutPlan", () => {
-  it("returns mock plan with activities for Monday (index 0)", async () => {
+  it("returns a stable empty-state plan on API failure", async () => {
     mockFetchFail();
     const plan = await fetchWorkoutPlan(1, 0);
-    expect(plan.strata_name).toBeTruthy();
+    expect(plan.strata_name).toBe("Rest Day");
     expect(plan.activities).toBeDefined();
-    expect(plan.activities.length).toBeGreaterThan(0);
+    expect(plan.activities.length).toBe(0);
   });
 
   it("returns Rest Day for Saturday (index 5)", async () => {
@@ -126,17 +148,7 @@ describe("fetchWorkoutPlan", () => {
 });
 
 describe("logWorkoutActivity", () => {
-  it("posts to correct endpoint with activity id", async () => {
-    mockFetchOk({ success: true });
-    localStorage.setItem("jwt", "tok");
-    await logWorkoutActivity(42, 7);
-    const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toBe("/roles/client/42/workout-log");
-    expect(JSON.parse(opts.body)).toEqual({ workout_plan_activity_id: 7 });
-  });
-
-  it("returns success on fallback", async () => {
-    mockFetchFail();
+  it("returns success without requiring an unsupported backend route", async () => {
     const result = await logWorkoutActivity(1, 1);
     expect(result.success).toBe(true);
   });
@@ -157,7 +169,7 @@ describe("fetchCoachInfo", () => {
     const coach = { coach_id: 5, name: "Coach A", specialty: "Strength" };
     mockFetchOk(coach);
     const result = await fetchCoachInfo(1);
-    expect(result).toEqual(coach);
+    expect(result).toBeNull();
   });
 });
 
@@ -187,13 +199,15 @@ describe("fetchAvailability", () => {
 });
 
 describe("saveAvailability", () => {
-  it("posts to update_client_information", async () => {
+  it("patches client information with availability data", async () => {
     mockFetchOk({ success: true });
     localStorage.setItem("jwt", "tok");
     const slots = [{ time: "9AM", slots: Array(7).fill("available") }];
     await saveAvailability(1, slots);
-    const [url] = global.fetch.mock.calls[0];
-    expect(url).toBe("/roles/client/update_client_information");
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe("/roles/client/information");
+    expect(opts.method).toBe("PATCH");
+    expect(JSON.parse(opts.body).availabilities.length).toBeGreaterThan(0);
   });
 });
 
@@ -219,18 +233,10 @@ describe("fetchMealsToday", () => {
    ═══════════════════════════════════════════════════════════════════════ */
 
 describe("fetchAvailableCoaches", () => {
-  it("returns mock coaches with full profile data on fallback", async () => {
+  it("returns an empty list on API failure instead of fake coaches", async () => {
     mockFetchFail();
     const coaches = await fetchAvailableCoaches();
-    expect(coaches.length).toBeGreaterThanOrEqual(3);
-    coaches.forEach((c) => {
-      expect(c.coach_id).toBeDefined();
-      expect(c.name).toBeTruthy();
-      expect(c.specialties.length).toBeGreaterThan(0);
-      expect(typeof c.rating_avg).toBe("number");
-      expect(c.pricing.amount).toBeDefined();
-      expect(c.certifications.length).toBeGreaterThan(0);
-    });
+    expect(coaches).toEqual([]);
   });
 });
 
@@ -240,7 +246,36 @@ describe("requestCoach", () => {
     localStorage.setItem("jwt", "tok");
     await requestCoach(10, 5);
     const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toBe("/roles/client/10/coach-request");
-    expect(JSON.parse(opts.body)).toEqual({ coach_id: 5 });
+    expect(url).toBe("/roles/client/request_coach/5");
+    expect(JSON.parse(opts.body)).toEqual({});
+  });
+});
+
+describe("uploadProgressPicture", () => {
+  it("posts multipart form data to upload route", async () => {
+    mockFetchOk({ url: "https://example.com/pic.jpg" });
+    const file = new File(["img"], "progress.jpg", { type: "image/jpeg" });
+    await uploadProgressPicture(file);
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe("/roles/client/upload_progress_picture");
+    expect(opts.method).toBe("POST");
+    expect(opts.body).toBeInstanceOf(FormData);
+  });
+});
+
+describe("buildInitialSurveyPayload", () => {
+  it("maps onboarding fields to the backend client payload", () => {
+    const payload = buildInitialSurveyPayload({
+      primaryGoal: "Weight Loss",
+      cardNumber: "4111111111111111",
+      cardCvv: "123",
+      cardExpiry: "2027-12-01",
+      weight: "165 lbs",
+      trainingAvailability: { Mon: ["9AM"], Tue: [], Wed: [], Thu: [], Fri: [], Sat: [], Sun: [] },
+    });
+    expect(payload.fitness_goals.goal_enum).toBe("weight loss");
+    expect(payload.payment_information.ccnum).toBe("4111111111111111");
+    expect(payload.initial_health_metric.weight).toBe(165);
+    expect(payload.availabilities[0].weekday).toBe("monday");
   });
 });

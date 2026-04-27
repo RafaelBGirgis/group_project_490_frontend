@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Navbar } from "../components/navbar";
+import { fetchMe } from "../api/client";
+import { buildCoachRequestPayload, createCoachRequest } from "../api/coach";
 
 const SPECIALIZATION_OPTIONS = [
   "Strength Training",
@@ -18,11 +20,11 @@ const SPECIALIZATION_OPTIONS = [
 function CoachRequestFormPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
   const mode = searchParams.get("mode") || "create";
   const isViewMode = mode === "view";
   const isEditMode = mode === "edit";
   const [loading, setLoading] = useState(true);
+  const [account, setAccount] = useState(null);
   const [error, setError] = useState("");
   const [submitMessage, setSubmitMessage] = useState("");
   const [requestStorageKey, setRequestStorageKey] = useState("");
@@ -69,18 +71,8 @@ function CoachRequestFormPage() {
 
     const loadNameFromSession = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/me`, {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        if (!res.ok) {
-          throw new Error("Failed to load your account session.");
-        }
-
-        const data = await res.json();
+        const data = await fetchMe();
+        setAccount(data);
         const key = `coachRequest:${data.id || data.email || "current"}`;
         setRequestStorageKey(key);
 
@@ -116,7 +108,7 @@ function CoachRequestFormPage() {
     };
 
     loadNameFromSession();
-  }, [API_BASE_URL, navigate]);
+  }, [navigate]);
 
   const toggleSpecialization = (item) => {
     if (isViewMode) return;
@@ -128,7 +120,7 @@ function CoachRequestFormPage() {
     }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitMessage("");
 
@@ -161,8 +153,35 @@ function CoachRequestFormPage() {
       submittedAt: new Date().toISOString(),
     };
     const key = requestStorageKey || "coachRequestDraft";
-    localStorage.setItem(key, JSON.stringify(payload));
-    setSubmitMessage(isEditMode ? "Coach request updated." : "Coach request form submitted.");
+    const onboardingKey = account?.email
+      ? `onboarding:${String(account.email).trim().toLowerCase()}`
+      : "onboarding:current";
+
+    try {
+      if (!isEditMode && !payload.coach_request_id && !payload.backend_submitted) {
+        const onboardingRaw = localStorage.getItem(onboardingKey);
+        const onboardingData = onboardingRaw ? JSON.parse(onboardingRaw) : null;
+        const requestBody = buildCoachRequestPayload(
+          form,
+          onboardingData?.trainingAvailability || {}
+        );
+
+        if (!requestBody.availabilities.length) {
+          setError("Please set your availability in your client onboarding/profile before submitting a coach request.");
+          return;
+        }
+
+        const response = await createCoachRequest(requestBody);
+        payload.coach_request_id = response?.coach_request_id;
+        payload.coach_id = response?.coach_id;
+        payload.backend_submitted = true;
+      }
+
+      localStorage.setItem(key, JSON.stringify(payload));
+      setSubmitMessage(isEditMode ? "Coach request updated locally." : "Coach request form submitted.");
+    } catch (err) {
+      setError(err.message || "Failed to submit coach request.");
+    }
   };
 
   const addCertification = () => {

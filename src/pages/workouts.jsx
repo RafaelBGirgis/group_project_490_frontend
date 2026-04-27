@@ -14,7 +14,9 @@ import {
   fetchAssignableClients,
   fetchAssignedWorkouts,
   fetchWeeklyPlan,
+  publishWeeklyPlan,
   saveWeeklyPlan,
+  fetchSupportedEquipment,
   EXERCISE_DATABASE,
   MUSCLE_GROUPS,
 } from "../api/workouts";
@@ -33,8 +35,7 @@ const CATEGORY_ICONS = {
   Recovery: "🧘",
   General:  "💪",
 };
-
-const EQUIPMENT_OPTIONS = ["Barbell", "Dumbbell", "Cable", "Machine", "Bodyweight", "Bands", "Kettlebell", "Other"];
+const DEFAULT_EQUIPMENT_OPTIONS = ["Barbell", "Dumbbell", "Cable", "Machine", "Bodyweight", "Bands", "Kettlebell", "Other"];
 
 const EMPTY_EXERCISE = {
   name: "", sets: 3, reps: 10, weight: 0, intensity_measure: "lbs", notes: "",
@@ -61,6 +62,7 @@ export default function WorkoutsPage() {
   const [myWorkouts, setMyWorkouts] = useState([]);
   const [assignedWorkouts, setAssignedWorkouts] = useState([]);
   const [clients, setClients] = useState([]);
+  const [equipmentOptions, setEquipmentOptions] = useState(DEFAULT_EQUIPMENT_OPTIONS);
 
   // UI state
   const [tab, setTab] = useState("my"); // "my" | "presets" | "assigned" (coach only)
@@ -118,12 +120,25 @@ export default function WorkoutsPage() {
       setWeeklyPlan(wp);
 
       if (role === "coach" && account.coach_id) {
-        const [aw, cl] = await Promise.all([
+        const [aw, cl, equipment] = await Promise.all([
           fetchAssignedWorkouts(account.coach_id),
           fetchAssignableClients(account.coach_id),
+          fetchSupportedEquipment(),
         ]);
         setAssignedWorkouts(aw);
         setClients(cl);
+        setEquipmentOptions(
+          equipment.length > 0
+            ? Array.from(new Set([...equipment, ...DEFAULT_EQUIPMENT_OPTIONS]))
+            : DEFAULT_EQUIPMENT_OPTIONS
+        );
+      } else {
+        const equipment = await fetchSupportedEquipment().catch(() => []);
+        setEquipmentOptions(
+          equipment.length > 0
+            ? Array.from(new Set([...equipment, ...DEFAULT_EQUIPMENT_OPTIONS]))
+            : DEFAULT_EQUIPMENT_OPTIONS
+        );
       }
       setLoading(false);
     })();
@@ -187,14 +202,18 @@ export default function WorkoutsPage() {
 
   const handleSaveWeeklyPlan = async () => {
     setWeeklySaving(true);
-    // Save just the workout IDs per day
-    const planPayload = {};
-    for (const day of ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]) {
-      planPayload[day] = weeklyPlan[day]?.id ?? null;
-    }
-    await saveWeeklyPlan(role, roleId, planPayload);
+    await saveWeeklyPlan(role, roleId, weeklyPlan);
     setWeeklyDirty(false);
     setWeeklySaving(false);
+  };
+
+  const handlePublishWeeklyPlan = async () => {
+    setWeeklySaving(true);
+    try {
+      await publishWeeklyPlan(role, roleId, weeklyPlan, "Coach Weekly Plan");
+    } finally {
+      setWeeklySaving(false);
+    }
   };
 
   const handleAssign = async () => {
@@ -323,6 +342,7 @@ export default function WorkoutsPage() {
             onSetDay={handleSetDay}
             onClearDay={handleClearDay}
             onSave={handleSaveWeeklyPlan}
+            onPublish={role === "coach" ? handlePublishWeeklyPlan : undefined}
             dirty={weeklyDirty}
             saving={weeklySaving}
           />
@@ -407,6 +427,7 @@ export default function WorkoutsPage() {
           <WorkoutBuilder
             initial={editWorkout}
             theme={theme}
+            equipmentOptions={equipmentOptions}
             onSave={handleSaveWorkout}
             onCancel={() => setEditWorkout(null)}
           />
@@ -649,7 +670,7 @@ function WorkoutView({ workout, theme, onEdit, onDelete, onDuplicate, onAssign }
    WORKOUT BUILDER — create / edit a workout
    ═══════════════════════════════════════════════════════════════════════ */
 
-function WorkoutBuilder({ initial, theme, onSave, onCancel }) {
+function WorkoutBuilder({ initial, theme, equipmentOptions, onSave, onCancel }) {
   const [name, setName] = useState(initial.name ?? "");
   const [description, setDescription] = useState(initial.description ?? "");
   const [category, setCategory] = useState(initial.category ?? "Strength");
@@ -910,7 +931,7 @@ function WorkoutBuilder({ initial, theme, onSave, onCancel }) {
                   className="w-full bg-[#080D19] border border-white/10 rounded-lg px-2 py-1.5 text-sm text-gray-300 focus:outline-none"
                 >
                   <option value="">None</option>
-                  {EQUIPMENT_OPTIONS.map((eq) => (
+                  {(equipmentOptions || DEFAULT_EQUIPMENT_OPTIONS).map((eq) => (
                     <option key={eq} value={eq}>{eq}</option>
                   ))}
                 </select>
@@ -1009,14 +1030,26 @@ function WeeklyPlanner({ weeklyPlan, allWorkouts, theme, onSetDay, onClearDay, o
             <p className="text-orange-400 font-bold text-lg">~{weekTotals.calories} <span className="text-xs font-normal">kcal</span></p>
           </div>
         </div>
-        <button
-          onClick={onSave}
-          disabled={!dirty || saving}
-          className="px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-colors disabled:opacity-30"
-          style={{ backgroundColor: theme.accent }}
-        >
-          {saving ? "Saving..." : dirty ? "Save Plan" : "Saved ✓"}
-        </button>
+        <div className="flex items-center gap-2">
+          {onPublish ? (
+            <button
+              onClick={onPublish}
+              disabled={saving}
+              className="px-5 py-2.5 rounded-xl text-sm font-bold transition-colors disabled:opacity-30 border border-white/10"
+              style={{ backgroundColor: `${theme.accent}20`, color: theme.accentText }}
+            >
+              {saving ? "Publishing..." : "Publish Plan"}
+            </button>
+          ) : null}
+          <button
+            onClick={onSave}
+            disabled={!dirty || saving}
+            className="px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-colors disabled:opacity-30"
+            style={{ backgroundColor: theme.accent }}
+          >
+            {saving ? "Saving..." : dirty ? "Save Plan" : "Saved ✓"}
+          </button>
+        </div>
       </div>
 
       {/* Day grid */}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AvailabilityDetail from "../components/overlays/availability_detail";
+import { buildInitialSurveyPayload, createClientInitialSurvey, fetchMe } from "../api/client";
 
 const PRIMARY_GOALS = [
   "Weight Loss",
@@ -79,10 +80,10 @@ const convertFromSlotsFormat = (slots) => {
 
 function OnboardingPage() {
   const navigate = useNavigate();
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -93,6 +94,9 @@ function OnboardingPage() {
     gender: "",
     bio: "",
     trainingAvailability: { ...EMPTY_TRAINING_AVAILABILITY },
+    cardNumber: "",
+    cardCvv: "",
+    cardExpiry: "",
   });
 
   const onboardingKey = useMemo(() => {
@@ -107,6 +111,9 @@ function OnboardingPage() {
         form.height &&
         form.age &&
         form.gender &&
+        form.cardNumber &&
+        form.cardCvv &&
+        form.cardExpiry &&
         Object.values(form.trainingAvailability).some((slots) => slots.length > 0)
     );
   }, [form]);
@@ -120,18 +127,7 @@ function OnboardingPage() {
 
     const load = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/me`, {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        if (!res.ok) {
-          throw new Error("Unable to load account session.");
-        }
-
-        const account = await res.json();
+        const account = await fetchMe();
         const email = (account.email || localStorage.getItem("active_user_email") || "")
           .trim()
           .toLowerCase();
@@ -154,6 +150,9 @@ function OnboardingPage() {
           age: account.age != null ? String(account.age) : savedData?.age || prev.age,
           gender: account.gender || savedData?.gender || prev.gender,
           bio: account.bio || savedData?.bio || prev.bio,
+          cardNumber: savedData?.cardNumber || prev.cardNumber,
+          cardCvv: savedData?.cardCvv || prev.cardCvv,
+          cardExpiry: savedData?.cardExpiry || prev.cardExpiry,
         }));
       } catch (err) {
         setError(err.message || "Failed to initialize onboarding.");
@@ -163,9 +162,9 @@ function OnboardingPage() {
     };
 
     load();
-  }, [API_BASE_URL, navigate]);
+  }, [navigate]);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!isFormValid) {
       setError("Please complete all required onboarding fields before continuing.");
@@ -173,19 +172,32 @@ function OnboardingPage() {
     }
 
     setError("");
-    const payload = {
+    const localPayload = {
       ...form,
       age: Number(form.age),
       completedAt: new Date().toISOString(),
     };
 
-    localStorage.setItem(onboardingKey, JSON.stringify(payload));
-    if (form.email) {
-      localStorage.setItem(`onboarding_complete:${form.email}`, "true");
-      localStorage.setItem("active_user_email", form.email);
-    }
+    try {
+      setSubmitting(true);
+      const surveyPayload = buildInitialSurveyPayload(form);
+      const response = await createClientInitialSurvey(surveyPayload);
 
-    navigate("/client");
+      localStorage.setItem(onboardingKey, JSON.stringify(localPayload));
+      if (form.email) {
+        localStorage.setItem(`onboarding_complete:${form.email}`, "true");
+        localStorage.setItem("active_user_email", form.email);
+      }
+      if (response?.client_id) {
+        localStorage.setItem("active_client_id", String(response.client_id));
+      }
+
+      navigate("/client");
+    } catch (err) {
+      setError(err.message || "Unable to create your client profile.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -312,13 +324,42 @@ function OnboardingPage() {
               />
             </section>
 
+            <section className="space-y-3">
+              <h2 className="text-sm font-bold uppercase tracking-widest text-slate-400">
+                Payment Information
+              </h2>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <input
+                  value={form.cardNumber}
+                  onChange={(e) => setForm((prev) => ({ ...prev, cardNumber: e.target.value }))}
+                  className="rounded-lg border border-white/10 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
+                  placeholder="Card number"
+                  required
+                />
+                <input
+                  value={form.cardCvv}
+                  onChange={(e) => setForm((prev) => ({ ...prev, cardCvv: e.target.value }))}
+                  className="rounded-lg border border-white/10 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
+                  placeholder="CVV"
+                  required
+                />
+                <input
+                  type="date"
+                  value={form.cardExpiry}
+                  onChange={(e) => setForm((prev) => ({ ...prev, cardExpiry: e.target.value }))}
+                  className="rounded-lg border border-white/10 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
+                  required
+                />
+              </div>
+            </section>
+
             <div className="flex justify-end">
               <button
                 type="submit"
                 className="rounded-xl bg-gradient-to-r from-indigo-500 to-cyan-400 px-6 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={!isFormValid}
+                disabled={!isFormValid || submitting}
               >
-                Complete Onboarding
+                {submitting ? "Creating Profile..." : "Complete Onboarding"}
               </button>
             </div>
           </form>

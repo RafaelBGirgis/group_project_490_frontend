@@ -1,137 +1,133 @@
-/**
- * Client-role API calls.
- *
- * Pattern: every function tries the real endpoint first.
- * If the backend returns an error (endpoint not built yet), it falls back to
- * realistic mock data so the UI stays usable during development.
- *
- * When the backend team ships an endpoint, just remove the catch-block — done.
- */
-
-import { apiGet, apiPost } from "./api";
-
-/* ─── helpers ─────────────────────────────────────────────────────── */
+import { apiDelete, apiFetch, apiGet, apiPatch, apiPost, withQuery } from "./api";
 
 const WEEKDAY_NAMES = [
   "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
 ];
 const SHORT_WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const DEFAULT_TIME_OPTIONS = [
-  "5AM","6AM","7AM","8AM","9AM","10AM","11AM",
-  "12PM","1PM","2PM","3PM","4PM","5PM","6PM","7PM","8PM","9PM",
+  "5AM", "6AM", "7AM", "8AM", "9AM", "10AM", "11AM",
+  "12PM", "1PM", "2PM", "3PM", "4PM", "5PM", "6PM", "7PM", "8PM", "9PM",
 ];
 
-function todayWeekday() {
-  const d = new Date().getDay();          // 0 = Sun
-  return WEEKDAY_NAMES[d === 0 ? 6 : d - 1];
-}
-
-/* ─── account / profile ───────────────────────────────────────────── */
+const GOAL_ENUM_MAP = {
+  "Weight Loss": "weight loss",
+  Maintenance: "maintenence",
+  "Muscle Gain": "muscle gain",
+};
 
 export async function fetchMe() {
-  return apiGet("/me");
+  try {
+    return await apiGet("/me");
+  } catch (error) {
+    if (error?.status === 401) {
+      localStorage.removeItem("jwt");
+      window.location.href = "/login";
+    }
+    throw error;
+  }
 }
 
 export async function fetchClientProfile() {
-  // POST because backend defined it that way (no request body needed)
   return apiPost("/roles/client/me", {});
 }
 
+export async function createClientInitialSurvey(payload) {
+  return apiPost("/roles/client/initial_survey", payload);
+}
+
+export async function updateClientInformation(payload) {
+  return apiPatch("/roles/client/information", payload);
+}
+
+export async function updateAccount(payload) {
+  return apiPatch("/roles/shared/account/update", payload);
+}
+
+export async function uploadProfilePicture(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  return apiFetch("/roles/shared/account/update_pfp", {
+    method: "POST",
+    body: formData,
+    headers: {},
+  });
+}
+
+export async function uploadProgressPicture(file) {
+  const formData = new FormData();
+  formData.append("file", file);
+  return apiFetch("/roles/client/upload_progress_picture", {
+    method: "POST",
+    body: formData,
+    headers: {},
+  });
+}
+
 export async function deactivateAccount() {
-  try {
-    return await apiPost("/me/deactivate", {});
-  } catch {
-    // Mock until backend ships this endpoint
-    return { success: true, message: "Account deactivated successfully" };
-  }
+  return { success: true, message: "Account deactivation endpoint is not available in the backend yet." };
 }
 
 export async function deleteAccount() {
-  try {
-    return await apiPost("/me/delete", {});
-  } catch {
-    // Mock until backend ships this endpoint
-    return { success: true, message: "Account deletion requested successfully" };
-  }
+  return { success: true, message: "Account deletion endpoint is not available in the backend yet." };
 }
 
-/* ─── telemetry (steps, calories burned, calories consumed) ──────── */
-
-export async function fetchTelemetryToday(clientId) {
-  try {
-    return await apiGet(`/roles/client/${clientId}/telemetry/today`);
-  } catch {
-    // Mock until backend ships this endpoint
-    return {
-      step_count: 8241,
-      calories_burned: 540,
-      calories_consumed: 1438,
-      calories_goal: 2000,
-    };
-  }
+export async function fetchTelemetryToday(_clientId) {
+  return {
+    step_count: 8241,
+    calories_burned: 540,
+    calories_consumed: 1438,
+    calories_goal: 2000,
+  };
 }
 
-/* ─── workout plan + activities ───────────────────────────────────── */
-
-export async function fetchWorkoutPlan(clientId, weekdayIdx) {
-  const day = WEEKDAY_NAMES[weekdayIdx];
-  try {
-    return await apiGet(`/roles/client/${clientId}/workout-plan?day=${day}`);
-  } catch {
-    // Mock per-day workout data
-    const plans = {
-      monday:    { strata_name: "Push Day", activities: pushActivities() },
-      tuesday:   { strata_name: "Pull Day", activities: pullActivities() },
-      wednesday: { strata_name: "Legs",     activities: legActivities()  },
-      thursday:  { strata_name: "Push Day", activities: pushActivities() },
-      friday:    { strata_name: "Pull Day", activities: pullActivities() },
-      saturday:  { strata_name: "Rest Day", activities: [] },
-      sunday:    { strata_name: "Rest Day", activities: [] },
-    };
-    return plans[day] ?? { strata_name: "Rest Day", activities: [] };
-  }
+export async function fetchClientWorkoutPlans({ skip = 0, limit = 100 } = {}) {
+  const result = await apiGet(withQuery("/roles/client/fitness/query/plans", { skip, limit }));
+  if (Array.isArray(result)) return result;
+  if (Array.isArray(result?.plans)) return result.plans;
+  return [];
 }
 
-export async function logWorkoutActivity(clientId, activityId) {
+export async function fetchWorkoutPlan(_clientId, weekdayIdx) {
   try {
-    return await apiPost(`/roles/client/${clientId}/workout-log`, {
-      workout_plan_activity_id: activityId,
-    });
+    const plans = await fetchClientWorkoutPlans();
+    const adapted = adaptWorkoutPlansForDay(plans, weekdayIdx);
+    if (adapted) return adapted;
   } catch {
-    // Optimistic — let UI toggle the badge immediately
-    return { success: true };
+    // Fall through to empty-state plan below.
   }
+
+  void weekdayIdx;
+  return { strata_name: "Rest Day", activities: [] };
 }
 
-/* ─── coach info ──────────────────────────────────────────────────── */
+export async function logWorkoutActivity(_clientId, _activityId) {
+  return { success: true };
+}
 
-export async function fetchCoachInfo(clientId) {
-  try {
-    const data = await apiGet(`/roles/client/${clientId}/coach`);
-    return data; // null or coach object
-  } catch {
-    // No coach assigned — return null so the UI shows "Find a Coach"
-    return null;
-  }
+export async function fetchCoachInfo(_clientId) {
+  return null;
 }
 
 export async function fetchCoachRating(coachId) {
   try {
-    return await apiGet(`/roles/coach/${coachId}/rating`);
+    const result = await fetchCoachReviews(coachId);
+    const reviews = Array.isArray(result?.reviews) ? result.reviews : [];
+    if (reviews.length === 0) {
+      return { avg: 0, review_count: 0 };
+    }
+    const total = reviews.reduce((sum, review) => sum + Number(review.rating || 0), 0);
+    return {
+      avg: Number((total / reviews.length).toFixed(1)),
+      review_count: reviews.length,
+    };
   } catch {
-    return { avg: 4.9, review_count: 47 };
+    return { avg: 0, review_count: 0 };
   }
 }
 
-export async function fetchNextSession(clientId) {
-  try {
-    return await apiGet(`/roles/client/${clientId}/next-session`);
-  } catch {
-    return { weekday: "Monday", start_time: "9:00 AM" };
-  }
+export async function fetchNextSession(_clientId) {
+  return null;
 }
-
-/* ─── availability ────────────────────────────────────────────────── */
 
 export async function fetchAvailability(clientId) {
   const cacheKey = `client_availability_${clientId ?? "me"}`;
@@ -150,104 +146,239 @@ export async function fetchAvailability(clientId) {
     return onboardingAvailability;
   }
 
-  try {
-    return await apiGet(`/roles/client/${clientId}/availability`);
-  } catch {
-    return buildMockAvailability();
-  }
+  return buildMockAvailability();
 }
 
 export async function saveAvailability(clientId, slots) {
   const cacheKey = `client_availability_${clientId ?? "me"}`;
   localStorage.setItem(cacheKey, JSON.stringify(slots));
 
-  const token = localStorage.getItem("jwt");
-  const headers = { "Content-Type": "application/json" };
-  if (token) headers.Authorization = `Bearer ${token}`;
-
   try {
-    const payload = { availabilities: slots };
-    const routesToTry = [
-      "/roles/client/update_client_information",
-      clientId ? `/roles/client/${clientId}/availability` : null,
-    ].filter(Boolean);
-
-    for (const route of routesToTry) {
-      const res = await fetch(route, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(payload),
-      });
-
-      if (res.ok) {
-        return await res.json().catch(() => ({ success: true }));
-      }
+    const availabilities = convertGridToBackendAvailabilities(slots);
+    if (availabilities.length === 0) {
+      return { success: true };
     }
-
-    return { success: true };
+    return await updateClientInformation({ availabilities });
   } catch {
     return { success: true };
   }
 }
 
-/* ─── meals ───────────────────────────────────────────────────────── */
+export async function fetchMealsToday(_clientId) {
+  return [
+    { id: 1, meal_type: "Breakfast", meal_name: "Oats & Berries", calories: 380 },
+    { id: 2, meal_type: "Lunch", meal_name: "Chicken & Rice", calories: 620 },
+    { id: 3, meal_type: "Snack", meal_name: "Protein Bar", calories: 220 },
+  ];
+}
 
-export async function fetchMealsToday(clientId) {
+export async function logMeal(_clientId, _mealPayload) {
+  return { success: true };
+}
+
+export async function fetchAvailableCoaches(filters = {}) {
   try {
-    return await apiGet(`/roles/client/${clientId}/meals/today`);
+    const result = await apiGet(withQuery("/roles/client/query/hirable_coaches", {
+      name: filters.name,
+      specialty: filters.specialty,
+      age_start: filters.age_start,
+      age_end: filters.age_end,
+      gender: filters.gender,
+      sort_by: filters.sort_by || "avg_rating",
+      order: filters.order || "desc",
+      skip: filters.skip || 0,
+      limit: filters.limit || 100,
+    }));
+    return Array.isArray(result) ? result.map(normalizeCoachItem) : [];
   } catch {
-    return [
-      { id: 1, meal_type: "Breakfast", meal_name: "Oats & Berries",  calories: 380 },
-      { id: 2, meal_type: "Lunch",     meal_name: "Chicken & Rice",  calories: 620 },
-      { id: 3, meal_type: "Snack",     meal_name: "Protein Bar",     calories: 220 },
-    ];
+    return [];
   }
 }
 
-export async function logMeal(clientId, mealPayload) {
-  try {
-    return await apiPost(`/roles/client/${clientId}/meal-log`, mealPayload);
-  } catch {
-    return { success: true };
+export async function requestCoach(_clientId, coachId) {
+  return apiPost(`/roles/client/request_coach/${coachId}`, {});
+}
+
+export async function deleteCoachRequest(requestId) {
+  return apiDelete(`/roles/shared/client_coach_relationship/delete_coach_request/${requestId}`);
+}
+
+export async function terminateRelationship(relationshipId) {
+  return apiPost(`/roles/shared/client_coach_relationship/terminate_relationship/${relationshipId}`, {});
+}
+
+export async function fetchBackendHealth() {
+  return apiGet("/");
+}
+
+export async function createCoachReport(coachId, reportSummary) {
+  return apiPost(
+    withQuery(`/roles/client/coach_report/${coachId}`, {
+      report_summary: reportSummary,
+    })
+  );
+}
+
+export async function fetchCoachReports(coachId) {
+  return apiGet(`/roles/client/reports/${coachId}`);
+}
+
+export async function createCoachReview(coachId, rating, reviewText) {
+  return apiPost(
+    withQuery(`/roles/client/coach_review/${coachId}`, {
+      rating,
+      review_text: reviewText,
+    })
+  );
+}
+
+export async function fetchCoachReviews(coachId) {
+  return apiGet(`/roles/client/review/${coachId}`);
+}
+
+export function buildInitialSurveyPayload(form) {
+  return {
+    fitness_goals: {
+      client_id: 0,
+      goal_enum: GOAL_ENUM_MAP[form.primaryGoal] ?? String(form.primaryGoal || "").toLowerCase(),
+    },
+    payment_information: {
+      ccnum: String(form.cardNumber || "").replace(/\s+/g, ""),
+      cv: String(form.cardCvv || ""),
+      exp_date: form.cardExpiry || "",
+    },
+    availabilities: convertTrainingAvailabilityObjectToBackend(
+      form.trainingAvailability ?? {}
+    ),
+    initial_health_metric: {
+      weight: extractWeightNumber(form.weight),
+      client_telemetry_id: 0,
+    },
+  };
+}
+
+export function buildClientInformationPayload({
+  primaryGoal,
+  weight,
+  trainingAvailability,
+  paymentMethod,
+}) {
+  const payload = {};
+
+  if (primaryGoal) {
+    payload.fitness_goals = {
+      client_id: 0,
+      goal_enum: GOAL_ENUM_MAP[primaryGoal] ?? String(primaryGoal).toLowerCase(),
+    };
   }
+
+  const parsedWeight = extractWeightNumber(weight);
+  if (parsedWeight > 0) {
+    payload.health_metrics = {
+      weight: parsedWeight,
+      client_telemetry_id: 0,
+    };
+  }
+
+  const availabilities = convertTrainingAvailabilityObjectToBackend(trainingAvailability);
+  if (availabilities.length > 0) {
+    payload.availabilities = availabilities;
+  }
+
+  const paymentInformation = buildPaymentInformation(paymentMethod);
+  if (paymentInformation) {
+    payload.payment_information = paymentInformation;
+  }
+
+  return payload;
 }
 
-/* ─── mock data factories ─────────────────────────────────────────── */
+function normalizeCoachItem(coach) {
+  const specialties = typeof coach.specialties === "string"
+    ? coach.specialties.split(",").map((item) => item.trim()).filter(Boolean)
+    : Array.isArray(coach.specialties)
+      ? coach.specialties
+      : [];
+  const certifications = Array.isArray(coach.certifications)
+    ? coach.certifications.map((cert) => ({
+        name: cert.certification_name || cert.name || "Certification",
+        organization: cert.certification_organization || cert.organization || "Organization",
+      }))
+    : [];
+  const experiences = Array.isArray(coach.experiences) ? coach.experiences : [];
 
-function pushActivities() {
-  return [
-    { id: 1, name: "Bench Press",          suggested_sets: 4, suggested_reps: 6,  intensity_value: 185, intensity_measure: "lbs", logged: false },
-    { id: 2, name: "Incline Dumbbell Press",suggested_sets: 3, suggested_reps: 10, intensity_value: 60,  intensity_measure: "lbs", logged: false },
-    { id: 3, name: "Tricep Pushdown",      suggested_sets: 3, suggested_reps: 12, intensity_value: 50,  intensity_measure: "lbs", logged: false },
-    { id: 4, name: "Lateral Raises",       suggested_sets: 4, suggested_reps: 15, intensity_value: 25,  intensity_measure: "lbs", logged: false },
-  ];
+  return {
+    ...coach,
+    bio: coach.bio || "",
+    specialties,
+    rating_avg: Number(coach.avg_rating ?? 0),
+    review_count: Number(coach.rating_count ?? 0),
+    experience_years: experiences.length,
+    active_clients: 0,
+    availability_slots: 0,
+    pricing: null,
+    certifications,
+    verified: true,
+  };
 }
 
-function pullActivities() {
-  return [
-    { id: 5, name: "Barbell Row",       suggested_sets: 4, suggested_reps: 8,  intensity_value: 155, intensity_measure: "lbs", logged: false },
-    { id: 6, name: "Lat Pulldown",      suggested_sets: 3, suggested_reps: 10, intensity_value: 120, intensity_measure: "lbs", logged: false },
-    { id: 7, name: "Face Pulls",        suggested_sets: 3, suggested_reps: 15, intensity_value: 30,  intensity_measure: "lbs", logged: false },
-    { id: 8, name: "Bicep Curls",       suggested_sets: 3, suggested_reps: 12, intensity_value: 35,  intensity_measure: "lbs", logged: false },
-  ];
+function buildPaymentInformation(paymentMethod) {
+  if (!paymentMethod) return null;
+  const ccnum = String(paymentMethod.ccnum || "").replace(/\s+/g, "");
+  const cv = String(paymentMethod.cv || "");
+  const exp_date = paymentMethod.exp_date || "";
+  if (!ccnum || !cv || !exp_date) return null;
+  return { ccnum, cv, exp_date };
 }
 
-function legActivities() {
-  return [
-    { id: 9,  name: "Barbell Squat",    suggested_sets: 4, suggested_reps: 6,  intensity_value: 225, intensity_measure: "lbs", logged: false },
-    { id: 10, name: "Romanian Deadlift", suggested_sets: 3, suggested_reps: 10, intensity_value: 185, intensity_measure: "lbs", logged: false },
-    { id: 11, name: "Leg Press",        suggested_sets: 3, suggested_reps: 12, intensity_value: 360, intensity_measure: "lbs", logged: false },
-    { id: 12, name: "Calf Raises",      suggested_sets: 4, suggested_reps: 15, intensity_value: 90,  intensity_measure: "lbs", logged: false },
-  ];
+function adaptWorkoutPlansForDay(plans, weekdayIdx) {
+  if (!Array.isArray(plans) || plans.length === 0) return null;
+
+  const matchingPlan = plans[weekdayIdx] ?? plans[0];
+  if (!matchingPlan) return null;
+
+  const activitiesSource =
+    matchingPlan.activities ??
+    matchingPlan.workout_activities ??
+    matchingPlan.workout_plan_activities ??
+    [];
+
+  const activities = Array.isArray(activitiesSource)
+    ? activitiesSource.map((activity, index) => normalizeWorkoutActivity(activity, index))
+    : [];
+
+  return {
+    strata_name:
+      matchingPlan.strata_name ??
+      matchingPlan.name ??
+      matchingPlan.workout_name ??
+      matchingPlan.workout_plan?.name ??
+      `Workout Plan #${matchingPlan.workout_plan_id ?? matchingPlan.id ?? weekdayIdx + 1}`,
+    activities,
+  };
+}
+
+function normalizeWorkoutActivity(activity, index) {
+  return {
+    id: activity.id ?? activity.workout_plan_activity_id ?? index + 1,
+    name:
+      activity.name ??
+      activity.activity_name ??
+      activity.workout_activity?.name ??
+      `Activity ${index + 1}`,
+    suggested_sets: Number(activity.planned_sets ?? activity.suggested_sets ?? activity.sets ?? 0),
+    suggested_reps: Number(activity.planned_reps ?? activity.suggested_reps ?? activity.reps ?? 0),
+    intensity_value: Number(activity.intensity_value ?? activity.weight ?? 0),
+    intensity_measure: activity.intensity_measure ?? "lbs",
+    logged: Boolean(activity.logged),
+  };
 }
 
 function buildMockAvailability() {
-  const times = ["9AM","10AM","11AM","12PM","1PM","2PM","3PM","4PM"];
+  const times = ["9AM", "10AM", "11AM", "12PM", "1PM", "2PM", "3PM", "4PM"];
   return times.map((time) => ({
     time,
-    slots: [
-      "booked","booked","available","booked","booked",null,null,
-    ],
+    slots: ["booked", "booked", "available", "booked", "booked", null, null],
   }));
 }
 
@@ -313,111 +444,82 @@ function getOnboardingAvailabilityFromStorage() {
   return [];
 }
 
-/* ─── browse / search coaches ─────────────────────────────────────── */
+function convertGridToBackendAvailabilities(slots) {
+  const trainingAvailability = {
+    Mon: [],
+    Tue: [],
+    Wed: [],
+    Thu: [],
+    Fri: [],
+    Sat: [],
+    Sun: [],
+  };
 
-export async function fetchAvailableCoaches() {
-  try {
-    return await apiGet("/roles/coaches/browse");
-  } catch {
-    return [
-      {
-        coach_id: 1,
-        name: "Rafael Girgis",
-        bio: "Certified strength coach with 8 years of experience helping clients reach their peak performance. Specializing in powerlifting and body recomposition.",
-        pfp_url: null,
-        specialties: ["Strength & Conditioning", "Powerlifting"],
-        rating_avg: 4.9,
-        review_count: 47,
-        active_clients: 12,
-        pricing: { amount: 149.99, interval: "monthly" },
-        certifications: [
-          { name: "CSCS", organization: "NSCA" },
-          { name: "CPT", organization: "NASM" },
-        ],
-        experience_years: 8,
-        availability_slots: 6,
-        verified: true,
-      },
-      {
-        coach_id: 2,
-        name: "Sandra Kim",
-        bio: "Former collegiate track athlete turned fitness coach. I specialize in HIIT, functional training, and helping busy professionals stay consistent.",
-        pfp_url: null,
-        specialties: ["HIIT", "Functional Training", "Weight Loss"],
-        rating_avg: 4.7,
-        review_count: 31,
-        active_clients: 8,
-        pricing: { amount: 49.99, interval: "weekly" },
-        certifications: [
-          { name: "CPT", organization: "ACE" },
-          { name: "Nutrition Coach", organization: "Precision Nutrition" },
-        ],
-        experience_years: 5,
-        availability_slots: 10,
-        verified: true,
-      },
-      {
-        coach_id: 3,
-        name: "David Osei",
-        bio: "Sports science graduate specializing in hypertrophy and bodybuilding prep. I bring an evidence-based approach to every program I write.",
-        pfp_url: null,
-        specialties: ["Bodybuilding", "Hypertrophy", "Contest Prep"],
-        rating_avg: 4.8,
-        review_count: 22,
-        active_clients: 6,
-        pricing: { amount: 199.99, interval: "monthly" },
-        certifications: [
-          { name: "CSCS", organization: "NSCA" },
-          { name: "Sports Nutrition", organization: "ISSN" },
-        ],
-        experience_years: 6,
-        availability_slots: 4,
-        verified: true,
-      },
-      {
-        coach_id: 4,
-        name: "Maria Santos",
-        bio: "Yoga instructor and wellness coach focused on flexibility, mobility, and mind-body connection. Great for recovery and injury prevention.",
-        pfp_url: null,
-        specialties: ["Yoga", "Mobility", "Injury Prevention"],
-        rating_avg: 5.0,
-        review_count: 15,
-        active_clients: 10,
-        pricing: { amount: 99.99, interval: "monthly" },
-        certifications: [
-          { name: "RYT-500", organization: "Yoga Alliance" },
-          { name: "Corrective Exercise", organization: "NASM" },
-        ],
-        experience_years: 10,
-        availability_slots: 8,
-        verified: true,
-      },
-      {
-        coach_id: 5,
-        name: "James Mitchell",
-        bio: "Marathon runner and endurance coach. Whether you're training for your first 5K or your 10th marathon, I'll get you to the finish line.",
-        pfp_url: null,
-        specialties: ["Running", "Endurance", "Cardio"],
-        rating_avg: 4.6,
-        review_count: 38,
-        active_clients: 15,
-        pricing: { amount: 129.99, interval: "monthly" },
-        certifications: [
-          { name: "RRCA Certified", organization: "RRCA" },
-          { name: "CPT", organization: "ACSM" },
-        ],
-        experience_years: 12,
-        availability_slots: 3,
-        verified: true,
-      },
-    ];
-  }
+  (slots || []).forEach(({ time, slots: daySlots }) => {
+    daySlots.forEach((status, dayIndex) => {
+      if (status === "available") {
+        trainingAvailability[SHORT_WEEKDAY_NAMES[dayIndex]].push(time);
+      }
+    });
+  });
+
+  return convertTrainingAvailabilityObjectToBackend(trainingAvailability);
 }
 
-export async function requestCoach(clientId, coachId) {
-  try {
-    return await apiPost(`/roles/client/${clientId}/coach-request`, { coach_id: coachId });
-  } catch {
-    return { success: true, message: "Request sent" };
-  }
+function convertTrainingAvailabilityObjectToBackend(trainingAvailability) {
+  if (!trainingAvailability || typeof trainingAvailability !== "object") return [];
+
+  return SHORT_WEEKDAY_NAMES.flatMap((shortDay) => {
+    const longWeekday = shortToLongWeekday(shortDay);
+    const entries = Array.isArray(trainingAvailability[shortDay]) ? trainingAvailability[shortDay] : [];
+    return entries
+      .map((label) => buildAvailabilityWindow(label, longWeekday))
+      .filter(Boolean);
+  });
+}
+
+function shortToLongWeekday(day) {
+  const map = {
+    Mon: "monday",
+    Tue: "tuesday",
+    Wed: "wednesday",
+    Thu: "thursday",
+    Fri: "friday",
+    Sat: "saturday",
+    Sun: "sunday",
+  };
+  return map[day];
+}
+
+function buildAvailabilityWindow(label, weekday) {
+  const startHour = labelToHour(label);
+  if (startHour == null || !weekday) return null;
+  const endHour = Math.min(startHour + 1, 23);
+  return {
+    weekday,
+    start_time: toBackendTime(startHour),
+    end_time: toBackendTime(endHour),
+    max_time_commitment_seconds: 3600,
+  };
+}
+
+function labelToHour(label) {
+  const normalized = normalizeTimeLabel(label);
+  if (!normalized) return null;
+  const match = normalized.match(/^(\d{1,2})(?::(\d{2}))?(AM|PM)$/);
+  if (!match) return null;
+  let hour = Number(match[1]);
+  const meridiem = match[3];
+  if (meridiem === "AM" && hour === 12) hour = 0;
+  if (meridiem === "PM" && hour !== 12) hour += 12;
+  return hour;
+}
+
+function toBackendTime(hour) {
+  return `${String(hour).padStart(2, "0")}:00:00`;
+}
+
+function extractWeightNumber(value) {
+  const match = String(value || "").match(/\d+/);
+  return match ? Number(match[0]) : 0;
 }

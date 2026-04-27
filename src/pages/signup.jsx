@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import clientLogo from "../assets/Client Logo.svg";
+import { initiateGoogleOAuth, signup as signupRequest, storeToken } from "../api/auth";
 
 export default function SignupPage() {
   const [formData, setFormData] = useState({
@@ -14,18 +15,6 @@ export default function SignupPage() {
     bio: "",
   });
   const [error, setError] = useState("");
-
-  // Replace with your backend URL
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
-
-  const getErrorMessage = async (response, fallback) => {
-    try {
-      const errorData = await response.json();
-      return errorData?.detail || fallback;
-    } catch {
-      return fallback;
-    }
-  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -51,31 +40,16 @@ export default function SignupPage() {
     }
 
     try {
-      const payload = {
-        email: formData.email.trim(),
-        password: formData.password,
-        name: formData.name.trim(),
-        age: parsedAge,
-        gender: formData.gender,
-      };
-
-      if (formData.pfpUrl.trim()) payload.pfp_url = formData.pfpUrl.trim();
-      if (formData.bio.trim()) payload.bio = formData.bio.trim();
-
-      const res = await fetch(`${API_BASE_URL}/auth/signup`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) {
-        const message = await getErrorMessage(res, "Signup failed");
-        throw new Error(message);
-      }
-
-      const data = await res.json();
-      console.log("Signup successful:", data);
-      localStorage.setItem("jwt", data.access_token);
+      const data = await signupRequest(
+        formData.email,
+        formData.password,
+        formData.name,
+        parsedAge,
+        formData.gender,
+        formData.pfpUrl.trim() || undefined,
+        formData.bio.trim() || undefined
+      );
+      storeToken(data.access_token);
       localStorage.setItem("active_user_email", formData.email.trim().toLowerCase());
       window.location.href = "/onboarding";
     } catch (err) {
@@ -161,6 +135,7 @@ export default function SignupPage() {
             <div className="mt-6">
               <button
                 type="button"
+                onClick={initiateGoogleOAuth}
                 className="flex w-full items-center justify-center gap-3 rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-[rgba(255,255,255,0.06)]"
               >
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-[10px] font-bold text-white">

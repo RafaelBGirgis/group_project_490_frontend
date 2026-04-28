@@ -101,6 +101,11 @@ export function Navbar({ role = "client", userName = "JD", onMessage, onNotifica
     role === "admin" ? adminLogo :
     clientLogo;
 
+  const messagesRoute =
+    role === "coach" ? "/coach/messages" :
+    role === "client" ? "/client/messages" :
+    "/chat";
+
   return (
     <nav className="relative z-10 border-b border-white/5 bg-[#0B1120]">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3">

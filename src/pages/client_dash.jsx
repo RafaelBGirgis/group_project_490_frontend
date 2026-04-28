@@ -33,6 +33,7 @@ import {
   saveAvailability,
   fetchMealsToday,
   logMeal,
+  terminateRelationship,
 } from "../api/client";
 
 const role = "client";
@@ -87,6 +88,7 @@ export default function ClientDash() {
   const [availabilitySlots, setAvailabilitySlots] = useState([]);
   const [prescribedMeals, setPrescribedMeals] = useState([]);
   const [loading, setLoading]           = useState(true);
+  const [relationshipId, setRelationshipId] = useState(null);
 
   /* ── load account + client profile ──────────────────────────────── */
   useEffect(() => {
@@ -135,6 +137,10 @@ export default function ClientDash() {
         setNextSession(session);
         setAvailabilitySlots(availability);
         setPrescribedMeals(meals);
+        if (coachInfo?.coach_id) {
+          const storedRelationshipId = localStorage.getItem(`client_relationship:${clientId}:${coachInfo.coach_id}`);
+          setRelationshipId(storedRelationshipId ? Number(storedRelationshipId) : null);
+        }
       } catch {
         // Individual fetchers have their own fallbacks; if something still
         // throws (e.g. 401 redirect in progress) just stay on skeleton
@@ -187,6 +193,22 @@ export default function ClientDash() {
     } catch {
       setPrescribedMeals((prev) => prev.filter((m) => m.id !== newMeal.id));
       setCaloriesConsumed((prev) => (prev ?? 0) - mealPayload.calories);
+    }
+  };
+
+  const handleTerminateRelationship = async () => {
+    if (!relationshipId) return;
+    if (!window.confirm("End your relationship with this coach?")) return;
+
+    try {
+      await terminateRelationship(relationshipId);
+      if (coach?.coach_id) {
+        localStorage.removeItem(`client_relationship:${clientId}:${coach.coach_id}`);
+      }
+      setCoach(null);
+      setRelationshipId(null);
+    } catch {
+      // keep UI state unchanged on failure
     }
   };
 
@@ -401,6 +423,14 @@ export default function ClientDash() {
                   >
                     📋 View Plan
                   </button>
+                  {relationshipId ? (
+                    <button
+                      className="flex-1 border border-red-500/30 text-red-300 hover:bg-red-500/10 rounded-xl py-2 text-sm transition-colors"
+                      onClick={handleTerminateRelationship}
+                    >
+                      End
+                    </button>
+                  ) : null}
                 </div>
               }
             >
@@ -611,7 +641,7 @@ export default function ClientDash() {
           weekdays={WEEKDAYS}
           role="client"
           onSave={async (updatedSlots) => {
-            await saveAvailability(account.client_id, updatedSlots);
+            await saveAvailability(clientId, updatedSlots);
             setAvailabilitySlots(updatedSlots);
           }}
         />

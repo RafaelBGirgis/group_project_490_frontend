@@ -22,6 +22,8 @@ import {
   updateExercise,
   deleteExercise,
   fetchAnalytics,
+  fetchCoachRequests,
+  resolveCoachRequest,
 } from "../api/admin";
 import RoleRequestsDetail from "../components/overlays/role_requests_detail";
 import ReportsDetail from "../components/overlays/reports_detail";
@@ -280,25 +282,18 @@ export default function AdminDash() {
         if (me?.name) setInitials(me.name.split(" ").map((n) => n[0]).join("").toUpperCase());
       } catch {}
 
-      const [s, u, ex, an] = await Promise.all([
+      const [s, u, ex, an, requests] = await Promise.all([
         fetchAdminStats(),
         fetchAllUsers(),
         fetchExerciseBank(),
         fetchAnalytics(),
+        fetchCoachRequests(),
       ]);
       setStats(s);
       setUsers(u);
       setExercises(ex);
       setAnalytics(an);
-
-      // Mock role requests & reports (keep from original)
-      setRoleRequests([
-        { id: 1, account_name: "Marcus Webb",   requested_role: "Coach",  is_approved: null },
-        { id: 2, account_name: "Priya Sharma",  requested_role: "Coach",  is_approved: null },
-        { id: 3, account_name: "Jordan Lee",    requested_role: "Client", is_approved: null },
-        { id: 4, account_name: "Tanya Okonkwo", requested_role: "Coach",  is_approved: null },
-        { id: 5, account_name: "Sam Rivera",    requested_role: "Client", is_approved: null },
-      ]);
+      setRoleRequests(requests);
       setReports([
         { id: 1, reporter_name: "Aisha Patel",  reported_name: "Coach X", reason: "Inappropriate content", created_at: "1 hr ago" },
         { id: 2, reporter_name: "Chris Nguyen", reported_name: "Coach Y", reason: "No show",               created_at: "3 hrs ago" },
@@ -309,8 +304,15 @@ export default function AdminDash() {
   }, [authed]);
 
   /* ── handlers ────────────────────────────────────────────────────── */
-  const handleApprove = (id) => setRoleRequests((p) => p.map((r) => r.id === id ? { ...r, is_approved: true } : r));
-  const handleReject = (id) => setRoleRequests((p) => p.map((r) => r.id === id ? { ...r, is_approved: false } : r));
+  const handleApprove = async (id) => {
+    await resolveCoachRequest(id, true);
+    setRoleRequests((p) => p.map((r) => r.id === id ? { ...r, is_approved: true } : r));
+  };
+
+  const handleReject = async (id) => {
+    await resolveCoachRequest(id, false);
+    setRoleRequests((p) => p.map((r) => r.id === id ? { ...r, is_approved: false } : r));
+  };
   const handleDismissReport = (id) => setReports((p) => p.filter((r) => r.id !== id));
 
   const handleUserStatusChange = async (userId, newStatus) => {

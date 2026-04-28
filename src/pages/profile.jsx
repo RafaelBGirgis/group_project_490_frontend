@@ -2,8 +2,26 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Navbar } from "../components/navbar";
 import AvailabilityDetail from "../components/overlays/availability_detail";
-import { deactivateAccount, deleteAccount } from "../api/client";
-import { deactivateCoachAccount, deleteCoachAccount } from "../api/coach";
+import {
+  buildClientInformationPayload,
+  deactivateAccount,
+  deleteAccount,
+  fetchClientProfile,
+  fetchMe,
+  updateAccount,
+  updateClientInformation,
+  uploadProgressPicture,
+  uploadProfilePicture,
+} from "../api/client";
+import {
+  buildCoachInformationPayload,
+  deactivateCoachAccount,
+  deleteCoachAccount,
+  fetchCoachAvailability,
+  fetchCoachProfile,
+  saveCoachAvailability,
+  updateCoachInformation,
+} from "../api/coach";
 
 const PRIMARY_GOALS = [
   "Weight Loss",
@@ -90,16 +108,42 @@ const normalizeGenderToSignupValue = (value) => {
   return value || "";
 };
 
+const buildAccountUpdatePayload = ({ age, email, bio, pfp_url, gender }) => {
+  const payload = {};
+
+  const parsedAge = Number(age);
+  if (Number.isFinite(parsedAge) && parsedAge > 0) {
+    payload.age = parsedAge;
+  }
+  if (email) {
+    payload.email = email;
+  }
+  if (typeof bio === "string") {
+    payload.bio = bio;
+  }
+  if (pfp_url) {
+    payload.pfp_url = pfp_url;
+  }
+  if (gender) {
+    payload.gender = gender;
+  }
+
+  return payload;
+};
+
 function ProfilePage({ role = "client" }) {
   const navigate = useNavigate();
   const isCoach = role === "coach";
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 
   const accent = isCoach ? "#F59E0B" : "#3B82F6";
   const accentSoft = isCoach ? "rgba(245, 158, 11, 0.12)" : "rgba(59, 130, 246, 0.12)";
   const accentBorder = isCoach ? "rgba(245, 158, 11, 0.30)" : "rgba(59, 130, 246, 0.30)";
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [saveMessage, setSaveMessage] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [coachProfileData, setCoachProfileData] = useState(null);
   const [coachRequest, setCoachRequest] = useState(null);
   const [coachRequestStorageKey, setCoachRequestStorageKey] = useState("");
 
@@ -172,11 +216,14 @@ function ProfilePage({ role = "client" }) {
 
   const [newPaymentMethod, setNewPaymentMethod] = useState({
     type: "",
-    lastFour: "",
-    expiryMonth: "",
-    expiryYear: "",
+    ccnum: "",
+    cv: "",
+    exp_date: "",
   });
   const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [progressPictures, setProgressPictures] = useState([]);
+  const [uploadingProgressPicture, setUploadingProgressPicture] = useState(false);
+  const [progressPictureError, setProgressPictureError] = useState("");
 
   const fullName = useMemo(
     () => `${profile.firstName} ${profile.lastName}`.trim(),
@@ -189,6 +236,11 @@ function ProfilePage({ role = "client" }) {
     return `${f}${l}`.toUpperCase() || "?";
   }, [profile.firstName, profile.lastName]);
 
+  const progressPicturesStorageKey = useMemo(
+    () => `client_progress_pictures:${String(profile.email || "current").trim().toLowerCase()}`,
+    [profile.email]
+  );
+
   useEffect(() => {
     const token = localStorage.getItem("jwt");
     if (!token) {
@@ -200,18 +252,25 @@ function ProfilePage({ role = "client" }) {
 
     const loadProfile = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/me`, {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        if (!res.ok) {
-          throw new Error("Failed to load profile.");
+        const data = await fetchMe();
+        let clientProfile = null;
+        let coachProfile = null;
+        if (!isCoach && data.client_id) {
+          try {
+            clientProfile = await fetchClientProfile();
+          } catch {
+            clientProfile = null;
+          }
         }
-
-        const data = await res.json();
+        if (isCoach && data.coach_id) {
+          try {
+            coachProfile = await fetchCoachProfile();
+            setCoachProfileData(coachProfile);
+          } catch {
+            coachProfile = null;
+            setCoachProfileData(null);
+          }
+        }
         const [firstName = "", ...rest] = (data.name || "").trim().split(/\s+/);
         const lastName = rest.join(" ");
         const onboardingKey = data.email
@@ -263,6 +322,64 @@ function ProfilePage({ role = "client" }) {
           ),
           profilePicture: data.pfp_url || null,
         }));
+
+        if (!isCoach) {
+          const paymentInfo = clientProfile?.client_account?.payment_information;
+          if (paymentInfo) {
+            setPaymentMethods([
+              {
+                id: paymentInfo.id || Date.now(),
+                type: "credit",
+                lastFour: String(paymentInfo.ccnum || "").slice(-4),
+                expiryMonth: String(paymentInfo.exp_date || "").slice(5, 7),
+                expiryYear: String(paymentInfo.exp_date || "").slice(0, 4),
+                ccnum: paymentInfo.ccnum || "",
+                cv: paymentInfo.cv || "",
+                exp_date: paymentInfo.exp_date || "",
+              },
+            ]);
+          }
+
+          const storedProgressPictures = localStorage.getItem(
+            `client_progress_pictures:${String(data.email || "current").trim().toLowerCase()}`
+          );
+          if (storedProgressPictures) {
+            try {
+              const parsed = JSON.parse(storedProgressPictures);
+              setProgressPictures(Array.isArray(parsed) ? parsed : []);
+            } catch {
+              setProgressPictures([]);
+            }
+          } else {
+            setProgressPictures([]);
+          }
+        }
+
+        if (isCoach) {
+          const coachStorageKey = `coach_profile:${data.coach_id || data.id || "current"}`;
+          const coachStoredRaw = localStorage.getItem(coachStorageKey);
+          let coachStored = null;
+          if (coachStoredRaw) {
+            try {
+              coachStored = JSON.parse(coachStoredRaw);
+            } catch {
+              coachStored = null;
+            }
+          }
+
+          const profileAvailability = await fetchCoachAvailability(data.coach_id);
+          setAvailability(convertFromSlotsFormat(profileAvailability));
+
+          setSpecializations(
+            coachStored?.specializations ||
+            String(coachProfile?.coach_account?.specialties || "")
+              .split(",")
+              .map((item) => item.trim())
+              .filter(Boolean)
+          );
+          setCertifications(Array.isArray(coachStored?.certifications) ? coachStored.certifications : []);
+          setExperiences(Array.isArray(coachStored?.experiences) ? coachStored.experiences : []);
+        }
       } catch (err) {
         setLoadError(err.message || "Failed to load profile.");
       } finally {
@@ -271,10 +388,146 @@ function ProfilePage({ role = "client" }) {
     };
 
     loadProfile();
-  }, [API_BASE_URL, navigate]);
+  }, [isCoach, navigate]);
 
   const handleProfileChange = (field, value) => {
     setProfile((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSaveClientProfile = async () => {
+    setSaveMessage("");
+    setSaveError("");
+    setSavingProfile(true);
+
+    try {
+      let profilePictureUrl =
+        typeof profile.profilePicture === "string" ? profile.profilePicture : null;
+
+      if (profile.profilePicture instanceof File) {
+        const upload = await uploadProfilePicture(profile.profilePicture);
+        profilePictureUrl = upload?.pfp_url || upload?.url || profilePictureUrl;
+        setProfile((prev) => ({
+          ...prev,
+          profilePicture: profilePictureUrl || prev.profilePicture,
+        }));
+      }
+
+      const latestPayment = paymentMethods[0]
+        ? {
+            ccnum: paymentMethods[0].ccnum || "",
+            cv: paymentMethods[0].cv || "",
+            exp_date:
+              paymentMethods[0].exp_date ||
+              `${paymentMethods[0].expiryYear}-${paymentMethods[0].expiryMonth}-01`,
+          }
+        : null;
+
+      const payload = buildClientInformationPayload({
+        primaryGoal: profile.primaryGoal,
+        weight: profile.weight,
+        trainingAvailability: profile.trainingAvailability,
+        paymentMethod: latestPayment,
+      });
+
+      if (Object.keys(payload).length > 0) {
+        await updateClientInformation(payload);
+      }
+
+      const accountPayload = buildAccountUpdatePayload({
+        age: profile.age,
+        email: profile.email,
+        bio: profile.bio,
+        pfp_url: profilePictureUrl,
+        gender: profile.gender,
+      });
+      if (Object.keys(accountPayload).length > 0) {
+        await updateAccount(accountPayload);
+      }
+
+      const onboardingKey = profile.email
+        ? `onboarding:${String(profile.email).trim().toLowerCase()}`
+        : "onboarding:current";
+      const raw = localStorage.getItem(onboardingKey);
+      const existing = raw ? JSON.parse(raw) : {};
+      localStorage.setItem(
+        onboardingKey,
+        JSON.stringify({
+          ...existing,
+          primaryGoal: profile.primaryGoal,
+          weight: profile.weight,
+          height: profile.height,
+          age: profile.age,
+          gender: profile.gender,
+          bio: profile.bio,
+          trainingAvailability: profile.trainingAvailability,
+        })
+      );
+
+      setSaveMessage("Client profile changes saved.");
+    } catch (error) {
+      setSaveError(error.message || "Unable to save your client profile.");
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const handleSaveCoachProfile = async () => {
+    setSaveMessage("");
+    setSaveError("");
+    setSavingProfile(true);
+
+    try {
+      let profilePictureUrl =
+        typeof profile.profilePicture === "string" ? profile.profilePicture : null;
+
+      if (profile.profilePicture instanceof File) {
+        const upload = await uploadProfilePicture(profile.profilePicture);
+        profilePictureUrl = upload?.pfp_url || upload?.url || profilePictureUrl;
+        setProfile((prev) => ({
+          ...prev,
+          profilePicture: profilePictureUrl || prev.profilePicture,
+        }));
+      }
+
+      const payload = buildCoachInformationPayload({
+        availability,
+        certifications,
+        experiences,
+        specializations,
+      });
+
+      if (Object.keys(payload).length > 0) {
+        await updateCoachInformation(payload);
+      }
+
+      const accountPayload = buildAccountUpdatePayload({
+        age: profile.age,
+        email: profile.email,
+        bio: profile.bio,
+        pfp_url: profilePictureUrl,
+        gender: profile.gender,
+      });
+      if (Object.keys(accountPayload).length > 0) {
+        await updateAccount(accountPayload);
+      }
+
+      const coachId = coachProfileData?.coach_account?.id || "current";
+      localStorage.setItem(
+        `coach_profile:${coachId}`,
+        JSON.stringify({
+          availability,
+          certifications,
+          experiences,
+          specializations,
+        })
+      );
+
+      setSaveMessage("Coach profile changes saved.");
+    } catch (error) {
+      setSaveError(error.message || "Unable to save your coach profile.");
+    } finally {
+      setSavingProfile(false);
+    }
   };
 
   const handleDeleteAccountRequest = async () => {
@@ -376,16 +629,62 @@ function ProfilePage({ role = "client" }) {
   };
 
   const addPaymentMethod = () => {
-    if (!newPaymentMethod.type || !newPaymentMethod.lastFour || !newPaymentMethod.expiryMonth || !newPaymentMethod.expiryYear) return;
+    if (!newPaymentMethod.type || !newPaymentMethod.ccnum || !newPaymentMethod.cv || !newPaymentMethod.exp_date) return;
     setPaymentMethods((prev) => [
       ...prev,
       {
         id: Date.now(),
         ...newPaymentMethod,
+        lastFour: String(newPaymentMethod.ccnum).slice(-4),
+        expiryMonth: String(newPaymentMethod.exp_date).slice(5, 7),
+        expiryYear: String(newPaymentMethod.exp_date).slice(0, 4),
       },
     ]);
-    setNewPaymentMethod({ type: "", lastFour: "", expiryMonth: "", expiryYear: "" });
+    setNewPaymentMethod({ type: "", ccnum: "", cv: "", exp_date: "" });
     setShowPaymentForm(false);
+  };
+
+  const handleProgressPictureUpload = async (file) => {
+    if (!file) return;
+
+    setProgressPictureError("");
+    setUploadingProgressPicture(true);
+
+    try {
+      const response = await uploadProgressPicture(file);
+      const url = response?.url || response?.public_url || response?.pfp_url;
+
+      if (!url) {
+        throw new Error("The backend did not return a progress picture URL.");
+      }
+
+      const newEntry = {
+        id: Date.now(),
+        url,
+        uploaded_at: new Date().toISOString(),
+        file_name: file.name,
+      };
+
+      setProgressPictures((prev) => {
+        const updated = [newEntry, ...prev];
+        localStorage.setItem(progressPicturesStorageKey, JSON.stringify(updated));
+        return updated;
+      });
+    } catch (error) {
+      setProgressPictureError(
+        error.message || "Unable to upload your progress picture right now."
+      );
+    } finally {
+      setUploadingProgressPicture(false);
+    }
+  };
+
+  const handleRemoveProgressPicture = (id) => {
+    setProgressPictures((prev) => {
+      const updated = prev.filter((item) => item.id !== id);
+      localStorage.setItem(progressPicturesStorageKey, JSON.stringify(updated));
+      return updated;
+    });
   };
 
   const deleteItem = (setter, id) => {
@@ -433,6 +732,18 @@ function ProfilePage({ role = "client" }) {
           </div>
         )}
 
+        {!loadingProfile && saveError && (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+            {saveError}
+          </div>
+        )}
+
+        {!loadingProfile && saveMessage && (
+          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+            {saveMessage}
+          </div>
+        )}
+
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold">{isCoach ? "Edit Profile" : "Profile Settings"}</h1>
           {isCoach && (
@@ -467,7 +778,9 @@ function ProfilePage({ role = "client" }) {
 
                 <h2 className="mt-4 text-xl font-bold">{fullName}</h2>
                 <p className="text-sm" style={{ color: accent }}>
-                  {isCoach ? "Coach · Verified" : "Client"}
+                  {isCoach
+                    ? `Coach · ${coachProfileData?.coach_account?.verified ? "Verified" : "Pending"}`
+                    : "Client"}
                 </p>
 
                 <label className="mt-5 w-full cursor-pointer rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] px-4 py-3 text-sm font-medium text-slate-200 hover:bg-[rgba(255,255,255,0.05)]">
@@ -487,10 +800,10 @@ function ProfilePage({ role = "client" }) {
             {isCoach && (
               <SidebarCard title="Account Stats">
                 <div className="grid grid-cols-2 gap-3">
-                  <StatBox label="Clients" value="--" />
-                  <StatBox label="Rating" value="--" />
-                  <StatBox label="Reviews" value="--" />
-                  <StatBox label="Coach Since" value="--" />
+                  <StatBox label="Coach ID" value={coachProfileData?.coach_account?.id ?? "--"} />
+                  <StatBox label="Verified" value={coachProfileData?.coach_account?.verified ? "Yes" : "No"} />
+                  <StatBox label="Specialties" value={specializations.length || "--"} />
+                  <StatBox label="Certs" value={certifications.length || "--"} />
                 </div>
               </SidebarCard>
             )}
@@ -792,25 +1105,22 @@ function ProfilePage({ role = "client" }) {
                           </select>
                         </div>
                         <Input
-                          label="Last 4 Digits"
-                          value={newPaymentMethod.lastFour}
-                          onChange={(v) => setNewPaymentMethod((prev) => ({ ...prev, lastFour: v }))}
-                          placeholder="1234"
-                          maxLength="4"
+                          label="Card Number"
+                          value={newPaymentMethod.ccnum}
+                          onChange={(v) => setNewPaymentMethod((prev) => ({ ...prev, ccnum: v }))}
+                          placeholder="4111111111111111"
                         />
                         <Input
-                          label="Expiry Month"
-                          value={newPaymentMethod.expiryMonth}
-                          onChange={(v) => setNewPaymentMethod((prev) => ({ ...prev, expiryMonth: v }))}
-                          placeholder="12"
-                          maxLength="2"
+                          label="CVV"
+                          value={newPaymentMethod.cv}
+                          onChange={(v) => setNewPaymentMethod((prev) => ({ ...prev, cv: v }))}
+                          placeholder="123"
                         />
                         <Input
-                          label="Expiry Year"
-                          value={newPaymentMethod.expiryYear}
-                          onChange={(v) => setNewPaymentMethod((prev) => ({ ...prev, expiryYear: v }))}
-                          placeholder="2025"
-                          maxLength="4"
+                          label="Expiry Date"
+                          value={newPaymentMethod.exp_date}
+                          onChange={(v) => setNewPaymentMethod((prev) => ({ ...prev, exp_date: v }))}
+                          placeholder="2027-12-01"
                         />
                       </div>
 
@@ -829,6 +1139,90 @@ function ProfilePage({ role = "client" }) {
                           Add Payment Method
                         </button>
                       </div>
+                    </div>
+                  )}
+                </div>
+              </Panel>
+            )}
+
+            {!isCoach && (
+              <Panel title="Progress Pictures" accent={accent}>
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-white/6 bg-[#101827] px-4 py-3">
+                    <p className="text-sm font-semibold text-white">Upload a progress picture</p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      This uses the backend upload route and stores the returned image URL in your
+                      local profile view because the backend route does not save it to the database yet.
+                    </p>
+
+                    <label
+                      className="mt-4 inline-flex cursor-pointer items-center rounded-lg px-4 py-2 text-sm font-semibold text-white"
+                      style={{ backgroundColor: accent }}
+                    >
+                      {uploadingProgressPicture ? "Uploading..." : "Choose Image"}
+                      <input
+                        type="file"
+                        className="hidden"
+                        accept="image/*"
+                        disabled={uploadingProgressPicture}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] || null;
+                          handleProgressPictureUpload(file);
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+
+                    {progressPictureError && (
+                      <p className="mt-3 text-xs text-red-300">{progressPictureError}</p>
+                    )}
+                  </div>
+
+                  {progressPictures.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-white/8 bg-[#101827] px-4 py-8 text-center text-sm text-slate-500">
+                      No progress pictures uploaded yet.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {progressPictures.map((picture) => (
+                        <div
+                          key={picture.id}
+                          className="overflow-hidden rounded-xl border border-white/6 bg-[#101827]"
+                        >
+                          <img
+                            src={picture.url}
+                            alt={picture.file_name || "Progress"}
+                            className="h-56 w-full bg-[#0F172A] object-cover"
+                          />
+                          <div className="space-y-2 px-4 py-3">
+                            <p className="truncate text-sm font-medium text-white">
+                              {picture.file_name || "Progress photo"}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              Uploaded{" "}
+                              {picture.uploaded_at
+                                ? new Date(picture.uploaded_at).toLocaleString()
+                                : "recently"}
+                            </p>
+                            <div className="flex gap-2">
+                              <a
+                                href={picture.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs font-medium text-slate-300"
+                              >
+                                Open
+                              </a>
+                              <button
+                                onClick={() => handleRemoveProgressPicture(picture.id)}
+                                className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -856,7 +1250,8 @@ function ProfilePage({ role = "client" }) {
                 <AvailabilityDetail
                   slots={convertToSlotsFormat(availability)}
                   weekdays={WEEKDAYS}
-                  onSave={(updatedSlots) => {
+                  onSave={async (updatedSlots) => {
+                    await saveCoachAvailability(coachProfileData?.coach_account?.id, updatedSlots);
                     setAvailability(convertFromSlotsFormat(updatedSlots));
                   }}
                   role="coach"
@@ -951,10 +1346,12 @@ function ProfilePage({ role = "client" }) {
                 Discard
               </button>
               <button
+                onClick={isCoach ? handleSaveCoachProfile : handleSaveClientProfile}
+                disabled={savingProfile}
                 className="rounded-xl px-5 py-3 text-sm font-semibold text-white shadow-lg"
                 style={{ backgroundColor: accent }}
               >
-                Save Changes
+                {savingProfile ? "Saving..." : "Save Changes"}
               </button>
             </div>
 

@@ -23,6 +23,13 @@ const DEFAULT_TIME_OPTIONS = [
   "12PM","1PM","2PM","3PM","4PM","5PM","6PM","7PM","8PM","9PM",
 ];
 
+const normalizeStatus = (value) => {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "booked") return "booked";
+  if (normalized === "available") return "available";
+  return null;
+};
+
 function SlotCellEditable({ status, time, locked, onClick, isCoach }) {
   const base = "rounded-lg py-2.5 text-center text-xs font-medium transition-all";
 
@@ -76,7 +83,9 @@ export default function AvailabilityDetail({
   const [slots, setSlots] = useState(() =>
     (initialSlots ?? []).map((row) => ({
       ...row,
-      slots: [...row.slots],
+      slots: Array.from({ length: 7 }, (_, i) =>
+        normalizeStatus(Array.isArray(row.slots) ? row.slots[i] : null)
+      ),
     }))
   );
   const [saving, setSaving] = useState(false);

@@ -226,4 +226,15 @@ describe("API helper auth behavior", () => {
     expect(opts.method).toBe("PUT");
     expect(JSON.parse(opts.body)).toEqual({ name: "updated" });
   });
+
+  it("apiPatch sends JSON body with PATCH method", async () => {
+    const { apiPatch } = await import("../api/api");
+    mockFetchOk({ success: true });
+    await apiPatch("/update/profile", { goal: "muscle gain" });
+
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe("/update/profile");
+    expect(opts.method).toBe("PATCH");
+    expect(JSON.parse(opts.body)).toEqual({ goal: "muscle gain" });
+  });
 });

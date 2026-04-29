@@ -9,6 +9,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   buildInitialSurveyPayload,
   createClientInitialSurvey,
+  extractUploadedAssetUrl,
   fetchMe,
   fetchTelemetryToday,
   fetchWorkoutPlan,
@@ -29,13 +30,24 @@ import {
 
 function mockFetchOk(data) {
   global.fetch = vi.fn(() =>
-    Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(data) })
+    Promise.resolve({
+      ok: true,
+      status: 200,
+      headers: { get: () => "application/json" },
+      json: () => Promise.resolve(data),
+      text: () => Promise.resolve(typeof data === "string" ? data : JSON.stringify(data)),
+    })
   );
 }
 
 function mockFetchFail(status = 500) {
   global.fetch = vi.fn(() =>
-    Promise.resolve({ ok: false, status, json: () => Promise.resolve({ detail: "err" }) })
+    Promise.resolve({
+      ok: false,
+      status,
+      headers: { get: () => "application/json" },
+      json: () => Promise.resolve({ detail: "err" }),
+    })
   );
 }
 
@@ -238,16 +250,44 @@ describe("fetchAvailableCoaches", () => {
     const coaches = await fetchAvailableCoaches();
     expect(coaches).toEqual([]);
   });
+
+  it("normalizes coach experiences for public profile rendering", async () => {
+    mockFetchOk([
+      {
+        coach_id: 7,
+        name: "Coach A",
+        email: "coach@example.com",
+        specialties: "Strength, Mobility",
+        experiences: [
+          {
+            experience_name: "Iron Gym",
+            experience_title: "Head Coach",
+            experience_description: "Led training programs",
+            experience_start: "2020-01-01",
+            experience_end: "2024-12-31",
+          },
+        ],
+      },
+    ]);
+    const coaches = await fetchAvailableCoaches();
+    expect(coaches[0].experiences[0]).toEqual({
+      title: "Head Coach",
+      organization: "Iron Gym",
+      year: "2020-2024",
+      description: "Led training programs",
+    });
+  });
 });
 
 describe("requestCoach", () => {
-  it("posts to correct endpoint", async () => {
+  it("posts to correct endpoint without a JSON body", async () => {
     mockFetchOk({ success: true });
     localStorage.setItem("jwt", "tok");
     await requestCoach(10, 5);
     const [url, opts] = global.fetch.mock.calls[0];
     expect(url).toBe("/roles/client/request_coach/5");
-    expect(JSON.parse(opts.body)).toEqual({});
+    expect(opts.method).toBe("POST");
+    expect(opts.body).toBeUndefined();
   });
 });
 
@@ -260,6 +300,15 @@ describe("uploadProgressPicture", () => {
     expect(url).toBe("/roles/client/upload_progress_picture");
     expect(opts.method).toBe("POST");
     expect(opts.body).toBeInstanceOf(FormData);
+  });
+});
+
+describe("extractUploadedAssetUrl", () => {
+  it("finds urls across the upload response variants we see in the app", () => {
+    expect(extractUploadedAssetUrl("https://example.com/a.jpg")).toBe("https://example.com/a.jpg");
+    expect(extractUploadedAssetUrl({ public_url: "https://example.com/b.jpg" })).toBe("https://example.com/b.jpg");
+    expect(extractUploadedAssetUrl({ account: { pfp_url: "https://example.com/c.jpg" } })).toBe("https://example.com/c.jpg");
+    expect(extractUploadedAssetUrl({ data: { url: "https://example.com/d.jpg" } })).toBe("https://example.com/d.jpg");
   });
 });
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AvailabilityDetail from "../components/overlays/availability_detail";
 import { buildInitialSurveyPayload, createClientInitialSurvey, fetchMe } from "../api/client";
+import { getOnboardingStorageKey, loadProfileDraft, saveOnboardingDraft } from "../utils/profileDrafts";
 
 const PRIMARY_GOALS = [
   "Weight Loss",
@@ -100,8 +101,7 @@ function OnboardingPage() {
   });
 
   const onboardingKey = useMemo(() => {
-    const email = (form.email || "").trim().toLowerCase();
-    return email ? `onboarding:${email}` : "onboarding:current";
+    return getOnboardingStorageKey(form.email);
   }, [form.email]);
 
   const isFormValid = useMemo(() => {
@@ -133,10 +133,7 @@ function OnboardingPage() {
           .toLowerCase();
 
         localStorage.setItem("active_user_email", email);
-
-        const key = email ? `onboarding:${email}` : "onboarding:current";
-        const saved = localStorage.getItem(key);
-        const savedData = saved ? JSON.parse(saved) : null;
+        const savedData = loadProfileDraft(email);
 
         setForm((prev) => ({
           ...prev,
@@ -153,6 +150,7 @@ function OnboardingPage() {
           cardNumber: savedData?.cardNumber || prev.cardNumber,
           cardCvv: savedData?.cardCvv || prev.cardCvv,
           cardExpiry: savedData?.cardExpiry || prev.cardExpiry,
+          profilePicture: savedData?.profilePicture || prev.profilePicture,
         }));
       } catch (err) {
         setError(err.message || "Failed to initialize onboarding.");
@@ -163,6 +161,14 @@ function OnboardingPage() {
 
     load();
   }, [navigate]);
+
+  useEffect(() => {
+    if (loading || !form.email) {
+      return;
+    }
+
+    saveOnboardingDraft(form);
+  }, [form, loading]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -183,7 +189,7 @@ function OnboardingPage() {
       const surveyPayload = buildInitialSurveyPayload(form);
       const response = await createClientInitialSurvey(surveyPayload);
 
-      localStorage.setItem(onboardingKey, JSON.stringify(localPayload));
+      saveOnboardingDraft(localPayload);
       if (form.email) {
         localStorage.setItem(`onboarding_complete:${form.email}`, "true");
         localStorage.setItem("active_user_email", form.email);

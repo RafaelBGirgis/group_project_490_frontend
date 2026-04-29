@@ -27,6 +27,7 @@ import {
 } from "../api/admin";
 import RoleRequestsDetail from "../components/overlays/role_requests_detail";
 import ReportsDetail from "../components/overlays/reports_detail";
+import { saveCoachRequestResolution } from "../utils/coachRequests";
 
 const role = "admin";
 const MUSCLE_GROUPS = ["Chest", "Back", "Shoulders", "Legs", "Arms", "Core", "Cardio"];
@@ -306,11 +307,13 @@ export default function AdminDash() {
   /* ── handlers ────────────────────────────────────────────────────── */
   const handleApprove = async (id) => {
     await resolveCoachRequest(id, true);
+    saveCoachRequestResolution(id, "approved");
     setRoleRequests((p) => p.map((r) => r.id === id ? { ...r, is_approved: true } : r));
   };
 
   const handleReject = async (id) => {
     await resolveCoachRequest(id, false);
+    saveCoachRequestResolution(id, "rejected");
     setRoleRequests((p) => p.map((r) => r.id === id ? { ...r, is_approved: false } : r));
   };
   const handleDismissReport = (id) => setReports((p) => p.filter((r) => r.id !== id));

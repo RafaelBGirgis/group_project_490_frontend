@@ -47,6 +47,7 @@ export async function deleteCoachAccount() {
 }
 
 export async function fetchMyClients(_coachId) {
+  const acceptedClients = readAcceptedCoachClients(_coachId);
   try {
     const items = await fetchClientRequests();
     const clients = await Promise.all(items.map(async (item) => {
@@ -74,9 +75,9 @@ export async function fetchMyClients(_coachId) {
         };
       }
     }));
-    return clients;
+    return mergeClientsById(clients, acceptedClients);
   } catch {
-    return [];
+    return acceptedClients;
   }
 }
 
@@ -94,11 +95,11 @@ export async function lookupClient(clientId) {
 }
 
 export async function acceptClientRequest(requestId) {
-  return apiPost(`/roles/coach/accept_client/${requestId}`, {});
+  return apiPost(`/roles/coach/accept_client/${requestId}`);
 }
 
 export async function denyClientRequest(requestId) {
-  return apiPost(`/roles/coach/deny_client/${requestId}`, {});
+  return apiPost(`/roles/coach/deny_client/${requestId}`);
 }
 
 export async function createClientReview(clientId, reportSummary) {
@@ -112,66 +113,40 @@ export async function fetchClientReports(clientId) {
 }
 
 export async function fetchCoachAvailability(coachId) {
-  const cacheKey = `coach_profile:${coachId ?? "me"}`;
-  const raw = localStorage.getItem(cacheKey);
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw);
-      const grid = convertTrainingAvailabilityToGrid(parsed.availability);
-      if (grid.length > 0) return grid;
-    } catch {
-      localStorage.removeItem(cacheKey);
-    }
-  }
+  if (!coachId) return [];
 
   try {
     const response = await apiGet(`/roles/coach/coach_availability/${coachId}`);
     const grid = convertBackendAvailabilitiesToGrid(response?.coach_availabilities || []);
-    if (grid.length > 0) {
-      return grid;
-    }
+    return grid;
   } catch {
-    // Use local fallback below.
+    return [];
   }
-
-  const requestRaw =
-    localStorage.getItem(`coachRequest:${localStorage.getItem("active_user_email") || "current"}`) ||
-    localStorage.getItem("coachRequestDraft");
-  if (requestRaw) {
-    try {
-      const parsed = JSON.parse(requestRaw);
-      const grid = convertTrainingAvailabilityToGrid(parsed.availability);
-      if (grid.length > 0) return grid;
-    } catch {
-      // Ignore malformed storage.
-    }
-  }
-
-  const times = ["9AM", "10AM", "11AM", "12PM", "1PM", "2PM", "3PM", "4PM"];
-  return times.map((time) => ({
-    time,
-    slots: ["available", "booked", "available", "booked", "available", null, null],
-  }));
 }
 
 export async function saveCoachAvailability(coachId, slots) {
+  if (!coachId) {
+    throw new Error("Missing coach id for availability update.");
+  }
   const cacheKey = `coach_profile:${coachId ?? "me"}`;
+  const availability = convertFromSlotsFormat(slots);
+  const backendAvailabilities = convertTrainingAvailabilityObjectToBackend(availability);
+
+  await updateCoachInformation({
+    availabilities: backendAvailabilities,
+  });
+
+  const refreshed = await fetchCoachAvailability(coachId);
   const existing = readJson(cacheKey) || {};
   localStorage.setItem(
     cacheKey,
     JSON.stringify({
       ...existing,
-      availability: convertFromSlotsFormat(slots),
+      availability: convertFromSlotsFormat(refreshed),
     })
   );
 
-  try {
-    return await updateCoachInformation({
-      availabilities: convertTrainingAvailabilityObjectToBackend(convertFromSlotsFormat(slots)),
-    });
-  } catch {
-    return { success: true };
-  }
+  return refreshed;
 }
 
 export async function fetchCoachStats(coachId) {
@@ -196,8 +171,26 @@ export async function fetchCoachStats(coachId) {
   };
 }
 
-export async function fetchCoachReviews(_coachId) {
-  return [];
+export async function fetchCoachReviews(coachId) {
+  if (!coachId) return [];
+
+  try {
+    const response = await apiGet(`/roles/client/review/${coachId}`);
+    const reviews = Array.isArray(response?.reviews) ? response.reviews : [];
+    return reviews.map((review, index) => ({
+      id: review.id ?? `${coachId}-${index}`,
+      client_id: review.client_id ?? null,
+      client_name: review.client_name || `Client #${review.client_id ?? index + 1}`,
+      rating: Math.max(0, Math.min(5, Math.round(Number(review.rating ?? 0)))),
+      comment: review.review_text || review.comment || "",
+      created_at: review.last_updated
+        ? new Date(review.last_updated).toLocaleDateString()
+        : "",
+      last_updated: review.last_updated || null,
+    }));
+  } catch {
+    return [];
+  }
 }
 
 export async function fetchCoachWorkoutPlans(coachId) {
@@ -213,6 +206,33 @@ export async function fetchCoachWorkoutPlans(coachId) {
   }
 
   return [];
+}
+
+export function cacheAcceptedClientForCoach(coachId, client) {
+  if (!coachId || !client?.id) return;
+  const key = getAcceptedClientsKey(coachId);
+  const cached = readJson(key);
+  const list = Array.isArray(cached) ? cached : [];
+  const next = [
+    {
+      ...client,
+      status: "active",
+      joined: client.joined || new Date().toLocaleDateString(),
+    },
+    ...list.filter((item) => Number(item.id) !== Number(client.id)),
+  ];
+  localStorage.setItem(key, JSON.stringify(next));
+}
+
+export function removeAcceptedClientForCoach(coachId, clientId) {
+  if (!coachId || !clientId) return;
+  const key = getAcceptedClientsKey(coachId);
+  const cached = readJson(key);
+  if (!Array.isArray(cached)) return;
+  localStorage.setItem(
+    key,
+    JSON.stringify(cached.filter((item) => Number(item.id) !== Number(clientId)))
+  );
 }
 
 export function buildCoachRequestPayload(form, availability) {
@@ -350,6 +370,36 @@ function readJson(key) {
   } catch {
     return null;
   }
+}
+
+function getAcceptedClientsKey(coachId) {
+  return `coach_accepted_clients:${coachId ?? "me"}`;
+}
+
+function readAcceptedCoachClients(coachId) {
+  const parsed = readJson(getAcceptedClientsKey(coachId));
+  if (!Array.isArray(parsed)) return [];
+
+  return parsed.filter((client) => {
+    if (!client?.id) return false;
+    const relationshipKey = `client_relationship:${client.id}:${coachId}`;
+    const activeRelationship = localStorage.getItem(relationshipKey);
+    if (!client.relationship_id) return true;
+    return String(activeRelationship || "") === String(client.relationship_id);
+  });
+}
+
+function mergeClientsById(primaryClients, fallbackClients) {
+  const merged = [];
+  const seen = new Set();
+
+  [fallbackClients, primaryClients].flat().forEach((client) => {
+    if (!client?.id || seen.has(Number(client.id))) return;
+    seen.add(Number(client.id));
+    merged.push(client);
+  });
+
+  return merged;
 }
 
 function normalizeTimeLabel(raw) {

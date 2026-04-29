@@ -17,7 +17,6 @@ import {
   SkeletonAvailability,
 } from "../components";
 import WorkoutDetail from "../components/overlays/workout_detail";
-import CoachProfile from "../components/overlays/coach_profile";
 import AvailabilityDetail from "../components/overlays/availability_detail";
 import MealDetail from "../components/overlays/meal_detail";
 import {
@@ -35,6 +34,10 @@ import {
   logMeal,
   terminateRelationship,
 } from "../api/client";
+import { removeAcceptedClientForCoach } from "../api/coach";
+import { createConversation, fetchConversations } from "../api/chat";
+import { readClientCoachRequests, removeClientCoachRequest } from "../utils/coachRequests";
+import { getCoachAccessState } from "../utils/roleAccess";
 
 const role = "client";
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -89,6 +92,11 @@ export default function ClientDash() {
   const [prescribedMeals, setPrescribedMeals] = useState([]);
   const [loading, setLoading]           = useState(true);
   const [relationshipId, setRelationshipId] = useState(null);
+  const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
+  const [pendingCoachRequest, setPendingCoachRequest] = useState(null);
+  const [approvedCoachRequest, setApprovedCoachRequest] = useState(null);
+  const [requestStatusError, setRequestStatusError] = useState("");
+  const [openingCoachChat, setOpeningCoachChat] = useState(false);
 
   /* ── load account + client profile ──────────────────────────────── */
   useEffect(() => {
@@ -98,6 +106,12 @@ export default function ClientDash() {
       try {
         const me = await fetchMe();
         setAccount(me);
+        const coachAccess = await getCoachAccessState(me);
+        setCanSwitchToCoach(coachAccess.canAccessCoach);
+        const storedRequests = readClientCoachRequests(me.email);
+        const requestList = Object.values(storedRequests);
+        setPendingCoachRequest(requestList.find((item) => item?.status === "pending") || null);
+        setApprovedCoachRequest(requestList.find((item) => item?.status === "approved") || null);
 
         if (me.client_id) {
           setClientId(me.client_id);
@@ -140,13 +154,20 @@ export default function ClientDash() {
         if (coachInfo?.coach_id) {
           const storedRelationshipId = localStorage.getItem(`client_relationship:${clientId}:${coachInfo.coach_id}`);
           setRelationshipId(storedRelationshipId ? Number(storedRelationshipId) : null);
+        } else if (approvedCoachRequest?.relationship_id) {
+          setRelationshipId(Number(approvedCoachRequest.relationship_id));
+          setCoach({
+            coach_id: approvedCoachRequest.coach_id,
+            name: approvedCoachRequest.coach_name || `Coach #${approvedCoachRequest.coach_id}`,
+            specialty: "Approved coach",
+          });
         }
       } catch {
         // Individual fetchers have their own fallbacks; if something still
         // throws (e.g. 401 redirect in progress) just stay on skeleton
       }
     })();
-  }, [clientId]);
+  }, [approvedCoachRequest, clientId]);
 
   /* ── load coach rating when coach is known ──────────────────────── */
   useEffect(() => {
@@ -204,11 +225,49 @@ export default function ClientDash() {
       await terminateRelationship(relationshipId);
       if (coach?.coach_id) {
         localStorage.removeItem(`client_relationship:${clientId}:${coach.coach_id}`);
+        removeClientCoachRequest(account?.email, coach.coach_id);
+        removeAcceptedClientForCoach(coach.coach_id, clientId);
       }
       setCoach(null);
       setRelationshipId(null);
+      const nextRequests = Object.values(readClientCoachRequests(account?.email));
+      setPendingCoachRequest(nextRequests.find((item) => item?.status === "pending") || null);
+      setApprovedCoachRequest(nextRequests.find((item) => item?.status === "approved") || null);
     } catch {
       // keep UI state unchanged on failure
+    }
+  };
+
+  const handleOpenApprovedCoachChat = async () => {
+    if (!approvedCoachRequest?.relationship_id || !account?.id) return;
+    setRequestStatusError("");
+    setOpeningCoachChat(true);
+    try {
+      const existingConversations = await fetchConversations(account.id, "client", {
+        legacyAccountIds: [clientId],
+      });
+      const existing = existingConversations.find(
+        (item) => Number(item.partner_id) === Number(approvedCoachRequest.coach_id)
+      );
+      if (!existing) {
+        await createConversation(
+          approvedCoachRequest.relationship_id,
+          {
+            id: approvedCoachRequest.coach_id,
+            name: approvedCoachRequest.coach_name || `Coach #${approvedCoachRequest.coach_id}`,
+            role: "coach",
+          },
+          {
+            accountId: account.id,
+            role: "client",
+          }
+        );
+      }
+      navigate(`/client-chat?client=${approvedCoachRequest.coach_id}`);
+    } catch (error) {
+      setRequestStatusError(error.message || "Unable to open coach chat.");
+    } finally {
+      setOpeningCoachChat(false);
     }
   };
 
@@ -266,6 +325,7 @@ export default function ClientDash() {
     <div className="min-h-screen" style={{ backgroundColor: "#080D19" }}>
       <Navbar
         role={role}
+        canSwitchToCoach={canSwitchToCoach}
         userName={
           account?.name
             ? account.name.split(" ").map((n) => n[0]).join("").toUpperCase()
@@ -346,6 +406,57 @@ export default function ClientDash() {
         {/* ─── WORKOUT & COACH ────────────────────────────────────── */}
         <SectionHeader label="WORKOUT & COACH" role={role} />
 
+        {requestStatusError ? (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+            {requestStatusError}
+          </div>
+        ) : null}
+
+        {pendingCoachRequest ? (
+          <DashboardCard role={role} title="Coach Request Status">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-white font-semibold">
+                  {pendingCoachRequest.coach_name || "Coach request pending"}
+                </p>
+                <p className="mt-1 text-sm text-amber-300">Pending approval</p>
+                <p className="mt-1 text-xs text-gray-500">
+                  Your request is waiting for the coach to review it.
+                </p>
+              </div>
+              <button
+                onClick={() => navigate("/find-coach")}
+                className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm font-medium text-amber-300"
+              >
+                View Request
+              </button>
+            </div>
+          </DashboardCard>
+        ) : null}
+
+        {!pendingCoachRequest && approvedCoachRequest && !coach ? (
+          <DashboardCard role={role} title="Coach Request Status">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-white font-semibold">
+                  {approvedCoachRequest.coach_name || "Coach request approved"}
+                </p>
+                <p className="mt-1 text-sm text-green-300">Approved</p>
+                <p className="mt-1 text-xs text-gray-500">
+                  Your coach request was approved and chat is ready.
+                </p>
+              </div>
+              <button
+                onClick={handleOpenApprovedCoachChat}
+                disabled={openingCoachChat}
+                className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:bg-blue-900/40"
+              >
+                {openingCoachChat ? "Opening..." : "Chat with Coach"}
+              </button>
+            </div>
+          </DashboardCard>
+        ) : null}
+
         <div className="grid grid-cols-3 gap-4 items-stretch">
           {/* Today's Workout */}
           <DashboardCard
@@ -407,7 +518,7 @@ export default function ClientDash() {
               title="My Coach"
               action={{
                 label: "View Profile",
-                onClick: () => setOverlay("coach"),
+                onClick: () => navigate(`/coaches/${coach.coach_id}`),
               }}
               footer={
                 <div className="flex gap-2">
@@ -613,22 +724,6 @@ export default function ClientDash() {
       </Overlay>
 
       {/* Coach Profile */}
-      <Overlay
-        open={overlay === "coach"}
-        onClose={closeOverlay}
-        title="Coach Profile"
-      >
-        <CoachProfile
-          coach={coach}
-          rating={coachRating}
-          nextSession={nextSession}
-          onMessage={() => {
-            closeOverlay();
-            // future: open messaging overlay or navigate
-          }}
-        />
-      </Overlay>
-
       {/* Availability */}
       <Overlay
         open={overlay === "availability"}

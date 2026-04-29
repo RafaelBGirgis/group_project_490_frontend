@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Navbar } from "../components/navbar";
 import { fetchMe } from "../api/client";
 import { buildCoachRequestPayload, createCoachRequest } from "../api/coach";
+import { clearCoachRequestResolution } from "../utils/coachRequests";
 
 const SPECIALIZATION_OPTIONS = [
   "Strength Training",
@@ -175,10 +176,20 @@ function CoachRequestFormPage() {
         payload.coach_request_id = response?.coach_request_id;
         payload.coach_id = response?.coach_id;
         payload.backend_submitted = true;
+        clearCoachRequestResolution(response?.coach_request_id);
       }
 
       localStorage.setItem(key, JSON.stringify(payload));
-      setSubmitMessage(isEditMode ? "Coach request updated locally." : "Coach request form submitted.");
+      if (isEditMode) {
+        setSubmitMessage("Coach request updated locally.");
+      } else {
+        navigate("/profile", {
+          state: {
+            coachRequestSubmitted: true,
+            successMessage: "Application successfully sent.",
+          },
+        });
+      }
     } catch (err) {
       setError(err.message || "Failed to submit coach request.");
     }

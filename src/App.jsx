@@ -13,6 +13,7 @@ import CoachChatPage from "./pages/coach_chat";
 import ClientChatPage from "./pages/client_chat";
 import FindCoachPage from "./pages/find_coach";
 import WorkoutsPage from "./pages/workouts";
+import CoachPublicProfilePage from "./pages/coach_public_profile";
 
 function App() {
   return (
@@ -35,6 +36,7 @@ function App() {
           <Route path="/client/messages" element={<ChatPage />} />
           <Route path="/coach/messages" element={<ChatPage />} />
           <Route path="/find-coach" element={<FindCoachPage />} />
+          <Route path="/coaches/:coachId" element={<CoachPublicProfilePage />} />
           <Route path="/workouts" element={<WorkoutsPage />} />
           {/* Catch-all: redirect unknown routes back to the landing page */}
           <Route path="*" element={<Navigate to="/" />} />

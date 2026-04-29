@@ -164,8 +164,8 @@ describe("Navbar", () => {
     expect(screen.queryByText("Mark all read")).not.toBeInTheDocument();
   });
 
-  it("shows 'Switch to Coach' for client role", () => {
-    renderWithRouter(<Navbar role="client" userName="JD" />);
+  it("shows 'Switch to Coach' for approved client role", () => {
+    renderWithRouter(<Navbar role="client" userName="JD" canSwitchToCoach />);
     expect(screen.getByText("Switch to Coach")).toBeInTheDocument();
   });
 

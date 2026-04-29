@@ -1,11 +1,15 @@
 import { describe, it, expect, vi } from "vitest";
 import {
+  acceptClientRequest,
   buildCoachInformationPayload,
   buildCoachRequestPayload,
   buildCoachWorkoutActivities,
   buildCoachWorkoutPayload,
   createCoachRequest,
+  denyClientRequest,
+  fetchCoachAvailability,
   fetchCoachProfile,
+  fetchCoachReviews,
   saveCoachAvailability,
   updateCoachInformation,
 } from "../api/coach";
@@ -54,6 +58,26 @@ describe("updateCoachInformation", () => {
   });
 });
 
+describe("coach request actions", () => {
+  it("posts accept without a JSON body", async () => {
+    mockFetchOk({ relationship_id: 11 });
+    await acceptClientRequest(11);
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe("/roles/coach/accept_client/11");
+    expect(opts.method).toBe("POST");
+    expect(opts.body).toBeUndefined();
+  });
+
+  it("posts deny without a JSON body", async () => {
+    mockFetchOk({ relationship_id: 11 });
+    await denyClientRequest(11);
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe("/roles/coach/deny_client/11");
+    expect(opts.method).toBe("POST");
+    expect(opts.body).toBeUndefined();
+  });
+});
+
 describe("saveCoachAvailability", () => {
   it("uses the coach information patch route", async () => {
     mockFetchOk({ coach_id: 7 });
@@ -62,6 +86,47 @@ describe("saveCoachAvailability", () => {
     expect(url).toBe("/roles/coach/information");
     expect(opts.method).toBe("PATCH");
     expect(JSON.parse(opts.body).availabilities.length).toBeGreaterThan(0);
+  });
+});
+
+describe("fetchCoachAvailability", () => {
+  it("returns an empty array when no backend or saved availability exists", async () => {
+    global.fetch = vi.fn(() =>
+      Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) })
+    );
+    localStorage.clear();
+    const result = await fetchCoachAvailability(7);
+    expect(result).toEqual([]);
+  });
+});
+
+describe("fetchCoachReviews", () => {
+  it("reads coach reviews from the backend review route and normalizes them", async () => {
+    mockFetchOk({
+      reviews: [
+        {
+          id: 1,
+          client_id: 21,
+          rating: 4.4,
+          review_text: "Great coach",
+          last_updated: "2026-04-28T14:00:00.000Z",
+        },
+      ],
+    });
+    const result = await fetchCoachReviews(7);
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/roles/client/review/7",
+      expect.objectContaining({
+        headers: expect.objectContaining({ "Content-Type": "application/json" }),
+      })
+    );
+    expect(result[0]).toMatchObject({
+      id: 1,
+      client_id: 21,
+      client_name: "Client #21",
+      rating: 4,
+      comment: "Great coach",
+    });
   });
 });
 

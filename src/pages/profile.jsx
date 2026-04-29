@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Navbar } from "../components/navbar";
-import AvailabilityDetail from "../components/overlays/availability_detail";
 import {
   buildClientInformationPayload,
   deactivateAccount,
   deleteAccount,
+  extractUploadedAssetUrl,
   fetchClientProfile,
   fetchMe,
   updateAccount,
@@ -13,89 +13,22 @@ import {
   uploadProgressPicture,
   uploadProfilePicture,
 } from "../api/client";
+import { loadProfileDraft, saveOnboardingDraft } from "../utils/profileDrafts";
+import { readCoachRequestResolution, clearCoachRequestResolution } from "../utils/coachRequests";
 import {
   buildCoachInformationPayload,
   deactivateCoachAccount,
   deleteCoachAccount,
-  fetchCoachAvailability,
   fetchCoachProfile,
-  saveCoachAvailability,
   updateCoachInformation,
 } from "../api/coach";
+import { getCoachAccessState } from "../utils/roleAccess";
 
 const PRIMARY_GOALS = [
   "Weight Loss",
   "Maintenance",
   "Muscle Gain",
 ];
-const EMPTY_TRAINING_AVAILABILITY = {
-  Mon: [],
-  Tue: [],
-  Wed: [],
-  Thu: [],
-  Fri: [],
-  Sat: [],
-  Sun: [],
-};
-
-const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
-const normalizeTrainingAvailability = (value, fallbackDays = []) => {
-  const base = {
-    Mon: [],
-    Tue: [],
-    Wed: [],
-    Thu: [],
-    Fri: [],
-    Sat: [],
-    Sun: [],
-  };
-
-  if (!value || typeof value !== "object") {
-    fallbackDays.forEach((day) => {
-      if (base[day]) base[day] = [];
-    });
-    return base;
-  }
-
-  Object.keys(base).forEach((day) => {
-    const slots = value[day];
-    base[day] = Array.isArray(slots) ? slots : [];
-  });
-
-  return base;
-};
-
-// Convert from { Mon: ["9AM", "10AM"], ... } to [{ time, slots: [...] }, ...]
-const convertToSlotsFormat = (trainingAvailability) => {
-  const allTimes = new Set();
-  Object.values(trainingAvailability).forEach(slots => {
-    slots.forEach(time => allTimes.add(time));
-  });
-
-  const sortedTimes = Array.from(allTimes).sort((a, b) => {
-    const timeOrder = ["5AM","6AM","7AM","8AM","9AM","10AM","11AM","12PM","1PM","2PM","3PM","4PM","5PM","6PM","7PM","8PM","9PM"];
-    return timeOrder.indexOf(a) - timeOrder.indexOf(b);
-  });
-
-  return sortedTimes.map(time => ({
-    time,
-    slots: WEEKDAYS.map(day => trainingAvailability[day].includes(time) ? "available" : null)
-  }));
-};
-
-// Convert from [{ time, slots: [...] }, ...] to { Mon: ["9AM", "10AM"], ... }
-const convertFromSlotsFormat = (slots) => {
-  const result = { ...EMPTY_TRAINING_AVAILABILITY };
-  slots.forEach(({ time, slots: daySlots }) => {
-    daySlots.forEach((status, dayIndex) => {
-      if (status === "available") {
-        result[WEEKDAYS[dayIndex]].push(time);
-      }
-    });
-  });
-  return result;
-};
 
 const normalizeGenderToSignupValue = (value) => {
   const normalized = String(value || "").trim().toLowerCase().replaceAll("_", "-");
@@ -131,8 +64,58 @@ const buildAccountUpdatePayload = ({ age, email, bio, pfp_url, gender }) => {
   return payload;
 };
 
+const normalizeCoachProfileSeed = (requestData) => {
+  if (!requestData || typeof requestData !== "object") {
+    return null;
+  }
+
+  const certifications = Array.isArray(requestData.certifications)
+    ? requestData.certifications.map((item, index) => ({
+        id: item?.id || `cert-${index}-${Date.now()}`,
+        title: item?.title || item?.certification_name || "",
+        issuer: item?.issuer || item?.certification_organization || "",
+        year: item?.year || item?.certification_date || "",
+        description: item?.description || item?.certification_score || "",
+      }))
+    : [];
+
+  const experiences = Array.isArray(requestData.experiences)
+    ? requestData.experiences.map((item, index) => ({
+        id: item?.id || `exp-${index}-${Date.now()}`,
+        title: item?.title || item?.experience_title || item?.experience_name || "",
+        issuer: item?.issuer || item?.organization || item?.experience_name || "",
+        year: item?.year || item?.experience_start || "",
+        description: item?.description || item?.experience_description || "",
+      }))
+    : [];
+
+  const specializations = Array.isArray(requestData.specializations)
+    ? requestData.specializations.filter(Boolean)
+    : [];
+
+  if (!certifications.length && !experiences.length && !specializations.length) {
+    return null;
+  }
+
+  return {
+    certifications,
+    experiences,
+    specializations,
+    pricingInterval: requestData?.paymentInterval || requestData?.payment_interval || "",
+    amount:
+      requestData?.amount != null
+        ? String(requestData.amount)
+        : requestData?.priceCents != null
+          ? String(Number(requestData.priceCents) / 100)
+          : requestData?.price_cents != null
+            ? String(Number(requestData.price_cents) / 100)
+            : "",
+  };
+};
+
 function ProfilePage({ role = "client" }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const isCoach = role === "coach";
 
   const accent = isCoach ? "#F59E0B" : "#3B82F6";
@@ -157,23 +140,11 @@ function ProfilePage({ role = "client" }) {
     age: "",
     gender: "",
     primaryGoal: "",
-    trainingAvailability: { ...EMPTY_TRAINING_AVAILABILITY },
     weight: "",
     height: "",
     profilePicture: null,
     pricingInterval: "",
     amount: "",
-    openToNewClients: "",
-  });
-
-  const [availability, setAvailability] = useState({
-    Mon: [],
-    Tue: [],
-    Wed: [],
-    Thu: [],
-    Fri: [],
-    Sat: [],
-    Sun: [],
   });
 
   const [specializations, setSpecializations] = useState([]);
@@ -224,11 +195,22 @@ function ProfilePage({ role = "client" }) {
   const [progressPictures, setProgressPictures] = useState([]);
   const [uploadingProgressPicture, setUploadingProgressPicture] = useState(false);
   const [progressPictureError, setProgressPictureError] = useState("");
+  const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
 
   const fullName = useMemo(
     () => `${profile.firstName} ${profile.lastName}`.trim(),
     [profile.firstName, profile.lastName]
   );
+
+  const profilePicturePreviewUrl = useMemo(() => {
+    if (typeof profile.profilePicture === "string") {
+      return profile.profilePicture || "";
+    }
+    if (profile.profilePicture instanceof File) {
+      return URL.createObjectURL(profile.profilePicture);
+    }
+    return "";
+  }, [profile.profilePicture]);
 
   const initials = useMemo(() => {
     const f = profile.firstName?.[0] || "";
@@ -242,6 +224,22 @@ function ProfilePage({ role = "client" }) {
   );
 
   useEffect(() => {
+    if (!location.state?.coachRequestSubmitted) return;
+    setSaveMessage(location.state.successMessage || "Application successfully sent.");
+    navigate(location.pathname, { replace: true, state: {} });
+  }, [location.pathname, location.state, navigate]);
+
+  useEffect(() => {
+    if (!(profile.profilePicture instanceof File) || !profilePicturePreviewUrl) {
+      return undefined;
+    }
+
+    return () => {
+      URL.revokeObjectURL(profilePicturePreviewUrl);
+    };
+  }, [profile.profilePicture, profilePicturePreviewUrl]);
+
+  useEffect(() => {
     const token = localStorage.getItem("jwt");
     if (!token) {
       setLoadError("You are not logged in.");
@@ -253,6 +251,12 @@ function ProfilePage({ role = "client" }) {
     const loadProfile = async () => {
       try {
         const data = await fetchMe();
+        const coachAccess = await getCoachAccessState(data);
+        setCanSwitchToCoach(coachAccess.canAccessCoach);
+        if (isCoach && !coachAccess.canAccessCoach) {
+          navigate("/profile");
+          return;
+        }
         let clientProfile = null;
         let coachProfile = null;
         if (!isCoach && data.client_id) {
@@ -271,20 +275,11 @@ function ProfilePage({ role = "client" }) {
             setCoachProfileData(null);
           }
         }
-        const [firstName = "", ...rest] = (data.name || "").trim().split(/\s+/);
+        const draftData = loadProfileDraft(data.email);
+        const resolvedName = data.name || draftData?.name || "";
+        const [firstName = "", ...rest] = resolvedName.trim().split(/\s+/);
         const lastName = rest.join(" ");
-        const onboardingKey = data.email
-          ? `onboarding:${String(data.email).trim().toLowerCase()}`
-          : "onboarding:current";
-        let onboardingData = null;
-        const onboardingRaw = localStorage.getItem(onboardingKey);
-        if (onboardingRaw) {
-          try {
-            onboardingData = JSON.parse(onboardingRaw);
-          } catch {
-            onboardingData = null;
-          }
-        }
+        const onboardingData = draftData;
         const requestKey = `coachRequest:${data.id || data.email || "current"}`;
         setCoachRequestStorageKey(requestKey);
 
@@ -292,7 +287,28 @@ function ProfilePage({ role = "client" }) {
           localStorage.getItem(requestKey) || localStorage.getItem("coachRequestDraft");
         if (savedRequestRaw) {
           try {
-            setCoachRequest(JSON.parse(savedRequestRaw));
+            const parsedRequest = JSON.parse(savedRequestRaw);
+            const resolution = readCoachRequestResolution(parsedRequest?.coach_request_id);
+            const isResolved =
+              coachAccess.canAccessCoach || resolution?.status === "approved" || resolution?.status === "rejected";
+
+            if (isResolved) {
+              const coachProfileSeed = normalizeCoachProfileSeed(parsedRequest);
+              const coachStorageKey = `coach_profile:${data.coach_id || data.id || "current"}`;
+              const hasStoredCoachProfile = Boolean(localStorage.getItem(coachStorageKey));
+              if (coachProfileSeed && !hasStoredCoachProfile) {
+                localStorage.setItem(coachStorageKey, JSON.stringify(coachProfileSeed));
+              }
+            }
+
+            if (isResolved) {
+              localStorage.removeItem(requestKey);
+              localStorage.removeItem("coachRequestDraft");
+              clearCoachRequestResolution(parsedRequest?.coach_request_id);
+              setCoachRequest(null);
+            } else {
+              setCoachRequest(parsedRequest);
+            }
           } catch {
             setCoachRequest(null);
           }
@@ -316,26 +332,33 @@ function ProfilePage({ role = "client" }) {
           weight: onboardingData?.weight || "",
           height: onboardingData?.height || "",
           primaryGoal: onboardingData?.primaryGoal || "",
-          trainingAvailability: normalizeTrainingAvailability(
-            onboardingData?.trainingAvailability,
-            onboardingData?.availableDays
-          ),
-          profilePicture: data.pfp_url || null,
+          profilePicture: data.pfp_url || onboardingData?.profilePicture || null,
         }));
 
         if (!isCoach) {
           const paymentInfo = clientProfile?.client_account?.payment_information;
-          if (paymentInfo) {
+          const fallbackPaymentInfo =
+            !paymentInfo && onboardingData?.cardNumber
+              ? {
+                  id: Date.now(),
+                  ccnum: onboardingData.cardNumber,
+                  cv: onboardingData.cardCvv || "",
+                  exp_date: onboardingData.cardExpiry || "",
+                }
+              : null;
+          const resolvedPaymentInfo = paymentInfo || fallbackPaymentInfo;
+
+          if (resolvedPaymentInfo) {
             setPaymentMethods([
               {
-                id: paymentInfo.id || Date.now(),
+                id: resolvedPaymentInfo.id || Date.now(),
                 type: "credit",
-                lastFour: String(paymentInfo.ccnum || "").slice(-4),
-                expiryMonth: String(paymentInfo.exp_date || "").slice(5, 7),
-                expiryYear: String(paymentInfo.exp_date || "").slice(0, 4),
-                ccnum: paymentInfo.ccnum || "",
-                cv: paymentInfo.cv || "",
-                exp_date: paymentInfo.exp_date || "",
+                lastFour: String(resolvedPaymentInfo.ccnum || "").slice(-4),
+                expiryMonth: String(resolvedPaymentInfo.exp_date || "").slice(5, 7),
+                expiryYear: String(resolvedPaymentInfo.exp_date || "").slice(0, 4),
+                ccnum: resolvedPaymentInfo.ccnum || "",
+                cv: resolvedPaymentInfo.cv || "",
+                exp_date: resolvedPaymentInfo.exp_date || "",
               },
             ]);
           }
@@ -367,8 +390,17 @@ function ProfilePage({ role = "client" }) {
             }
           }
 
-          const profileAvailability = await fetchCoachAvailability(data.coach_id);
-          setAvailability(convertFromSlotsFormat(profileAvailability));
+          if (!coachStored) {
+            const requestSeedRaw =
+              localStorage.getItem(requestKey) || localStorage.getItem("coachRequestDraft");
+            if (requestSeedRaw) {
+              try {
+                coachStored = normalizeCoachProfileSeed(JSON.parse(requestSeedRaw));
+              } catch {
+                coachStored = null;
+              }
+            }
+          }
 
           setSpecializations(
             coachStored?.specializations ||
@@ -379,6 +411,11 @@ function ProfilePage({ role = "client" }) {
           );
           setCertifications(Array.isArray(coachStored?.certifications) ? coachStored.certifications : []);
           setExperiences(Array.isArray(coachStored?.experiences) ? coachStored.experiences : []);
+          setProfile((prev) => ({
+            ...prev,
+            pricingInterval: coachStored?.pricingInterval || "",
+            amount: coachStored?.amount || "",
+          }));
         }
       } catch (err) {
         setLoadError(err.message || "Failed to load profile.");
@@ -405,7 +442,7 @@ function ProfilePage({ role = "client" }) {
 
       if (profile.profilePicture instanceof File) {
         const upload = await uploadProfilePicture(profile.profilePicture);
-        profilePictureUrl = upload?.pfp_url || upload?.url || profilePictureUrl;
+        profilePictureUrl = extractUploadedAssetUrl(upload) || profilePictureUrl;
         setProfile((prev) => ({
           ...prev,
           profilePicture: profilePictureUrl || prev.profilePicture,
@@ -425,7 +462,6 @@ function ProfilePage({ role = "client" }) {
       const payload = buildClientInformationPayload({
         primaryGoal: profile.primaryGoal,
         weight: profile.weight,
-        trainingAvailability: profile.trainingAvailability,
         paymentMethod: latestPayment,
       });
 
@@ -444,24 +480,21 @@ function ProfilePage({ role = "client" }) {
         await updateAccount(accountPayload);
       }
 
-      const onboardingKey = profile.email
-        ? `onboarding:${String(profile.email).trim().toLowerCase()}`
-        : "onboarding:current";
-      const raw = localStorage.getItem(onboardingKey);
-      const existing = raw ? JSON.parse(raw) : {};
-      localStorage.setItem(
-        onboardingKey,
-        JSON.stringify({
-          ...existing,
-          primaryGoal: profile.primaryGoal,
-          weight: profile.weight,
-          height: profile.height,
-          age: profile.age,
-          gender: profile.gender,
-          bio: profile.bio,
-          trainingAvailability: profile.trainingAvailability,
-        })
-      );
+      saveOnboardingDraft({
+        ...loadProfileDraft(profile.email),
+        name: `${profile.firstName} ${profile.lastName}`.trim(),
+        email: profile.email,
+        primaryGoal: profile.primaryGoal,
+        weight: profile.weight,
+        height: profile.height,
+        age: profile.age,
+        gender: profile.gender,
+        bio: profile.bio,
+        profilePicture: profilePictureUrl,
+        cardNumber: latestPayment?.ccnum || "",
+        cardCvv: latestPayment?.cv || "",
+        cardExpiry: latestPayment?.exp_date || "",
+      });
 
       setSaveMessage("Client profile changes saved.");
     } catch (error) {
@@ -482,7 +515,7 @@ function ProfilePage({ role = "client" }) {
 
       if (profile.profilePicture instanceof File) {
         const upload = await uploadProfilePicture(profile.profilePicture);
-        profilePictureUrl = upload?.pfp_url || upload?.url || profilePictureUrl;
+        profilePictureUrl = extractUploadedAssetUrl(upload) || profilePictureUrl;
         setProfile((prev) => ({
           ...prev,
           profilePicture: profilePictureUrl || prev.profilePicture,
@@ -490,7 +523,7 @@ function ProfilePage({ role = "client" }) {
       }
 
       const payload = buildCoachInformationPayload({
-        availability,
+        availability: null,
         certifications,
         experiences,
         specializations,
@@ -515,10 +548,11 @@ function ProfilePage({ role = "client" }) {
       localStorage.setItem(
         `coach_profile:${coachId}`,
         JSON.stringify({
-          availability,
           certifications,
           experiences,
           specializations,
+          pricingInterval: profile.pricingInterval,
+          amount: profile.amount,
         })
       );
 
@@ -652,7 +686,7 @@ function ProfilePage({ role = "client" }) {
 
     try {
       const response = await uploadProgressPicture(file);
-      const url = response?.url || response?.public_url || response?.pfp_url;
+      const url = extractUploadedAssetUrl(response);
 
       if (!url) {
         throw new Error("The backend did not return a progress picture URL.");
@@ -716,6 +750,7 @@ function ProfilePage({ role = "client" }) {
       <Navbar
         role={role}
         userName={initials}
+        canSwitchToCoach={!isCoach && canSwitchToCoach}
         onSwitch={() => navigate(role === "coach" ? "/client" : "/coach")}
       />
 
@@ -748,6 +783,12 @@ function ProfilePage({ role = "client" }) {
           <h1 className="text-2xl font-bold">{isCoach ? "Edit Profile" : "Profile Settings"}</h1>
           {isCoach && (
             <button
+              onClick={() => {
+                if (coachProfileData?.coach_account?.id) {
+                  navigate(`/coaches/${coachProfileData.coach_account.id}?preview=1`);
+                }
+              }}
+              disabled={!coachProfileData?.coach_account?.id}
               className="rounded-lg border px-4 py-2 text-xs font-medium text-slate-300"
               style={{ borderColor: accentBorder, backgroundColor: accentSoft }}
             >
@@ -764,9 +805,9 @@ function ProfilePage({ role = "client" }) {
                   className="relative flex h-24 w-24 items-center justify-center rounded-full text-3xl font-bold text-white shadow-lg"
                   style={{ backgroundColor: accent }}
                 >
-                  {typeof profile.profilePicture === "string" && profile.profilePicture ? (
+                  {profilePicturePreviewUrl ? (
                     <img
-                      src={profile.profilePicture}
+                      src={profilePicturePreviewUrl}
                       alt={fullName}
                       className="h-full w-full rounded-full object-cover"
                     />
@@ -1229,36 +1270,6 @@ function ProfilePage({ role = "client" }) {
               </Panel>
             )}
 
-            {!isCoach && (
-              <Panel title="Availability" accent={accent}>
-                <AvailabilityDetail
-                  slots={convertToSlotsFormat(profile.trainingAvailability)}
-                  weekdays={WEEKDAYS}
-                  onSave={(updatedSlots) => {
-                    setProfile((prev) => ({
-                      ...prev,
-                      trainingAvailability: convertFromSlotsFormat(updatedSlots)
-                    }));
-                  }}
-                  role="client"
-                />
-              </Panel>
-            )}
-
-            {isCoach && (
-              <Panel title="Availability" accent={accent}>
-                <AvailabilityDetail
-                  slots={convertToSlotsFormat(availability)}
-                  weekdays={WEEKDAYS}
-                  onSave={async (updatedSlots) => {
-                    await saveCoachAvailability(coachProfileData?.coach_account?.id, updatedSlots);
-                    setAvailability(convertFromSlotsFormat(updatedSlots));
-                  }}
-                  role="coach"
-                />
-              </Panel>
-            )}
-
             {isCoach && (
               <>
                 <Panel title="Specialisations" accent={accent}>
@@ -1285,26 +1296,23 @@ function ProfilePage({ role = "client" }) {
 
                 <Panel title="Pricing Plan" accent={accent}>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Input
-                      label="Payment Interval"
-                      value={profile.pricingInterval}
-                      onChange={(v) => handleProfileChange("pricingInterval", v)}
-                      placeholder="Monthly"
-                    />
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-slate-400">Payment Interval</label>
+                      <select
+                        value={profile.pricingInterval}
+                        onChange={(event) => handleProfileChange("pricingInterval", event.target.value)}
+                        className="h-12 w-full rounded-xl border border-white/8 bg-[#101827] px-4 text-sm text-white outline-none transition focus:border-orange-400/50 focus:ring-2 focus:ring-orange-400/10"
+                      >
+                        <option value="">Select interval</option>
+                        <option value="monthly">Monthly</option>
+                        <option value="yearly">Yearly</option>
+                      </select>
+                    </div>
                     <Input
                       label="Amount"
                       value={profile.amount}
                       onChange={(v) => handleProfileChange("amount", v)}
-                      placeholder="$160.00"
-                    />
-                  </div>
-
-                  <div className="mt-4">
-                    <Input
-                      label="Open to New Clients"
-                      value={profile.openToNewClients}
-                      onChange={(v) => handleProfileChange("openToNewClients", v)}
-                      placeholder="Yes - accepting clients"
+                      placeholder="160.00"
                     />
                   </div>
                 </Panel>

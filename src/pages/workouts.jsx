@@ -20,6 +20,7 @@ import {
   EXERCISE_DATABASE,
   MUSCLE_GROUPS,
 } from "../api/workouts";
+import { getCoachAccessState } from "../utils/roleAccess";
 
 /* ─── constants ──────────────────────────────────────────────────────── */
 
@@ -54,6 +55,7 @@ export default function WorkoutsPage() {
 
   const [account, setAccount] = useState(null);
   const [role, setRole] = useState(roleFromUrl || "client");
+  const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
   const [loading, setLoading] = useState(true);
   const [initials, setInitials] = useState("??");
 
@@ -95,15 +97,23 @@ export default function WorkoutsPage() {
       try {
         const me = await fetchMe();
         setAccount(me);
-        const r = roleFromUrl || (me.coach_id ? "coach" : "client");
+        const coachAccess = await getCoachAccessState(me);
+        setCanSwitchToCoach(coachAccess.canAccessCoach);
+        const r =
+          roleFromUrl === "coach"
+            ? (coachAccess.canAccessCoach ? "coach" : "client")
+            : roleFromUrl || (coachAccess.canAccessCoach ? "coach" : "client");
         setRole(r);
+        if (roleFromUrl === "coach" && !coachAccess.canAccessCoach) {
+          navigate("/workouts?role=client", { replace: true });
+        }
         const n = me.name?.split(" ").map((w) => w[0]).join("").toUpperCase() || "??";
         setInitials(n);
       } catch {
         navigate("/login");
       }
     })();
-  }, []);
+  }, [navigate, roleFromUrl]);
 
   useEffect(() => {
     if (!account) return;
@@ -238,7 +248,7 @@ export default function WorkoutsPage() {
 
   return (
     <div className="min-h-screen bg-[#080D19]">
-      <Navbar role={role} userName={initials} />
+      <Navbar role={role} userName={initials} canSwitchToCoach={role === "client" && canSwitchToCoach} />
 
       <div className="mx-auto max-w-6xl px-6 py-8">
         {/* Header */}

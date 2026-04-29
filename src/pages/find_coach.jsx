@@ -11,6 +11,8 @@ import {
   fetchCoachReports,
   createCoachReport,
 } from "../api/client";
+import { readClientCoachRequests, removeClientCoachRequest, saveClientCoachRequest } from "../utils/coachRequests";
+import { getCoachAccessState } from "../utils/roleAccess";
 
 const role = "client";
 
@@ -52,6 +54,9 @@ export default function FindCoachPage() {
   const [requesting, setRequesting] = useState(null);
   const [requestedIds, setRequestedIds] = useState(new Set());
   const [pendingRequests, setPendingRequests] = useState({});
+  const [requestError, setRequestError] = useState("");
+  const [reviewError, setReviewError] = useState("");
+  const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
 
   const [expandedId, setExpandedId] = useState(null);
   const [coachReviews, setCoachReviews] = useState({});
@@ -70,23 +75,26 @@ export default function FindCoachPage() {
     }
 
     fetchMe()
-      .then((me) => setAccount(me))
+      .then(async (me) => {
+        setAccount(me);
+        const coachAccess = await getCoachAccessState(me);
+        setCanSwitchToCoach(coachAccess.canAccessCoach);
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [navigate]);
 
   useEffect(() => {
     if (!account?.email) return;
-    const storageKey = `pending_coach_requests:${String(account.email).trim().toLowerCase()}`;
-    const raw = localStorage.getItem(storageKey);
-    if (!raw) return;
-    try {
-      const parsed = JSON.parse(raw);
-      setPendingRequests(parsed || {});
-      setRequestedIds(new Set(Object.keys(parsed || {}).map((key) => Number(key))));
-    } catch {
-      setPendingRequests({});
-    }
+    const parsed = readClientCoachRequests(account.email);
+    setPendingRequests(parsed);
+    setRequestedIds(
+      new Set(
+        Object.entries(parsed)
+          .filter(([, value]) => value?.status !== "rejected")
+          .map(([key]) => Number(key))
+      )
+    );
   }, [account?.email]);
 
   useEffect(() => {
@@ -160,54 +168,83 @@ export default function FindCoachPage() {
   };
 
   const handleRequest = async (coachId) => {
-    if (!account?.client_id) return;
+    if (!account?.client_id) {
+      setRequestError("You need to finish client onboarding before requesting a coach.");
+      return;
+    }
+
+    setRequestError("");
     setRequesting(coachId);
     try {
       const response = await requestCoach(account.client_id, coachId);
       setRequestedIds((prev) => new Set(prev).add(coachId));
       if (account?.email && response?.request_id) {
-        const nextPending = {
-          ...pendingRequests,
-          [coachId]: response.request_id,
+        const coachRecord = coaches.find((item) => item.coach_id === coachId);
+        const requestEntry = {
+          request_id: response.request_id,
+          coach_id: coachId,
+          coach_name: coachRecord?.name || `Coach #${coachId}`,
+          coach_email: coachRecord?.email || "",
+          status: "pending",
+          relationship_id: null,
         };
-        const storageKey = `pending_coach_requests:${String(account.email).trim().toLowerCase()}`;
-        localStorage.setItem(storageKey, JSON.stringify(nextPending));
-        setPendingRequests(nextPending);
+        saveClientCoachRequest(account.email, coachId, requestEntry);
+        setPendingRequests((prev) => ({
+          ...prev,
+          [coachId]: requestEntry,
+        }));
       }
-    } catch {
-      // Keep the user on the page.
+    } catch (error) {
+      setRequestError(error.message || "Unable to send coach request.");
     } finally {
       setRequesting(null);
     }
   };
 
   const handleCancelRequest = async (coachId) => {
-    const requestId = pendingRequests[coachId];
+    const requestId = pendingRequests[coachId]?.request_id;
     if (!requestId) return;
+    setRequestError("");
     setRequesting(coachId);
     try {
       await deleteCoachRequest(requestId);
-      const nextPending = { ...pendingRequests };
-      delete nextPending[coachId];
-      setPendingRequests(nextPending);
+      removeClientCoachRequest(account?.email, coachId);
+      setPendingRequests((prev) => {
+        const next = { ...prev };
+        delete next[coachId];
+        return next;
+      });
       setRequestedIds((prev) => {
         const next = new Set(prev);
         next.delete(coachId);
         return next;
       });
-      if (account?.email) {
-        const storageKey = `pending_coach_requests:${String(account.email).trim().toLowerCase()}`;
-        localStorage.setItem(storageKey, JSON.stringify(nextPending));
-      }
+    } catch (error) {
+      setRequestError(error.message || "Unable to cancel coach request.");
     } finally {
       setRequesting(null);
     }
   };
 
   const handleReviewSubmit = async (coachId) => {
+    const requestEntry = pendingRequests[coachId];
+    const storedRelationshipId = account?.client_id
+      ? localStorage.getItem(`client_relationship:${account.client_id}:${coachId}`)
+      : null;
+    const hasRelationshipHistory = Boolean(
+      storedRelationshipId
+      || requestEntry?.relationship_id
+      || requestEntry?.status === "approved"
+    );
+    if (!hasRelationshipHistory) {
+      setReviewError("You can leave a review only if you have or had a relationship with this coach.");
+      return;
+    }
+
     const draft = reviewDrafts[coachId] || { rating: 5, review_text: "" };
     if (!draft.review_text?.trim()) return;
 
+    setReviewError("");
     setSubmittingReviewId(coachId);
     try {
       await createCoachReview(coachId, draft.rating, draft.review_text.trim());
@@ -216,6 +253,8 @@ export default function FindCoachPage() {
         ...prev,
         [coachId]: { rating: 5, review_text: "" },
       }));
+    } catch (error) {
+      setReviewError(error.message || "Unable to submit coach review.");
     } finally {
       setSubmittingReviewId(null);
     }
@@ -242,7 +281,7 @@ export default function FindCoachPage() {
   if (loading) {
     return (
       <div className="min-h-screen" style={{ backgroundColor: "#080D19" }}>
-        <Navbar role={role} userName="?" />
+        <Navbar role={role} userName="?" canSwitchToCoach={canSwitchToCoach} />
         <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
           <div className="h-5 w-48 bg-white/5 rounded animate-pulse" />
           <div className="h-12 bg-white/5 rounded-xl animate-pulse" />
@@ -259,7 +298,7 @@ export default function FindCoachPage() {
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: "#080D19" }}>
-      <Navbar role={role} userName={userInitials} />
+      <Navbar role={role} userName={userInitials} canSwitchToCoach={canSwitchToCoach} />
 
       <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
         <div className="flex items-center justify-between">
@@ -357,6 +396,18 @@ export default function FindCoachPage() {
           {coaches.length} coach{coaches.length !== 1 ? "es" : ""} found
         </p>
 
+        {requestError && (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+            {requestError}
+          </div>
+        )}
+
+        {reviewError && (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+            {reviewError}
+          </div>
+        )}
+
         {loadingCoaches ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <SkeletonDashCard rows={4} />
@@ -385,6 +436,16 @@ export default function FindCoachPage() {
               const isExpanded = expandedId === coach.coach_id;
               const isRequested = requestedIds.has(coach.coach_id);
               const isRequesting = requesting === coach.coach_id;
+              const requestEntry = pendingRequests[coach.coach_id];
+              const requestStatus = requestEntry?.status || null;
+              const storedRelationshipId = account?.client_id
+                ? localStorage.getItem(`client_relationship:${account.client_id}:${coach.coach_id}`)
+                : null;
+              const canReview = Boolean(
+                storedRelationshipId
+                || requestEntry?.relationship_id
+                || requestStatus === "approved"
+              );
               const initials = coach.name?.split(" ").map((name) => name[0]).join("") ?? "?";
               const reviews = coachReviews[coach.coach_id] || [];
               const reports = coachReports[coach.coach_id] || [];
@@ -535,10 +596,14 @@ export default function FindCoachPage() {
                           />
                           <button
                             onClick={() => handleReviewSubmit(coach.coach_id)}
-                            disabled={submittingReviewId === coach.coach_id}
+                            disabled={!canReview || submittingReviewId === coach.coach_id}
                             className="mt-2 w-full rounded-lg bg-blue-600 py-2 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:bg-blue-900/40"
                           >
-                            {submittingReviewId === coach.coach_id ? "Submitting..." : "Submit Review"}
+                            {submittingReviewId === coach.coach_id
+                              ? "Submitting..."
+                              : canReview
+                                ? "Submit Review"
+                                : "Review After Approval"}
                           </button>
                         </div>
 
@@ -573,18 +638,18 @@ export default function FindCoachPage() {
 
                   <div className="flex gap-2 mt-4">
                     <button
-                      onClick={() => toggleExpanded(coach.coach_id)}
+                      onClick={() => navigate(`/coaches/${coach.coach_id}`)}
                       className="flex-1 border border-white/10 text-gray-300 hover:bg-white/5 rounded-xl py-2.5 text-sm font-medium transition-colors"
                     >
-                      {isExpanded ? "Show Less" : "View Details"}
+                      View Profile
                     </button>
                     {isRequested ? (
                       <button
                         onClick={() => handleCancelRequest(coach.coach_id)}
-                        disabled={!pendingRequests[coach.coach_id] || isRequesting}
+                        disabled={requestStatus !== "pending" || isRequesting}
                         className="flex-1 bg-green-900/30 text-green-400 border border-green-500/30 rounded-xl py-2.5 text-sm font-medium disabled:cursor-default disabled:opacity-70"
                       >
-                        {isRequesting ? "Cancelling..." : pendingRequests[coach.coach_id] ? "Cancel Request" : "Request Sent"}
+                        {isRequesting ? "Cancelling..." : requestStatus === "approved" ? "Approved" : requestStatus === "rejected" ? "Rejected" : "Cancel Request"}
                       </button>
                     ) : (
                       <button

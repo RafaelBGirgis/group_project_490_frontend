@@ -47,7 +47,25 @@ export async function apiFetch(path, opts = {}) {
     return null;
   }
 
-  return res.json().catch(() => null);
+  const contentType = res.headers?.get?.("content-type") || "";
+  if (contentType.includes("application/json")) {
+    return res.json().catch(() => null);
+  }
+
+  if (typeof res.text !== "function") {
+    return typeof res.json === "function" ? res.json().catch(() => null) : null;
+  }
+
+  const text = await res.text().catch(() => "");
+  if (!text) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
 }
 
 export function withQuery(path, query = {}) {

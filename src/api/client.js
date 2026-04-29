@@ -46,21 +46,23 @@ export async function updateAccount(payload) {
 export async function uploadProfilePicture(file) {
   const formData = new FormData();
   formData.append("file", file);
-  return apiFetch("/roles/shared/account/update_pfp", {
+  const response = await apiFetch("/roles/shared/account/update_pfp", {
     method: "POST",
     body: formData,
     headers: {},
   });
+  return normalizeUploadResponse(response);
 }
 
 export async function uploadProgressPicture(file) {
   const formData = new FormData();
   formData.append("file", file);
-  return apiFetch("/roles/client/upload_progress_picture", {
+  const response = await apiFetch("/roles/client/upload_progress_picture", {
     method: "POST",
     body: formData,
     headers: {},
   });
+  return normalizeUploadResponse(response);
 }
 
 export async function deactivateAccount() {
@@ -196,7 +198,7 @@ export async function fetchAvailableCoaches(filters = {}) {
 }
 
 export async function requestCoach(_clientId, coachId) {
-  return apiPost(`/roles/client/request_coach/${coachId}`, {});
+  return apiPost(`/roles/client/request_coach/${coachId}`);
 }
 
 export async function deleteCoachRequest(requestId) {
@@ -303,9 +305,18 @@ function normalizeCoachItem(coach) {
     ? coach.certifications.map((cert) => ({
         name: cert.certification_name || cert.name || "Certification",
         organization: cert.certification_organization || cert.organization || "Organization",
+        year: cert.certification_date || cert.year || "",
+        description: cert.certification_score || cert.description || "",
       }))
     : [];
-  const experiences = Array.isArray(coach.experiences) ? coach.experiences : [];
+  const experiences = Array.isArray(coach.experiences)
+    ? coach.experiences.map((experience) => ({
+        title: experience.experience_title || experience.title || "Experience",
+        organization: experience.experience_name || experience.organization || experience.issuer || "",
+        year: formatExperienceYear(experience.experience_start, experience.experience_end, experience.year),
+        description: experience.experience_description || experience.description || "",
+      }))
+    : [];
 
   return {
     ...coach,
@@ -316,10 +327,28 @@ function normalizeCoachItem(coach) {
     experience_years: experiences.length,
     active_clients: 0,
     availability_slots: 0,
-    pricing: null,
+    pricing: coach.pricing || null,
+    pricingInterval: coach.payment_interval || coach.pricing_interval || coach.pricing?.payment_interval || "",
+    amount:
+      coach.amount != null
+        ? String(coach.amount)
+        : coach.price_cents != null
+          ? String(Number(coach.price_cents) / 100)
+          : coach.pricing?.payment_amount != null
+            ? String(coach.pricing.payment_amount)
+            : "",
     certifications,
+    experiences,
     verified: true,
   };
+}
+
+function formatExperienceYear(start, end, fallback) {
+  if (fallback) return String(fallback);
+  const startYear = String(start || "").slice(0, 4);
+  const endYear = String(end || "").slice(0, 4);
+  if (startYear && endYear) return `${startYear}-${endYear}`;
+  return startYear || endYear || "";
 }
 
 function buildPaymentInformation(paymentMethod) {
@@ -522,4 +551,67 @@ function toBackendTime(hour) {
 function extractWeightNumber(value) {
   const match = String(value || "").match(/\d+/);
   return match ? Number(match[0]) : 0;
+}
+
+function normalizeUploadResponse(response) {
+  const resolvedUrl = extractUploadedAssetUrl(response);
+
+  if (typeof response === "string") {
+    return {
+      url: resolvedUrl,
+      public_url: resolvedUrl,
+      pfp_url: resolvedUrl,
+    };
+  }
+
+  if (!response || typeof response !== "object") {
+    return response;
+  }
+
+  return resolvedUrl
+    ? {
+        ...response,
+        url: resolvedUrl,
+        public_url: response.public_url || resolvedUrl,
+        pfp_url: response.pfp_url || resolvedUrl,
+      }
+    : response;
+}
+
+export function extractUploadedAssetUrl(response) {
+  if (typeof response === "string") {
+    return response.trim() || null;
+  }
+
+  if (!response || typeof response !== "object") {
+    return null;
+  }
+
+  const candidates = [
+    response.pfp_url,
+    response.url,
+    response.public_url,
+    response.file_url,
+    response.image_url,
+    response.profile_picture_url,
+    response.account?.pfp_url,
+    response.account?.url,
+    response.account?.public_url,
+    response.data?.pfp_url,
+    response.data?.url,
+    response.data?.public_url,
+  ];
+
+  const directMatch = candidates.find((value) => typeof value === "string" && value.trim());
+  if (directMatch) {
+    return directMatch.trim();
+  }
+
+  for (const value of Object.values(response)) {
+    if (typeof value === "string" && /^https?:\/\//i.test(value.trim())) {
+      return value.trim();
+    }
+  }
+
+  return null;
 }

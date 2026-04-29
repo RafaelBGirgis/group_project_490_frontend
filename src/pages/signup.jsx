@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import clientLogo from "../assets/Client Logo.svg";
 import { initiateGoogleOAuth, signup as signupRequest, storeToken } from "../api/auth";
+import { saveSignupPrefill } from "../utils/profileDrafts";
 
 export default function SignupPage() {
   const [formData, setFormData] = useState({
@@ -50,7 +51,14 @@ export default function SignupPage() {
         formData.bio.trim() || undefined
       );
       storeToken(data.access_token);
-      localStorage.setItem("active_user_email", formData.email.trim().toLowerCase());
+      saveSignupPrefill({
+        name: formData.name,
+        email: formData.email,
+        age: parsedAge,
+        gender: formData.gender,
+        bio: formData.bio.trim(),
+        pfpUrl: formData.pfpUrl.trim(),
+      });
       window.location.href = "/onboarding";
     } catch (err) {
       console.error(err);

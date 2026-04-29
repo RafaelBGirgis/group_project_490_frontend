@@ -26,11 +26,14 @@ import {
   fetchClientRequests,
   lookupClient,
   acceptClientRequest,
+  cacheAcceptedClientForCoach,
   denyClientRequest,
   createClientReview,
   fetchClientReports,
 } from "../api/coach";
-import { createConversation } from "../api/chat";
+import { cacheConversationForAccount, createConversation } from "../api/chat";
+import { getCoachAccessState } from "../utils/roleAccess";
+import { updateClientCoachRequestByRequestId } from "../utils/coachRequests";
 import ClientsDetail from "../components/overlays/clients_detail";
 import SessionsDetail from "../components/overlays/sessions_detail";
 import ReviewsDetail from "../components/overlays/reviews_detail";
@@ -79,6 +82,7 @@ export default function CoachDashboard() {
   const [requestActionId, setRequestActionId] = useState(null);
   const [clientReportDrafts, setClientReportDrafts] = useState({});
   const [clientReports, setClientReports] = useState({});
+  const [availabilityError, setAvailabilityError] = useState("");
 
   /* ── load account ────────────────────────────────────────────────── */
   useEffect(() => {
@@ -86,12 +90,17 @@ export default function CoachDashboard() {
     (async () => {
       try {
         const me = await fetchMe();
+        const coachAccess = await getCoachAccessState(me);
+        if (!coachAccess.canAccessCoach) {
+          navigate("/profile");
+          return;
+        }
         setAccount(me);
         if (me.coach_id) setCoachId(me.coach_id);
       } catch { /* redirect handled */ }
       finally { setLoading(false); }
     })();
-  }, [authed]);
+  }, [authed, navigate]);
 
   /* ── load dashboard data ─────────────────────────────────────────── */
   useEffect(() => {
@@ -116,12 +125,12 @@ export default function CoachDashboard() {
 
       try {
         const requests = await fetchClientRequests();
-        setClientRequests(requests);
-      } catch {
-        setClientRequests([]);
-      }
-    })();
-  }, [coachId]);
+      setClientRequests(requests);
+    } catch {
+      setClientRequests([]);
+    }
+  })();
+}, [coachId]);
 
   const loadClientRequestDetails = useCallback(async (clientId) => {
     if (clientRequestDetails[clientId]) return clientRequestDetails[clientId];
@@ -144,16 +153,70 @@ export default function CoachDashboard() {
     try {
       const accepted = await acceptClientRequest(request.request_id);
       if (accepted?.relationship_id) {
+        const alreadyTrackedClient = clients.some((client) => Number(client.id) === Number(request.client_id));
+        const alreadyActiveClient = clients.some(
+          (client) => Number(client.id) === Number(request.client_id) && client.status === "active"
+        );
         localStorage.setItem(
           `client_relationship:${request.client_id}:${coachId}`,
           String(accepted.relationship_id)
         );
         const detail = await loadClientRequestDetails(request.client_id).catch(() => null);
-        await createConversation(accepted.relationship_id, {
+        const conversation = await createConversation(accepted.relationship_id, {
           id: request.client_id,
           name: detail?.base_account?.name || `Client #${request.client_id}`,
           role: "client",
-        }).catch(() => {});
+        }, {
+          accountId: account?.id || coachId,
+          role: "coach",
+        }).catch(() => null);
+        if (conversation) {
+          cacheConversationForAccount(
+            {
+              id: conversation.id,
+              partner_id: coachId,
+              partner_name: account?.name || "Coach",
+              partner_role: "coach",
+              last_message: conversation.last_message || "",
+              last_message_at: conversation.last_message_at || "",
+              unread_count: conversation.unread_count || 0,
+            },
+            { accountId: detail?.base_account?.id || request.client_id, role: "client" }
+          );
+        }
+        updateClientCoachRequestByRequestId(request.request_id, {
+          status: "approved",
+          relationship_id: accepted.relationship_id,
+        });
+
+        const acceptedClient = {
+          id: request.client_id,
+          request_id: request.request_id,
+          name: detail?.base_account?.name || `Client #${request.client_id}`,
+          goal: detail?.fitness_goals?.[0]?.goal_enum || "Active client",
+          status: "active",
+          joined: new Date().toLocaleDateString(),
+          relationship_id: accepted.relationship_id,
+          details: detail,
+        };
+
+        cacheAcceptedClientForCoach(coachId, acceptedClient);
+        setClients((prev) => {
+          const next = [
+            acceptedClient,
+            ...prev.filter((client) => Number(client.id) !== Number(request.client_id)),
+          ];
+          return next;
+        });
+        setStats((prev) =>
+          prev
+            ? {
+                ...prev,
+                total_clients: prev.total_clients + (alreadyTrackedClient ? 0 : 1),
+                active_clients: prev.active_clients + (alreadyActiveClient ? 0 : 1),
+              }
+            : prev
+        );
       }
       setClientRequests((prev) => prev.filter((item) => item.request_id !== request.request_id));
     } finally {
@@ -165,6 +228,7 @@ export default function CoachDashboard() {
     setRequestActionId(requestId);
     try {
       await denyClientRequest(requestId);
+      updateClientCoachRequestByRequestId(requestId, { status: "rejected" });
       setClientRequests((prev) => prev.filter((item) => item.request_id !== requestId));
     } finally {
       setRequestActionId(null);
@@ -327,6 +391,11 @@ export default function CoachDashboard() {
             title="My Availability"
             action={{ label: "Edit", onClick: () => setOverlay("availability") }}
           >
+            {availabilityError ? (
+              <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                {availabilityError}
+              </div>
+            ) : null}
             <div className="grid grid-cols-8 gap-1 mb-2">
               <div />
               {WEEKDAYS.map((d) => (
@@ -454,8 +523,14 @@ export default function CoachDashboard() {
           weekdays={WEEKDAYS}
           role="coach"
           onSave={async (updatedSlots) => {
-            await saveCoachAvailability(coachId, updatedSlots);
-            setAvailability(updatedSlots);
+            setAvailabilityError("");
+            try {
+              const refreshedAvailability = await saveCoachAvailability(coachId, updatedSlots);
+              setAvailability(refreshedAvailability);
+            } catch (error) {
+              setAvailabilityError(error.message || "Unable to save coach availability.");
+              throw error;
+            }
           }}
         />
       </Overlay>

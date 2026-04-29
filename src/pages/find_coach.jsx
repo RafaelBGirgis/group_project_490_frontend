@@ -13,6 +13,7 @@ import {
 } from "../api/client";
 import { readClientCoachRequests, removeClientCoachRequest, saveClientCoachRequest } from "../utils/coachRequests";
 import { getCoachAccessState } from "../utils/roleAccess";
+import { StarIcon as SolidStar } from '@heroicons/react/24/solid';
 
 const role = "client";
 
@@ -27,13 +28,34 @@ function extractSpecialties(coaches) {
 function Stars({ rating }) {
   const full = Math.floor(rating);
   const half = rating - full >= 0.25;
+  const stars = [];
 
-  return (
-    <span className="text-yellow-400 text-sm tracking-wide">
-      {"★".repeat(full)}
-      {half && "½"}
-      <span className="text-gray-600">{"★".repeat(5 - full - (half ? 1 : 0))}</span>
+  {/* full star */}
+  for (let i = 0; i < full; i++)
+    stars.push(<SolidStar className="w-[1em] h-[1em]" />);
+
+  {/* half star */}
+  if (half) {
+    stars.push(
+    <span key="half" className="relative w-[1em] h-[1em]">
+      {/* grey background*/}
+      <SolidStar className="absolute w-[1em] h-[1em] text-gray-600" />
+
+      {/* yellow half star */}
+      <span className="absolute overflow-hidden w-1/2 text-yellow-400">
+        <SolidStar className="w-[1em] h-[1em]" />
+      </span>
     </span>
+    );
+  }
+
+  {/* empty star */}
+  for (let i = stars.length; i < 5; i++)
+    stars.push(<SolidStar className="w-[1em] h-[1em] text-gray-600" />);
+
+  {/* render stars array */}
+  return (
+    <> {stars} </>
   );
 }
 
@@ -478,10 +500,11 @@ export default function FindCoachPage() {
                       </div>
 
                       <div className="flex items-center gap-2 mt-2">
-                        <Stars rating={coach.rating_avg ?? 0} />
-                        <span className="text-gray-500 text-xs">
-                          {(coach.rating_avg ?? 0).toFixed(1)} · {coach.review_count} review
-                          {coach.review_count !== 1 ? "s" : ""}
+                        <span className="inline-flex items-center text-yellow-400 text-sm leading-none tracking-normal">
+                          <Stars rating={coach.rating_avg ?? 0} />
+                          <span className="text-gray-600 ml-2">
+                            {coach.rating_avg?.toFixed(1)} · {coach.review_count} review{coach.review_count !== 1 ? "s" : ""}
+                          </span>
                         </span>
                       </div>
                     </div>

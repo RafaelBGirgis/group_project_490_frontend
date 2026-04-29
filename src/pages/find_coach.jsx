@@ -15,6 +15,8 @@ import { StarIcon as SolidStar } from '@heroicons/react/24/solid'
   
 
 
+import Overlay from "../components/Overlay";
+import CoachDetail from "../components/overlays/coach_detail";
 
 const role = "client";
 
@@ -86,6 +88,11 @@ export default function FindCoachPage() {
   const [reportDrafts, setReportDrafts] = useState({});
   const [submittingReviewId, setSubmittingReviewId] = useState(null);
   const [submittingReportId, setSubmittingReportId] = useState(null);
+
+  /* ── overlay ─────────────────────────────────────────────────────── */
+  const [overlay, setOverlay] = useState(null);
+  const closeOverlay = () => setOverlay(null);
+  const selectedCoach = coaches.find(c => c.coach_id === expandedId);
 
   useEffect(() => {
     const token = localStorage.getItem("jwt");
@@ -470,135 +477,15 @@ export default function FindCoachPage() {
                     </div>
                   </div>
 
-                  {isExpanded && (
-                    <div className="mt-4 pt-3 border-t border-white/5 space-y-3">
-                      {coach.bio ? (
-                        <div>
-                          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">About</p>
-                          <p className="text-gray-300 text-xs leading-relaxed">{coach.bio}</p>
-                        </div>
-                      ) : null}
-
-                      {coach.certifications?.length > 0 ? (
-                        <div>
-                          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Certifications</p>
-                          <div className="space-y-1">
-                            {coach.certifications.map((certification, index) => (
-                              <div key={`${certification.name}-${index}`} className="flex items-center gap-2">
-                                <span className="text-blue-400 text-xs">✓</span>
-                                <span className="text-gray-300 text-xs">{certification.name}</span>
-                                <span className="text-gray-600 text-[10px]">— {certification.organization}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-
-                      <div>
-                        <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Recent Reviews</p>
-                        {loadingDetailsId === coach.coach_id ? (
-                          <p className="text-gray-500 text-xs">Loading reviews...</p>
-                        ) : reviews.length === 0 ? (
-                          <p className="text-gray-500 text-xs">No reviews yet.</p>
-                        ) : (
-                          <div className="space-y-2">
-                            {reviews.slice(0, 3).map((review) => (
-                              <div key={review.id} className="rounded-xl bg-[#0B1220] px-3 py-2">
-                                <div className="flex items-center justify-between">
-                                  <span className="text-yellow-400 text-[11px]">
-                                    {"★".repeat(Math.max(0, Math.round(Number(review.rating || 0))))}
-                                  </span>
-                                  <span className="text-[10px] text-gray-600">
-                                    {review.last_updated
-                                      ? new Date(review.last_updated).toLocaleDateString()
-                                      : ""}
-                                  </span>
-                                </div>
-                                <p className="mt-1 text-xs text-gray-300">{review.review_text}</p>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <div className="rounded-xl bg-[#0B1220] p-3">
-                          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Leave Review</p>
-                          <select
-                            value={reviewDrafts[coach.coach_id]?.rating ?? 5}
-                            onChange={(e) =>
-                              setReviewDrafts((prev) => ({
-                                ...prev,
-                                [coach.coach_id]: {
-                                  rating: Number(e.target.value),
-                                  review_text: prev[coach.coach_id]?.review_text ?? "",
-                                },
-                              }))
-                            }
-                            className="mb-2 w-full rounded-lg border border-white/10 bg-[#080D19] px-3 py-2 text-xs text-gray-300 outline-none"
-                          >
-                            {[5, 4, 3, 2, 1].map((value) => (
-                              <option key={value} value={value}>
-                                {value} star{value !== 1 ? "s" : ""}
-                              </option>
-                            ))}
-                          </select>
-                          <textarea
-                            value={reviewDrafts[coach.coach_id]?.review_text ?? ""}
-                            onChange={(e) =>
-                              setReviewDrafts((prev) => ({
-                                ...prev,
-                                [coach.coach_id]: {
-                                  rating: prev[coach.coach_id]?.rating ?? 5,
-                                  review_text: e.target.value,
-                                },
-                              }))
-                            }
-                            rows={3}
-                            placeholder="Share your experience with this coach"
-                            className="w-full rounded-lg border border-white/10 bg-[#080D19] px-3 py-2 text-xs text-white outline-none placeholder:text-gray-600"
-                          />
-                          <button
-                            onClick={() => handleReviewSubmit(coach.coach_id)}
-                            disabled={submittingReviewId === coach.coach_id}
-                            className="mt-2 w-full rounded-lg bg-blue-600 py-2 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:bg-blue-900/40"
-                          >
-                            {submittingReviewId === coach.coach_id ? "Submitting..." : "Submit Review"}
-                          </button>
-                        </div>
-
-                        <div className="rounded-xl bg-[#0B1220] p-3">
-                          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Report Coach</p>
-                          <p className="mb-2 text-xs text-gray-400">
-                            {reports.length} submitted report{reports.length !== 1 ? "s" : ""}
-                          </p>
-                          <textarea
-                            value={reportDrafts[coach.coach_id] ?? ""}
-                            onChange={(e) =>
-                              setReportDrafts((prev) => ({
-                                ...prev,
-                                [coach.coach_id]: e.target.value,
-                              }))
-                            }
-                            rows={3}
-                            placeholder="Describe the issue you want to report"
-                            className="w-full rounded-lg border border-white/10 bg-[#080D19] px-3 py-2 text-xs text-white outline-none placeholder:text-gray-600"
-                          />
-                          <button
-                            onClick={() => handleReportSubmit(coach.coach_id)}
-                            disabled={submittingReportId === coach.coach_id}
-                            className="mt-2 w-full rounded-lg border border-red-500/30 bg-red-900/20 py-2 text-xs font-medium text-red-300 transition-colors hover:bg-red-900/30 disabled:opacity-50"
-                          >
-                            {submittingReportId === coach.coach_id ? "Submitting..." : "Submit Report"}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
                   <div className="flex gap-2 mt-4">
                     <button
-                      onClick={() => toggleExpanded(coach.coach_id)}
+                      onClick={() => {
+                        setExpandedId(coach.coach_id);
+                        setOverlay("coach-details");
+                        if (!coachReviews[coach.coach_id] || !coachReports[coach.coach_id]) {
+                          loadCoachDetails(coach.coach_id);
+                        }
+                      }}
                       className="flex-1 border border-white/10 text-gray-300 hover:bg-white/5 rounded-xl py-2.5 text-sm font-medium transition-colors"
                     >
                       {isExpanded ? "Show Less" : "View Details"}
@@ -627,6 +514,24 @@ export default function FindCoachPage() {
           </div>
         )}
       </div>
+
+      {/* ─── Overlays ───────────────────────────────────────────── */}
+      <Overlay open={overlay === "coach-details"} onClose={closeOverlay} title={selectedCoach?.name ?? "Coach Details"} wide>
+        <CoachDetail
+          coach={selectedCoach}
+          reviews={coachReviews[expandedId] || []}
+          reports={coachReports[expandedId] || []}
+          loadingDetailsId={loadingDetailsId}
+          reviewDrafts={reviewDrafts}
+          reportDrafts={reportDrafts}
+          submittingReviewId={submittingReviewId}
+          submittingReportId={submittingReportId}
+          onReviewSubmit={handleReviewSubmit}
+          onReportSubmit={handleReportSubmit}
+          setReviewDrafts={setReviewDrafts}
+          setReportDrafts={setReportDrafts}
+        />
+      </Overlay>
     </div>
   );
 }

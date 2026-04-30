@@ -1,10 +1,6 @@
 import { apiGet, apiPatch, apiPost } from "./api";
 
-const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const DEFAULT_TIME_OPTIONS = [
-  "5AM", "6AM", "7AM", "8AM", "9AM", "10AM", "11AM",
-  "12PM", "1PM", "2PM", "3PM", "4PM", "5PM", "6PM", "7PM", "8PM", "9PM",
-];
+/* ─── coach profile ───────────────────────────────────────────────── */
 
 export async function fetchCoachProfile() {
   return apiPost("/roles/coach/me", {});

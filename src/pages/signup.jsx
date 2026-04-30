@@ -5,6 +5,8 @@ import { initiateGoogleOAuth, isAuthenticated, signup as signupRequest, storeTok
 import { fetchMe } from "../api/client";
 import { saveSignupPrefill } from "../utils/profileDrafts";
 
+const API_BASE_URL = import.meta.env.PROD ? "https://api.till-failure.us" : "";
+
 export default function SignupPage() {
   const [formData, setFormData] = useState({
     name: "",
@@ -46,6 +48,14 @@ export default function SignupPage() {
       cancelled = true;
     };
   }, []);
+  const getErrorMessage = async (response, fallback) => {
+    try {
+      const errorData = await response.json();
+      return errorData?.detail || fallback;
+    } catch {
+      return fallback;
+    }
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -173,7 +183,7 @@ export default function SignupPage() {
             <div className="mt-6">
               <button
                 type="button"
-                onClick={initiateGoogleOAuth}
+                onClick={() => { window.location.href = `${API_BASE_URL}/auth/google`; }}
                 className="flex w-full items-center justify-center gap-3 rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-[rgba(255,255,255,0.06)]"
               >
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-[10px] font-bold text-white">

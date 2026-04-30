@@ -8,6 +8,8 @@ function resolvePostLoginPath(account) {
   return account?.client_id ? "/client" : "/onboarding";
 }
 
+const API_BASE_URL = import.meta.env.PROD ? "https://api.till-failure.us" : "";
+
 function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

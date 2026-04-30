@@ -278,9 +278,18 @@ export default function AdminDash() {
   useEffect(() => {
     if (!authed) return;
     (async () => {
+      // Fetch account info — use a direct fetch to avoid the global 401
+      // redirect in apiFetch (admin may not have a backend-valid JWT yet)
       try {
-        const me = await fetchMe();
-        if (me?.name) setInitials(me.name.split(" ").map((n) => n[0]).join("").toUpperCase());
+        const token = localStorage.getItem("jwt");
+        const API_BASE = import.meta.env.PROD ? "https://api.till-failure.us" : "";
+        const res = await fetch(`${API_BASE}/me`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (res.ok) {
+          const me = await res.json();
+          if (me?.name) setInitials(me.name.split(" ").map((n) => n[0]).join("").toUpperCase());
+        }
       } catch {}
 
       const [s, u, ex, an, requests] = await Promise.all([

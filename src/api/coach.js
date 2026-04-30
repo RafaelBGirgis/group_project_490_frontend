@@ -472,11 +472,15 @@ function backendTimeToLabel(value) {
   if (!raw) return null;
   const match = raw.match(/^(\d{1,2}):(\d{2})/);
   if (!match) return normalizeTimeLabel(raw);
+  // The availability grid is keyed on whole-hour buckets, and the frontend
+  // always writes :00:00 minutes. Any stray non-zero minutes in the backend
+  // (seed data, older clients) get floored to the hour so they merge into
+  // the matching bucket instead of producing an off-grid row like "10:49PM".
   let hour = Number(match[1]);
-  const minute = match[2];
+  if (!Number.isFinite(hour) || hour < 0 || hour > 23) return null;
   const suffix = hour >= 12 ? "PM" : "AM";
   hour = hour % 12 || 12;
-  return minute === "00" ? `${hour}${suffix}` : `${hour}:${minute}${suffix}`;
+  return `${hour}${suffix}`;
 }
 
 function convertFromSlotsFormat(slots) {

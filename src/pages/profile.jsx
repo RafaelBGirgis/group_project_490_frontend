@@ -10,9 +10,9 @@ import {
   fetchMe,
   updateAccount,
   updateClientInformation,
-  uploadProgressPicture,
   uploadProfilePicture,
 } from "../api/client";
+import TelemetryCharts from "../components/overlays/telemetry_charts";
 import { loadProfileDraft, saveOnboardingDraft } from "../utils/profileDrafts";
 import { readCoachRequestResolution, clearCoachRequestResolution } from "../utils/coachRequests";
 import {
@@ -192,9 +192,6 @@ function ProfilePage({ role = "client" }) {
     exp_date: "",
   });
   const [showPaymentForm, setShowPaymentForm] = useState(false);
-  const [progressPictures, setProgressPictures] = useState([]);
-  const [uploadingProgressPicture, setUploadingProgressPicture] = useState(false);
-  const [progressPictureError, setProgressPictureError] = useState("");
   const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
 
   const fullName = useMemo(
@@ -218,10 +215,6 @@ function ProfilePage({ role = "client" }) {
     return `${f}${l}`.toUpperCase() || "?";
   }, [profile.firstName, profile.lastName]);
 
-  const progressPicturesStorageKey = useMemo(
-    () => `client_progress_pictures:${String(profile.email || "current").trim().toLowerCase()}`,
-    [profile.email]
-  );
 
   useEffect(() => {
     if (!location.state?.coachRequestSubmitted) return;
@@ -363,19 +356,6 @@ function ProfilePage({ role = "client" }) {
             ]);
           }
 
-          const storedProgressPictures = localStorage.getItem(
-            `client_progress_pictures:${String(data.email || "current").trim().toLowerCase()}`
-          );
-          if (storedProgressPictures) {
-            try {
-              const parsed = JSON.parse(storedProgressPictures);
-              setProgressPictures(Array.isArray(parsed) ? parsed : []);
-            } catch {
-              setProgressPictures([]);
-            }
-          } else {
-            setProgressPictures([]);
-          }
         }
 
         if (isCoach) {
@@ -676,49 +656,6 @@ function ProfilePage({ role = "client" }) {
     ]);
     setNewPaymentMethod({ type: "", ccnum: "", cv: "", exp_date: "" });
     setShowPaymentForm(false);
-  };
-
-  const handleProgressPictureUpload = async (file) => {
-    if (!file) return;
-
-    setProgressPictureError("");
-    setUploadingProgressPicture(true);
-
-    try {
-      const response = await uploadProgressPicture(file);
-      const url = extractUploadedAssetUrl(response);
-
-      if (!url) {
-        throw new Error("The backend did not return a progress picture URL.");
-      }
-
-      const newEntry = {
-        id: Date.now(),
-        url,
-        uploaded_at: new Date().toISOString(),
-        file_name: file.name,
-      };
-
-      setProgressPictures((prev) => {
-        const updated = [newEntry, ...prev];
-        localStorage.setItem(progressPicturesStorageKey, JSON.stringify(updated));
-        return updated;
-      });
-    } catch (error) {
-      setProgressPictureError(
-        error.message || "Unable to upload your progress picture right now."
-      );
-    } finally {
-      setUploadingProgressPicture(false);
-    }
-  };
-
-  const handleRemoveProgressPicture = (id) => {
-    setProgressPictures((prev) => {
-      const updated = prev.filter((item) => item.id !== id);
-      localStorage.setItem(progressPicturesStorageKey, JSON.stringify(updated));
-      return updated;
-    });
   };
 
   const deleteItem = (setter, id) => {
@@ -1086,6 +1023,12 @@ function ProfilePage({ role = "client" }) {
             </Panel>
 
             {!isCoach && (
+              <Panel title="Progress &amp; Telemetry" accent={accent}>
+                <TelemetryCharts accent={accent} />
+              </Panel>
+            )}
+
+            {!isCoach && (
               <Panel title="Payment Methods" accent={accent}>
                 <div className="space-y-3">
                   {paymentMethods.map((method) => (
@@ -1180,90 +1123,6 @@ function ProfilePage({ role = "client" }) {
                           Add Payment Method
                         </button>
                       </div>
-                    </div>
-                  )}
-                </div>
-              </Panel>
-            )}
-
-            {!isCoach && (
-              <Panel title="Progress Pictures" accent={accent}>
-                <div className="space-y-4">
-                  <div className="rounded-xl border border-white/6 bg-[#101827] px-4 py-3">
-                    <p className="text-sm font-semibold text-white">Upload a progress picture</p>
-                    <p className="mt-1 text-xs text-slate-400">
-                      This uses the backend upload route and stores the returned image URL in your
-                      local profile view because the backend route does not save it to the database yet.
-                    </p>
-
-                    <label
-                      className="mt-4 inline-flex cursor-pointer items-center rounded-lg px-4 py-2 text-sm font-semibold text-white"
-                      style={{ backgroundColor: accent }}
-                    >
-                      {uploadingProgressPicture ? "Uploading..." : "Choose Image"}
-                      <input
-                        type="file"
-                        className="hidden"
-                        accept="image/*"
-                        disabled={uploadingProgressPicture}
-                        onChange={(e) => {
-                          const file = e.target.files?.[0] || null;
-                          handleProgressPictureUpload(file);
-                          e.target.value = "";
-                        }}
-                      />
-                    </label>
-
-                    {progressPictureError && (
-                      <p className="mt-3 text-xs text-red-300">{progressPictureError}</p>
-                    )}
-                  </div>
-
-                  {progressPictures.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-white/8 bg-[#101827] px-4 py-8 text-center text-sm text-slate-500">
-                      No progress pictures uploaded yet.
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {progressPictures.map((picture) => (
-                        <div
-                          key={picture.id}
-                          className="overflow-hidden rounded-xl border border-white/6 bg-[#101827]"
-                        >
-                          <img
-                            src={picture.url}
-                            alt={picture.file_name || "Progress"}
-                            className="h-56 w-full bg-[#0F172A] object-cover"
-                          />
-                          <div className="space-y-2 px-4 py-3">
-                            <p className="truncate text-sm font-medium text-white">
-                              {picture.file_name || "Progress photo"}
-                            </p>
-                            <p className="text-xs text-slate-500">
-                              Uploaded{" "}
-                              {picture.uploaded_at
-                                ? new Date(picture.uploaded_at).toLocaleString()
-                                : "recently"}
-                            </p>
-                            <div className="flex gap-2">
-                              <a
-                                href={picture.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs font-medium text-slate-300"
-                              >
-                                Open
-                              </a>
-                              <button
-                                onClick={() => handleRemoveProgressPicture(picture.id)}
-                                className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300"
-                              >
-                                Remove
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
                     </div>
                   )}
                 </div>

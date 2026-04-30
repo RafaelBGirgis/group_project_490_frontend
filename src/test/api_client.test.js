@@ -228,15 +228,29 @@ describe("saveAvailability", () => {
    ═══════════════════════════════════════════════════════════════════════ */
 
 describe("fetchMealsToday", () => {
-  it("returns mock meals with required fields on fallback", async () => {
+  it("returns an empty list when the telemetry endpoint is unreachable", async () => {
     mockFetchFail();
     const meals = await fetchMealsToday(1);
-    expect(meals.length).toBeGreaterThan(0);
-    meals.forEach((m) => {
-      expect(m.meal_type).toBeTruthy();
-      expect(m.meal_name).toBeTruthy();
-      expect(typeof m.calories).toBe("number");
+    expect(meals).toEqual([]);
+  });
+
+  it("normalizes CompletedMealActivity rows from the backend", async () => {
+    mockFetchOk([
+      { id: 7, on_demand_meal_id: 3, client_prescribed_meal_id: null, last_updated: "2026-04-30T12:00:00" },
+      { id: 8, on_demand_meal_id: null, client_prescribed_meal_id: 5, last_updated: "2026-04-30T18:00:00" },
+    ]);
+    const meals = await fetchMealsToday(1);
+    expect(meals).toHaveLength(2);
+    expect(meals[0]).toMatchObject({
+      id: 7,
+      on_demand_meal_id: 3,
+      client_prescribed_meal_id: null,
     });
+    expect(meals[1]).toMatchObject({
+      id: 8,
+      client_prescribed_meal_id: 5,
+    });
+    meals.forEach((m) => expect(m.logged_at).toBeTruthy());
   });
 });
 

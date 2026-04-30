@@ -166,16 +166,68 @@ export async function saveAvailability(clientId, slots) {
   }
 }
 
-export async function fetchMealsToday(_clientId) {
-  return [
-    { id: 1, meal_type: "Breakfast", meal_name: "Oats & Berries", calories: 380 },
-    { id: 2, meal_type: "Lunch", meal_name: "Chicken & Rice", calories: 620 },
-    { id: 3, meal_type: "Snack", meal_name: "Protein Bar", calories: 220 },
-  ];
+/**
+ * Fetch the meals the client has logged via the daily survey (newest first).
+ * Returns raw CompletedMealActivity rows from the backend — each carries
+ * ids and timestamps but the backend currently exposes no route to resolve
+ * those ids back to meal name / calories, so the consumer must accept a
+ * minimal shape.
+ */
+export async function fetchMealsToday(_clientId, { skip = 0, limit = 100 } = {}) {
+  try {
+    const result = await apiGet(
+      withQuery("/roles/client/telemetry/query/meals", { skip, limit })
+    );
+    if (!Array.isArray(result)) return [];
+    return result.map((row) => ({
+      id: row.id,
+      client_prescribed_meal_id: row.client_prescribed_meal_id ?? null,
+      on_demand_meal_id: row.on_demand_meal_id ?? null,
+      logged_at: row.last_updated || null,
+    }));
+  } catch {
+    return [];
+  }
 }
 
-export async function logMeal(_clientId, _mealPayload) {
-  return { success: true };
+/**
+ * Log a meal for today via the daily-survey/meal flow:
+ *   POST /daily-survey/meal/start   (idempotent — only fires if not started)
+ *   POST /daily-survey/meal/submit  (with on_demand_meal_id or client_prescribed_meal_id)
+ *
+ * The backend's MealSurveySubmitPayload requires at least one of those ids,
+ * and there is no route to create a Meal row server-side, so the caller must
+ * supply an existing id. Throws on backend rejection.
+ */
+export async function logMeal(_clientId, mealPayload = {}) {
+  const onDemandId =
+    mealPayload.on_demand_meal_id != null ? Number(mealPayload.on_demand_meal_id) : null;
+  const prescribedId =
+    mealPayload.client_prescribed_meal_id != null
+      ? Number(mealPayload.client_prescribed_meal_id)
+      : null;
+
+  if (!Number.isFinite(onDemandId) && !Number.isFinite(prescribedId)) {
+    throw new Error(
+      "Meal log needs either an on_demand_meal_id or a client_prescribed_meal_id."
+    );
+  }
+
+  // Mark the daily meal survey as started (silently no-ops if already started).
+  try {
+    await apiPost("/roles/client/fitness/daily-survey/meal/start", {});
+  } catch (error) {
+    // The backend returns 400 "already submitted/started" — that's fine here,
+    // any other status will resurface from the submit call below anyway.
+    if (error?.status && ![400, 409].includes(error.status)) {
+      throw error;
+    }
+  }
+
+  return apiPost("/roles/client/fitness/daily-survey/meal/submit", {
+    on_demand_meal_id: Number.isFinite(onDemandId) ? onDemandId : null,
+    client_prescribed_meal_id: Number.isFinite(prescribedId) ? prescribedId : null,
+  });
 }
 
 export async function fetchAvailableCoaches(filters = {}) {

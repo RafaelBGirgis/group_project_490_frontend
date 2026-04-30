@@ -1,76 +1,92 @@
 import { useState } from "react";
 
 /**
- * Meal detail / log overlay — shown when "Log Meal +" is clicked.
+ * Meal detail overlay.
+ *
+ * Backend reality:
+ *   GET /roles/client/telemetry/query/meals     — returns CompletedMealActivity
+ *                                                 rows (ids + timestamps only).
+ *   POST /roles/client/fitness/daily-survey/meal/start
+ *   POST /roles/client/fitness/daily-survey/meal/submit
+ *                                                 — requires either an
+ *                                                 on_demand_meal_id or a
+ *                                                 client_prescribed_meal_id.
+ *
+ * There is no backend route to create new Meal rows or look them up by id,
+ * so this overlay shows a minimal list (ids + dates) and asks the user for
+ * an existing meal id when logging a new one.
  *
  * Props:
- *   meals      – array of { id, meal_type, meal_name, calories }
- *   onLogMeal  – (mealPayload) => void
- *   caloriesConsumed – number
- *   caloriesGoal     – number
+ *   meals      – array of { id, on_demand_meal_id, client_prescribed_meal_id, logged_at }
+ *   onLogMeal  – (mealPayload) => Promise — receives one of the two id fields
  */
-export default function MealDetail({ meals, onLogMeal, caloriesConsumed, caloriesGoal }) {
+export default function MealDetail({ meals, onLogMeal }) {
   const [showForm, setShowForm] = useState(false);
-  const [mealName, setMealName] = useState("");
-  const [mealType, setMealType] = useState("Snack");
-  const [calories, setCalories] = useState("");
+  const [mealKind, setMealKind] = useState("on_demand"); // "on_demand" | "prescribed"
+  const [mealIdInput, setMealIdInput] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
 
-  const totalPrescribed = meals.reduce((s, m) => s + m.calories, 0);
-  const remaining = caloriesGoal - (caloriesConsumed ?? 0);
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (!mealName.trim() || !calories) return;
-    onLogMeal?.({
-      meal_name: mealName.trim(),
-      meal_type: mealType,
-      calories: parseInt(calories, 10),
-    });
-    setMealName("");
-    setCalories("");
-    setShowForm(false);
+  const reset = () => {
+    setMealIdInput("");
+    setError("");
+    setSubmitting(false);
   };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    const idNum = Number(mealIdInput);
+    if (!Number.isInteger(idNum) || idNum <= 0) {
+      setError("Enter a positive integer meal id.");
+      return;
+    }
+    setError("");
+    setSubmitting(true);
+    try {
+      const payload =
+        mealKind === "prescribed"
+          ? { client_prescribed_meal_id: idNum }
+          : { on_demand_meal_id: idNum };
+      await onLogMeal?.(payload);
+      reset();
+      setShowForm(false);
+    } catch (err) {
+      setError(err?.message || "Couldn't log that meal. Try a different id.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const total = meals.length;
 
   return (
     <>
-      {/* Calorie summary */}
-      <div className="grid grid-cols-3 gap-3">
+      {/* Summary */}
+      <div className="grid grid-cols-2 gap-3">
         <div className="bg-[#0A1020] rounded-xl p-3 text-center">
-          <p className="text-blue-400 font-bold text-xl">
-            {caloriesConsumed ?? 0}
-          </p>
+          <p className="text-blue-400 font-bold text-xl">{total}</p>
           <p className="text-gray-500 text-[10px] uppercase tracking-widest mt-0.5">
-            Consumed
+            Logged
           </p>
         </div>
         <div className="bg-[#0A1020] rounded-xl p-3 text-center">
-          <p className="text-orange-400 font-bold text-xl">{totalPrescribed}</p>
-          <p className="text-gray-500 text-[10px] uppercase tracking-widest mt-0.5">
-            Prescribed
-          </p>
-        </div>
-        <div className="bg-[#0A1020] rounded-xl p-3 text-center">
-          <p
-            className={`font-bold text-xl ${
-              remaining >= 0 ? "text-green-400" : "text-red-400"
-            }`}
-          >
-            {remaining}
+          <p className="text-orange-400 font-bold text-xl">
+            {meals.filter((m) => m.client_prescribed_meal_id != null).length}
           </p>
           <p className="text-gray-500 text-[10px] uppercase tracking-widest mt-0.5">
-            Remaining
+            From Plan
           </p>
         </div>
       </div>
 
-      {/* Prescribed meals list */}
+      {/* Meal list */}
       <div className="space-y-2">
         <p className="text-xs text-gray-500 uppercase tracking-widest">
-          Prescribed Meals
+          Recently Logged
         </p>
         {meals.length === 0 ? (
           <p className="text-gray-500 text-sm text-center py-4">
-            No meals prescribed for today
+            No meals logged yet.
           </p>
         ) : (
           meals.map((meal) => (
@@ -80,12 +96,18 @@ export default function MealDetail({ meals, onLogMeal, caloriesConsumed, calorie
             >
               <div>
                 <p className="text-white font-semibold text-sm">
-                  {meal.meal_name}
+                  {meal.client_prescribed_meal_id != null
+                    ? `Prescribed #${meal.client_prescribed_meal_id}`
+                    : meal.on_demand_meal_id != null
+                      ? `On-demand #${meal.on_demand_meal_id}`
+                      : `Entry #${meal.id}`}
                 </p>
-                <p className="text-gray-400 text-xs mt-0.5">{meal.meal_type}</p>
+                <p className="text-gray-400 text-xs mt-0.5">
+                  {meal.logged_at ? new Date(meal.logged_at).toLocaleString() : "Recently"}
+                </p>
               </div>
-              <span className="text-orange-400 font-semibold text-sm">
-                {meal.calories} kcal
+              <span className="text-[10px] uppercase tracking-widest text-gray-500">
+                #{meal.id}
               </span>
             </div>
           ))
@@ -98,70 +120,74 @@ export default function MealDetail({ meals, onLogMeal, caloriesConsumed, calorie
           onClick={() => setShowForm(true)}
           className="w-full border border-dashed border-blue-500/30 text-blue-400 rounded-xl py-3 text-sm font-medium hover:bg-blue-500/5 transition-colors"
         >
-          + Log a Custom Meal
+          + Log a Meal
         </button>
       ) : (
         <form
           onSubmit={handleSubmit}
           className="rounded-xl border border-white/10 bg-[rgba(255,255,255,0.02)] p-4 space-y-3"
         >
-          <p className="text-xs text-gray-500 uppercase tracking-widest">
-            Log Custom Meal
+          <p className="text-xs text-gray-500 uppercase tracking-widest">Log Meal</p>
+          <p className="text-[11px] text-gray-500 leading-relaxed">
+            The backend submit endpoint takes the id of an existing meal record. Pick
+            the source and enter the id.
           </p>
+
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setMealKind("on_demand")}
+              className={`flex-1 rounded-lg py-2 text-xs font-semibold transition-colors ${
+                mealKind === "on_demand"
+                  ? "bg-blue-600 text-white"
+                  : "bg-[#0B1220] border border-white/10 text-gray-400"
+              }`}
+            >
+              On-demand
+            </button>
+            <button
+              type="button"
+              onClick={() => setMealKind("prescribed")}
+              className={`flex-1 rounded-lg py-2 text-xs font-semibold transition-colors ${
+                mealKind === "prescribed"
+                  ? "bg-blue-600 text-white"
+                  : "bg-[#0B1220] border border-white/10 text-gray-400"
+              }`}
+            >
+              From plan
+            </button>
+          </div>
 
           <div>
             <label className="text-[10px] text-gray-500 uppercase tracking-widest block mb-1">
-              Meal Name
+              {mealKind === "prescribed" ? "Prescribed Meal ID" : "On-demand Meal ID"}
             </label>
             <input
-              type="text"
-              value={mealName}
-              onChange={(e) => setMealName(e.target.value)}
-              placeholder="e.g. Greek Yogurt"
+              type="number"
+              min={1}
+              value={mealIdInput}
+              onChange={(e) => setMealIdInput(e.target.value)}
+              placeholder="e.g. 1"
               className="w-full rounded-lg border border-white/10 bg-[#0B1220] px-3 py-2 text-sm text-white outline-none placeholder:text-gray-600 focus:border-blue-400/60"
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-[10px] text-gray-500 uppercase tracking-widest block mb-1">
-                Type
-              </label>
-              <select
-                value={mealType}
-                onChange={(e) => setMealType(e.target.value)}
-                className="w-full rounded-lg border border-white/10 bg-[#0B1220] px-3 py-2 text-sm text-white outline-none focus:border-blue-400/60"
-              >
-                <option>Breakfast</option>
-                <option>Lunch</option>
-                <option>Dinner</option>
-                <option>Snack</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-[10px] text-gray-500 uppercase tracking-widest block mb-1">
-                Calories
-              </label>
-              <input
-                type="number"
-                value={calories}
-                onChange={(e) => setCalories(e.target.value)}
-                placeholder="kcal"
-                className="w-full rounded-lg border border-white/10 bg-[#0B1220] px-3 py-2 text-sm text-white outline-none placeholder:text-gray-600 focus:border-blue-400/60"
-              />
-            </div>
-          </div>
+          {error && <p className="text-xs text-red-400">{error}</p>}
 
           <div className="flex gap-2 pt-1">
             <button
               type="submit"
-              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-2 text-sm font-medium transition-colors"
+              disabled={submitting}
+              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-2 text-sm font-medium transition-colors disabled:opacity-40"
             >
-              Log Meal
+              {submitting ? "Logging..." : "Log Meal"}
             </button>
             <button
               type="button"
-              onClick={() => setShowForm(false)}
+              onClick={() => {
+                setShowForm(false);
+                reset();
+              }}
               className="flex-1 border border-gray-700 text-gray-300 hover:bg-gray-800 rounded-lg py-2 text-sm transition-colors"
             >
               Cancel
@@ -169,14 +195,6 @@ export default function MealDetail({ meals, onLogMeal, caloriesConsumed, calorie
           </div>
         </form>
       )}
-
-      {/* Daily total */}
-      <div className="flex justify-between items-center pt-3 border-t border-white/5">
-        <span className="text-xs text-gray-500 uppercase tracking-widest">
-          Total Prescribed
-        </span>
-        <span className="text-white font-bold">{totalPrescribed} kcal</span>
-      </div>
     </>
   );
 }

@@ -19,6 +19,8 @@ import {
 import WorkoutDetail from "../components/overlays/workout_detail";
 import AvailabilityDetail from "../components/overlays/availability_detail";
 import MealDetail from "../components/overlays/meal_detail";
+import DailySurvey from "../components/overlays/daily_survey";
+import StepsLog from "../components/overlays/steps_log";
 import {
   fetchMe,
   fetchClientProfile,
@@ -34,6 +36,11 @@ import {
   logMeal,
   terminateRelationship,
 } from "../api/client";
+import {
+  fetchAllDailySurveys,
+  fetchDailyStepsSurvey,
+  fetchStepHistory,
+} from "../api/survey";
 import { removeAcceptedClientForCoach } from "../api/coach";
 import { createConversation, fetchConversations } from "../api/chat";
 import { readClientCoachRequests, removeClientCoachRequest } from "../utils/coachRequests";
@@ -72,8 +79,47 @@ export default function ClientDash() {
   }, [navigate]);
 
   /* ── overlay state ──────────────────────────────────────────────── */
-  const [overlay, setOverlay] = useState(null); // "workout" | "coach" | "availability" | "meals" | null
+  const [overlay, setOverlay] = useState(null); // "workout" | "coach" | "availability" | "meals" | "survey" | "steps" | null
   const closeOverlay = () => setOverlay(null);
+
+  /* ── daily survey state ─────────────────────────────────────────── */
+  const [surveyStatus, setSurveyStatus] = useState({ mood: null, body_metrics: null, steps: null });
+  const [stepsRecent, setStepsRecent] = useState([]);
+
+  const refreshSurveyStatus = useCallback(async () => {
+    try {
+      const [all, recent] = await Promise.all([
+        fetchAllDailySurveys(),
+        fetchStepHistory({ limit: 7 }),
+      ]);
+      setSurveyStatus(all);
+      setStepsRecent(recent);
+      // If we have a recent step entry from today, surface it on the card.
+      const latest = recent?.[0];
+      if (latest && Number.isFinite(Number(latest.step_count))) {
+        setStepCount(Number(latest.step_count));
+      }
+    } catch {
+      // Endpoint failures fall through; the overlay handles its own errors.
+    }
+  }, []);
+
+  const refreshStepsOnly = useCallback(async () => {
+    try {
+      const [stepsStatus, recent] = await Promise.all([
+        fetchDailyStepsSurvey().catch(() => null),
+        fetchStepHistory({ limit: 7 }),
+      ]);
+      setSurveyStatus((prev) => ({ ...prev, steps: stepsStatus }));
+      setStepsRecent(recent);
+      const latest = recent?.[0];
+      if (latest && Number.isFinite(Number(latest.step_count))) {
+        setStepCount(Number(latest.step_count));
+      }
+    } catch {
+      // Ignore — card just keeps last known data.
+    }
+  }, []);
 
   /* ── core state ──────────────────────────────────────────────────── */
   const [account, setAccount]           = useState(null);
@@ -130,6 +176,7 @@ export default function ClientDash() {
   /* ── load dashboard data once we have a clientId ────────────────── */
   useEffect(() => {
     if (!clientId) return;
+    refreshSurveyStatus();
 
     (async () => {
       try {
@@ -201,19 +248,15 @@ export default function ClientDash() {
 
   /* ── log a meal ─────────────────────────────────────────────────── */
   const handleLogMeal = async (mealPayload) => {
-    const newMeal = {
-      id: Date.now(),
-      meal_type: mealPayload.meal_type,
-      meal_name: mealPayload.meal_name,
-      calories: mealPayload.calories,
-    };
-    setPrescribedMeals((prev) => [...prev, newMeal]);
-    setCaloriesConsumed((prev) => (prev ?? 0) + mealPayload.calories);
+    // Backend throws if neither id is provided or the id is invalid; surface
+    // the failure so the overlay can show it. On success, refetch the list
+    // from telemetry so the new entry appears with its server id.
+    await logMeal(clientId, mealPayload);
     try {
-      await logMeal(clientId, mealPayload);
+      const refreshed = await fetchMealsToday(clientId);
+      setPrescribedMeals(refreshed);
     } catch {
-      setPrescribedMeals((prev) => prev.filter((m) => m.id !== newMeal.id));
-      setCaloriesConsumed((prev) => (prev ?? 0) - mealPayload.calories);
+      // Refresh failure is non-fatal — list will pick up the new row on next mount.
     }
   };
 
@@ -334,6 +377,12 @@ export default function ClientDash() {
       />
 
       <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
+        {/* ─── DAILY CHECK-IN BANNER ──────────────────────────────── */}
+        <DailyCheckInBanner
+          status={surveyStatus}
+          onOpen={() => setOverlay("survey")}
+        />
+
         {/* ─── FITNESS & NUTRITION ────────────────────────────────── */}
         <SectionHeader label="FITNESS & NUTRITION" role={role} />
 
@@ -354,11 +403,23 @@ export default function ClientDash() {
               label="STEPS TODAY"
               value={stepCount !== null ? stepCount.toLocaleString() : "—"}
               sub={
-                stepCount !== null
-                  ? `↑ ${stepsPercent}% of daily goal`
-                  : "Loading..."
+                surveyStatus?.steps === null
+                  ? "Survey offline"
+                  : surveyStatus?.steps?.is_finished
+                    ? `Logged · ${stepsPercent}% of daily goal`
+                    : stepCount !== null
+                      ? `Tap to log · ${stepsPercent}% of daily goal`
+                      : "Tap to log today's steps"
               }
               progress={stepsPercent}
+              action={
+                surveyStatus?.steps?.is_finished
+                  ? "Done ✓"
+                  : surveyStatus?.steps === null
+                    ? null
+                    : "Log"
+              }
+              onClick={() => setOverlay("steps")}
             />
             <StatCard
               role={role}
@@ -672,27 +733,38 @@ export default function ClientDash() {
           footer={
             <div className="pt-3 border-t border-white/5 flex justify-between items-center">
               <span className="text-xs text-gray-500 uppercase tracking-widest">
-                Total Consumed
+                Logged
               </span>
               <span className="text-white font-bold">
-                {prescribedMeals.reduce((s, m) => s + m.calories, 0)} kcal
+                {prescribedMeals.length}
               </span>
             </div>
           }
         >
           {prescribedMeals.length === 0 ? (
             <p className="text-gray-500 text-sm text-center py-4">
-              No meals prescribed for today
+              No meals logged yet
             </p>
           ) : (
             <div className="space-y-2">
-              {prescribedMeals.map((meal) => (
+              {prescribedMeals.slice(0, 5).map((meal) => (
                 <ListRow
                   key={meal.id}
-                  label={`${meal.meal_type} — ${meal.meal_name}`}
+                  label={
+                    meal.client_prescribed_meal_id != null
+                      ? `Prescribed #${meal.client_prescribed_meal_id}`
+                      : meal.on_demand_meal_id != null
+                        ? `On-demand #${meal.on_demand_meal_id}`
+                        : `Entry #${meal.id}`
+                  }
                   right={
-                    <span className="text-orange-400 font-semibold text-sm">
-                      {meal.calories} kcal
+                    <span className="text-[11px] text-gray-400">
+                      {meal.logged_at
+                        ? new Date(meal.logged_at).toLocaleDateString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                          })
+                        : ""}
                     </span>
                   }
                 />
@@ -746,10 +818,112 @@ export default function ClientDash() {
       <Overlay
         open={overlay === "meals"}
         onClose={closeOverlay}
-        title="Today's Meals"
+        title="Meal Log"
       >
-        <MealDetail meals={prescribedMeals} onLog={handleLogMeal} />
+        <MealDetail meals={prescribedMeals} onLogMeal={handleLogMeal} />
       </Overlay>
+
+      {/* Daily Survey */}
+      <Overlay
+        open={overlay === "survey"}
+        onClose={closeOverlay}
+        title="Daily Check-in"
+        wide
+      >
+        <DailySurvey
+          onCompleted={refreshSurveyStatus}
+          picturesStorageKey={`client_progress_pictures:${String(account?.email || "current").trim().toLowerCase()}`}
+        />
+      </Overlay>
+
+      {/* Steps Log */}
+      <Overlay
+        open={overlay === "steps"}
+        onClose={closeOverlay}
+        title="Log Today's Steps"
+      >
+        <StepsLog
+          status={surveyStatus.steps}
+          recent={stepsRecent}
+          onSubmitted={(_response, updatedRecent) => {
+            if (Array.isArray(updatedRecent)) {
+              setStepsRecent(updatedRecent);
+              const latest = updatedRecent[0];
+              if (latest && Number.isFinite(Number(latest.step_count))) {
+                setStepCount(Number(latest.step_count));
+              }
+            }
+            refreshStepsOnly();
+            closeOverlay();
+          }}
+        />
+      </Overlay>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   DAILY CHECK-IN BANNER — compact summary card with progress + open button
+   ═══════════════════════════════════════════════════════════════════════ */
+
+function DailyCheckInBanner({ status, onOpen }) {
+  const sections = [
+    { key: "mood", label: "Mood" },
+    { key: "body_metrics", label: "Body" },
+  ];
+  const availableSections = sections.filter((s) => status?.[s.key] !== null);
+  const completed = availableSections.filter((s) => status?.[s.key]?.is_finished).length;
+  const allDone = availableSections.length > 0 && completed === availableSections.length;
+  const allUnavailable = availableSections.length === 0;
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-gradient-to-r from-blue-500/10 via-blue-500/5 to-transparent px-5 py-4 flex items-center justify-between gap-4 flex-wrap">
+      <div className="flex items-center gap-4 min-w-0">
+        <span className="text-2xl">{allUnavailable ? "⚠" : allDone ? "✓" : "📋"}</span>
+        <div className="min-w-0">
+          <p className="text-white font-bold text-sm">
+            {allUnavailable
+              ? "Daily check-in offline"
+              : allDone
+                ? "Daily check-in complete"
+                : "Daily check-in"}
+          </p>
+          <p className="text-gray-400 text-xs mt-0.5">
+            {allUnavailable
+              ? "Survey endpoints aren't reachable right now."
+              : allDone
+                ? "Nice work — see you tomorrow."
+                : `${completed} of ${availableSections.length} done · log your day`}
+          </p>
+          <div className="flex gap-1.5 mt-2">
+            {sections.map((section) => {
+              const sectionStatus = status?.[section.key];
+              const unavailable = sectionStatus === null;
+              const done = sectionStatus?.is_finished;
+              const className = unavailable
+                ? "bg-red-500/15 text-red-400"
+                : done
+                  ? "bg-green-500/15 text-green-400"
+                  : "bg-white/5 text-gray-400";
+              return (
+                <span
+                  key={section.key}
+                  className={`px-2 py-0.5 rounded text-[10px] font-semibold ${className}`}
+                  title={unavailable ? "Unavailable" : done ? "Submitted" : "Pending"}
+                >
+                  {section.label}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+      <button
+        onClick={onOpen}
+        className="px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-blue-600 hover:bg-blue-500 transition-colors shrink-0"
+      >
+        {allUnavailable ? "View" : allDone ? "Review" : completed > 0 ? "Continue" : "Open Check-in"}
+      </button>
     </div>
   );
 }

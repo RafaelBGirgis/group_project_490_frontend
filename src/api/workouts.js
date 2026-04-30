@@ -1,23 +1,14 @@
-/**
- * Workout API calls — shared by clients and coaches.
- *
- * Covers: preset library, custom workouts, CRUD, and coach → client assignment.
- * Same pattern as other API files: real endpoint first, mock fallback.
- */
-
 import { apiGet, apiPost, withQuery } from "./api";
 import {
   buildCoachWorkoutActivities,
   buildCoachWorkoutPayload,
   createCoachWorkout,
   createCoachWorkoutActivity,
-  createLegacyCoachWorkout,
-  createLegacyCoachWorkoutActivity,
-  createLegacyCoachWorkoutPlan,
+  fetchMyClients,
 } from "./coach";
 
 /* ═══════════════════════════════════════════════════════════════════════
-   EXERCISE DATABASE — common exercises for the preset library & builder
+   EXERCISE DATABASE — common exercises for the in-app builder
    ═══════════════════════════════════════════════════════════════════════ */
 
 export const EXERCISE_DATABASE = [
@@ -72,6 +63,8 @@ export const EXERCISE_DATABASE = [
 export const MUSCLE_GROUPS = [
   "Chest", "Back", "Shoulders", "Legs", "Arms", "Core", "Cardio",
 ];
+
+const DAY_ORDER = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 
 export async function fetchSupportedEquipment({ skip = 0, limit = 100 } = {}) {
   try {
@@ -232,11 +225,17 @@ export async function fetchPresetWorkouts() {
   return PRESET_WORKOUTS.map((workout) => normalizeWorkout(workout, "preset"));
 }
 
-/** Fetch the user's custom (saved) workouts */
-export async function fetchMyWorkouts(role, roleId) {
+/** Fetch the global library of workouts (read-only for clients) */
+export async function fetchLibraryWorkouts({ text, workout_type, equipment_id } = {}) {
   try {
     const response = await apiGet(
-      withQuery("/roles/shared/fitness/query/workout", { skip: 0, limit: 1000 })
+      withQuery("/roles/shared/fitness/query/workout", {
+        text,
+        workout_type,
+        equiptment_id: equipment_id,
+        skip: 0,
+        limit: 1000,
+      })
     );
     const list = Array.isArray(response)
       ? response
@@ -246,38 +245,70 @@ export async function fetchMyWorkouts(role, roleId) {
           ? response.items
           : [];
     const withActivities = await hydrateWorkoutActivities(list);
-    const backendWorkouts = withActivities.map((workout) => normalizeWorkout(workout, "custom"));
-    return mergeWorkouts(backendWorkouts, getLocalWorkoutCache(role, roleId));
+    return withActivities.map((workout) => normalizeWorkout(workout, "library"));
   } catch {
-    return getLocalWorkoutCache(role, roleId).map((workout) => normalizeWorkout(workout, "custom"));
+    return [];
   }
 }
 
-/** Save (create) a new custom workout */
+/** Fetch the user's view of workouts. Currently the same as the global library. */
+export async function fetchMyWorkouts(role, roleId) {
+  const backend = await fetchLibraryWorkouts();
+  const cache = getLocalWorkoutCache(role, roleId);
+  return mergeWorkouts(backend, cache);
+}
+
+/** Fetch activities belonging to a single workout */
+export async function fetchActivitiesForWorkout(workoutId) {
+  if (!workoutId) return [];
+  try {
+    const response = await apiGet(
+      withQuery("/roles/shared/fitness/query/activity", {
+        workout_id: workoutId,
+        skip: 0,
+        limit: 100,
+      })
+    );
+    return Array.isArray(response)
+      ? response
+      : Array.isArray(response?.activities)
+        ? response.activities
+        : Array.isArray(response?.items)
+          ? response.items
+          : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Save (create) a new workout. Coach/admin only — clients only get a local copy. */
 export async function createWorkout(role, roleId, workout) {
-  if (role === "coach") {
+  const allowedToCreateOnBackend = role === "coach" || role === "admin";
+
+  if (allowedToCreateOnBackend) {
     try {
-      try {
-        await createLegacyCoachWorkout(toLegacyCoachWorkoutPayload(workout));
-      } catch {
-        // Keep the canonical fitness route as source of truth for IDs.
-      }
       const createdWorkout = await createCoachWorkout(buildCoachWorkoutPayload(workout));
       const workoutId = createdWorkout.workout_id;
       const activities = buildCoachWorkoutActivities(workoutId, workout.exercises || []);
+      const createdActivities = [];
       for (const activity of activities) {
-        try {
-          await createLegacyCoachWorkoutActivity(toLegacyCoachWorkoutActivityPayload(activity));
-        } catch {
-          // Ignore legacy-route failures if canonical route succeeds.
-        }
-        await createCoachWorkoutActivity(activity);
+        const created = await createCoachWorkoutActivity(activity);
+        createdActivities.push({ ...activity, id: created?.workout_activity_id });
       }
 
-      const cachedWorkout = { ...workout, id: workoutId, workout_id: workoutId, type: "custom" };
+      const cachedWorkout = {
+        ...workout,
+        id: workoutId,
+        workout_id: workoutId,
+        type: "custom",
+        exercises: (workout.exercises || []).map((exercise, index) => ({
+          ...exercise,
+          id: createdActivities[index]?.id ?? exercise.id,
+        })),
+      };
       writeLocalWorkoutCache(role, roleId, [cachedWorkout, ...getLocalWorkoutCache(role, roleId)]);
 
-      return { success: true, id: workoutId, workout_id: workoutId, ...workout };
+      return { success: true, id: workoutId, workout_id: workoutId, ...cachedWorkout };
     } catch {
       const cachedWorkout = { ...workout, id: `custom-${Date.now()}`, type: "custom" };
       writeLocalWorkoutCache(role, roleId, [cachedWorkout, ...getLocalWorkoutCache(role, roleId)]);
@@ -291,12 +322,12 @@ export async function createWorkout(role, roleId, workout) {
     success: true,
     id: cachedWorkout.id,
     backend_gap: true,
-    message: "The backend spec does not include a client custom-workout create route.",
+    message: "Only coaches and admins can publish workouts to the shared library.",
     ...workout,
   };
 }
 
-/** Update an existing workout */
+/** Update an existing workout (no backend route — local cache only) */
 export async function updateWorkout(role, roleId, workoutId, workout) {
   const updated = getLocalWorkoutCache(role, roleId).map((item) =>
     String(item.id) === String(workoutId) ? { ...item, ...workout, id: workoutId } : item
@@ -310,7 +341,7 @@ export async function updateWorkout(role, roleId, workoutId, workout) {
   };
 }
 
-/** Delete a workout */
+/** Delete a workout (no backend route — local cache only) */
 export async function deleteWorkout(role, roleId, workoutId) {
   const remaining = getLocalWorkoutCache(role, roleId).filter(
     (item) => String(item.id) !== String(workoutId)
@@ -335,7 +366,7 @@ export async function duplicatePreset(role, roleId, presetId) {
     name: `${preset.name} (Copy)`,
   };
 
-  if (role === "coach") {
+  if (role === "coach" || role === "admin") {
     return createWorkout(role, roleId, duplicated);
   }
 
@@ -344,24 +375,42 @@ export async function duplicatePreset(role, roleId, presetId) {
     success: true,
     ...duplicated,
     backend_gap: true,
-    message: "The backend spec does not include a client preset-duplication route.",
+    message: "Only coaches and admins can publish workouts to the shared library.",
   };
 }
 
-/* ─── weekly plan ────────────────────────────────────────────────────── */
+/* ─── plans ──────────────────────────────────────────────────────────── */
 
-/** Fetch the user's weekly plan (workouts assigned to days) */
+/** Fetch the client's saved workout plans from the backend */
+export async function fetchClientPlans({ skip = 0, limit = 100 } = {}) {
+  try {
+    const response = await apiGet(
+      withQuery("/roles/client/fitness/query/plans", { skip, limit })
+    );
+    const plans = Array.isArray(response)
+      ? response
+      : Array.isArray(response?.plans)
+        ? response.plans
+        : [];
+    return plans;
+  } catch {
+    return [];
+  }
+}
+
+/** Create a single workout plan from a list of plan-activity entries */
+export async function createWorkoutPlan(strataName, planActivities) {
+  return apiPost("/roles/shared/fitness/plan", {
+    strata_name: strataName,
+    activities: planActivities,
+  });
+}
+
+/** Fetch the user's weekly plan view (one entry per weekday) */
 export async function fetchWeeklyPlan(role, roleId) {
   try {
-    if (role === "client") {
-      const response = await apiGet(
-        withQuery("/roles/client/fitness/query/plans", { skip: 0, limit: 100 })
-      );
-      const plans = Array.isArray(response)
-        ? response
-        : Array.isArray(response?.plans)
-          ? response.plans
-          : [];
+    if (role === "client" || role === "coach" || role === "admin") {
+      const plans = await fetchClientPlans();
       if (plans.length > 0) {
         return normalizeWeeklyPlanFromPlans(plans);
       }
@@ -373,53 +422,57 @@ export async function fetchWeeklyPlan(role, roleId) {
   return normalizeWeeklyPlan(readJson(getWeeklyPlanCacheKey(role, roleId)));
 }
 
-/** Save the user's weekly plan */
+/** Save the user's weekly plan locally (no backend route for editing) */
 export async function saveWeeklyPlan(role, roleId, plan) {
   localStorage.setItem(getWeeklyPlanCacheKey(role, roleId), JSON.stringify(plan));
   return {
     success: true,
     backend_gap: true,
-    message: "The backend spec does not include a weekly-plan save route.",
+    message: "The backend spec does not include a weekly-plan update route — saved locally.",
   };
 }
 
-export async function publishWeeklyPlan(role, roleId, plan, strataName = "Weekly Plan") {
-  const dayEntries = Object.values(plan || {}).filter(Boolean);
-  const firstWorkout = dayEntries[0];
-  const activities = normalizePlanActivities(dayEntries);
+/** Publish each populated day as its own backend workout plan */
+export async function publishWeeklyPlan(role, roleId, plan, fallbackName = "Weekly Plan") {
+  void role;
+  void roleId;
+  const created = [];
 
-  if (role === "coach" && firstWorkout) {
+  for (const dayKey of DAY_ORDER) {
+    const dayWorkout = plan?.[dayKey];
+    const exercises = Array.isArray(dayWorkout?.exercises) ? dayWorkout.exercises : [];
+    const planActivities = buildPlanActivities(exercises);
+    if (planActivities.length === 0) continue;
+
+    const strataName = `${capitalize(dayKey)} — ${dayWorkout?.name || fallbackName}`;
     try {
-      await createLegacyCoachWorkoutPlan({
-        strata_name: strataName,
-        workout_activities: activities.map((activity, index) => ({
-          id: null,
-          workout_plan_id: null,
-          workout_activity_id: activity.workout_activity_id || index + 1,
-          estimated_calories: 0,
-          modified_by_account_id: 0,
-          planned_duration: activity.planned_duration ?? null,
-          planned_reps: activity.planned_reps ?? null,
-          planned_sets: activity.planned_sets ?? null,
-        })),
-      });
-    } catch {
-      // Keep going and try shared route too.
+      const result = await createWorkoutPlan(strataName, planActivities);
+      created.push({ day: dayKey, plan_id: result?.workout_plan_id ?? null });
+    } catch (error) {
+      created.push({ day: dayKey, error: error?.message || "Failed to publish" });
     }
   }
 
-  return apiPost("/roles/shared/fitness/plan", {
-    strata_name: strataName,
-    activities,
-  });
+  return { success: true, published: created };
 }
 
 /* ─── coach-only: assignment ─────────────────────────────────────────── */
 
 /** Fetch clients the coach can assign workouts to */
 export async function fetchAssignableClients(coachId) {
-  void coachId;
-  return [];
+  try {
+    const clients = await fetchMyClients(coachId);
+    return (clients || [])
+      .filter((client) => client && client.id != null)
+      .map((client) => ({
+        id: client.id,
+        name: client.name || `Client #${client.id}`,
+        goal: client.goal || (client.status === "pending" ? "Pending request" : ""),
+        status: client.status || "active",
+      }));
+  } catch {
+    return [];
+  }
 }
 
 /** Assign a workout to one or more clients */
@@ -440,22 +493,26 @@ export async function fetchAssignedWorkouts(coachId) {
   return [];
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   INTERNAL HELPERS
+   ═══════════════════════════════════════════════════════════════════════ */
+
 function normalizeWorkout(workout, fallbackType = "custom") {
   if (!workout || typeof workout !== "object") {
     return {
       id: `workout-${Date.now()}`,
       name: "Untitled Workout",
       description: "",
+      instructions: "",
+      workout_type: null,
       type: fallbackType,
-      category: "General",
-      difficulty: "Beginner",
       est_duration_min: 0,
       muscle_groups: [],
       exercises: [],
     };
   }
 
-  const exercises = Array.isArray(workout.exercises)
+  const exercisesSource = Array.isArray(workout.exercises)
     ? workout.exercises
     : Array.isArray(workout.activities)
       ? workout.activities
@@ -466,23 +523,29 @@ function normalizeWorkout(workout, fallbackType = "custom") {
     id: workout.id ?? workout.workout_id ?? workout.name ?? `workout-${Date.now()}`,
     name: workout.name ?? workout.strata_name ?? workout.workout_name ?? "Untitled Workout",
     description: workout.description ?? "",
+    instructions: workout.instructions ?? "",
+    workout_type: workout.workout_type ?? null,
     type: workout.type ?? fallbackType,
-    category: workout.category ?? "General",
-    difficulty: workout.difficulty ?? "Beginner",
     est_duration_min: Number(workout.est_duration_min ?? 0),
     muscle_groups: Array.isArray(workout.muscle_groups) ? workout.muscle_groups : [],
-    exercises: exercises.map((exercise, index) => ({
-      ...exercise,
-      _key: exercise._key ?? exercise.id ?? `${workout.id ?? workout.name ?? "workout"}-${index}`,
-      name: exercise.name ?? exercise.activity_name ?? `Exercise ${index + 1}`,
-      sets: Number(exercise.sets ?? exercise.planned_sets ?? 0),
-      reps: Number(exercise.reps ?? exercise.planned_reps ?? 0),
-      weight: Number(exercise.weight ?? exercise.intensity_value ?? 0),
-      intensity_measure: exercise.intensity_measure ?? "lbs",
-      notes: exercise.notes ?? "",
-      equipment: exercise.equipment ?? "",
-      estimated_calories_per_unit_frequency: Number(exercise.estimated_calories_per_unit_frequency ?? 0),
-    })),
+    exercises: exercisesSource.map((exercise, index) => normalizeExercise(exercise, index, workout)),
+  };
+}
+
+function normalizeExercise(exercise, index, workout) {
+  const id = exercise.id ?? exercise.workout_activity_id ?? null;
+  return {
+    ...exercise,
+    _key: exercise._key ?? id ?? `${workout?.id ?? workout?.name ?? "workout"}-${index}`,
+    id,
+    name: exercise.name ?? exercise.activity_name ?? `Exercise ${index + 1}`,
+    sets: Number(exercise.sets ?? exercise.planned_sets ?? 0),
+    reps: Number(exercise.reps ?? exercise.planned_reps ?? 0),
+    weight: Number(exercise.weight ?? exercise.intensity_value ?? 0),
+    intensity_measure: exercise.intensity_measure ?? "lbs",
+    notes: exercise.notes ?? "",
+    equipment: exercise.equipment ?? "",
+    estimated_calories_per_unit_frequency: Number(exercise.estimated_calories_per_unit_frequency ?? 0),
   };
 }
 
@@ -516,9 +579,11 @@ function normalizeWeeklyPlan(response) {
 
 function normalizeWeeklyPlanFromPlans(plans) {
   const base = emptyWeeklyPlan();
-  const dayKeys = Object.keys(base);
-  plans.slice(0, dayKeys.length).forEach((plan, index) => {
-    const dayKey = dayKeys[index];
+
+  plans.forEach((plan, index) => {
+    const dayKey = matchDayFromName(plan?.strata_name) ?? DAY_ORDER[index] ?? null;
+    if (!dayKey) return;
+
     const activities =
       plan.activities ??
       plan.workout_activities ??
@@ -535,7 +600,14 @@ function normalizeWeeklyPlanFromPlans(plans) {
       "custom"
     );
   });
+
   return base;
+}
+
+function matchDayFromName(name) {
+  if (!name) return null;
+  const lower = String(name).toLowerCase();
+  return DAY_ORDER.find((day) => lower.startsWith(day) || lower.includes(`${day} `)) ?? null;
 }
 
 async function hydrateWorkoutActivities(workouts) {
@@ -546,28 +618,8 @@ async function hydrateWorkoutActivities(workouts) {
         return workout;
       }
 
-      try {
-        const response = await apiGet(
-          withQuery("/roles/shared/fitness/query/activity", {
-            workout_id: workoutId,
-            skip: 0,
-            limit: 100,
-          })
-        );
-        const activities = Array.isArray(response)
-          ? response
-          : Array.isArray(response?.activities)
-            ? response.activities
-            : Array.isArray(response?.items)
-              ? response.items
-              : [];
-        return {
-          ...workout,
-          activities,
-        };
-      } catch {
-        return workout;
-      }
+      const activities = await fetchActivitiesForWorkout(workoutId);
+      return { ...workout, activities };
     })
   );
 }
@@ -609,44 +661,38 @@ function readJson(key) {
   }
 }
 
-function toLegacyCoachWorkoutPayload(workout) {
-  return {
-    name: workout.name,
-    description: workout.description || "",
-    instructions: workout.exercises
-      ?.map((exercise, index) => `${index + 1}. ${exercise.name}${exercise.notes ? ` - ${exercise.notes}` : ""}`)
-      .join("\n") || workout.description || "Coach-created workout",
-    workout_type: workout.exercises?.some((exercise) => exercise.intensity_measure === "sec") ? "duration" : "rep",
-    equipment: (workout.exercises || [])
-      .map((exercise) => String(exercise.equipment || "").trim())
-      .filter(Boolean)
-      .filter((value, index, list) => list.indexOf(value) === index)
-      .map((name) => ({ name, description: `${name} equipment` })),
-  };
+function buildPlanActivities(exercises) {
+  return (exercises || [])
+    .map((exercise) => {
+      const activityId = Number(exercise.id ?? exercise.workout_activity_id);
+      if (!Number.isFinite(activityId) || activityId <= 0) return null;
+
+      const isDuration = exercise.intensity_measure === "sec";
+      if (isDuration) {
+        const duration = Number(exercise.weight ?? exercise.intensity_value ?? exercise.reps ?? 0);
+        if (!Number.isFinite(duration) || duration <= 0) return null;
+        return {
+          workout_activity_id: activityId,
+          planned_duration: duration,
+          planned_reps: null,
+          planned_sets: null,
+        };
+      }
+
+      const reps = Number(exercise.reps ?? exercise.planned_reps ?? 0);
+      const sets = Number(exercise.sets ?? exercise.planned_sets ?? 0);
+      if (!reps || !sets) return null;
+      return {
+        workout_activity_id: activityId,
+        planned_duration: null,
+        planned_reps: reps,
+        planned_sets: sets,
+      };
+    })
+    .filter(Boolean);
 }
 
-function toLegacyCoachWorkoutActivityPayload(activity) {
-  return {
-    workout_id: activity.workout_id,
-    intensity_measure: activity.intensity_measure || null,
-    intensity_value: activity.intensity_value ?? null,
-    estimated_calories_per_unit_frequency: activity.estimated_calories_per_unit_frequency ?? 0,
-  };
-}
-
-function normalizePlanActivities(workouts) {
-  return workouts.flatMap((workout) =>
-    (workout?.exercises || []).map((exercise, index) => ({
-      workout_activity_id: Number(exercise.id ?? index + 1),
-      planned_duration:
-        exercise.intensity_measure === "sec"
-          ? Number(exercise.weight ?? exercise.intensity_value ?? 0) || null
-          : null,
-      planned_reps:
-        exercise.intensity_measure === "sec"
-          ? null
-          : Number(exercise.reps ?? exercise.planned_reps ?? 0) || null,
-      planned_sets: Number(exercise.sets ?? exercise.planned_sets ?? 0) || null,
-    }))
-  );
+function capitalize(value) {
+  const text = String(value || "");
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }

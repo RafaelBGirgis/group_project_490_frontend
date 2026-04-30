@@ -21,7 +21,6 @@ const SPECIALIZATION_OPTIONS = [
 function CoachRequestFormPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const API_BASE_URL = import.meta.env.PROD ? "https://api.till-failure.us" : "";
   const mode = searchParams.get("mode") || "create";
   const isViewMode = mode === "view";
   const isEditMode = mode === "edit";
@@ -65,6 +64,12 @@ function CoachRequestFormPage() {
   }, [form.name]);
 
   useEffect(() => {
+    const token = localStorage.getItem("jwt");
+    if (!token) {
+      navigate("/login");
+      return;
+    }
+
     const loadNameFromSession = async () => {
       try {
         const data = await fetchMe();
@@ -116,8 +121,6 @@ function CoachRequestFormPage() {
     }));
   };
 
-  const [submitting, setSubmitting] = useState(false);
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitMessage("");
@@ -144,41 +147,51 @@ function CoachRequestFormPage() {
     }
 
     setError("");
-    setSubmitting(true);
-
-    // Build backend-compatible payload
-    const backendPayload = {
-      availabilities: [],  // User can fill in availability later
-      experiences: form.experiences.map((exp) => ({
-        title: exp.title,
-        organization: exp.organization,
-        description: exp.description || "",
-      })),
-      certifications: form.certifications.map((cert) => ({
-        name: cert.title,
-        issuer: cert.issuer,
-        description: cert.description || "",
-      })),
-      payment_interval: "monthly",   // Default, can be made configurable
-      price_cents: 0,                // Default, admin can adjust later
-      specialties: form.specializations,
+    const payload = {
+      ...form,
+      yearsExperience: Number(form.yearsExperience),
+      status: "submitted",
+      submittedAt: new Date().toISOString(),
     };
+    const key = requestStorageKey || "coachRequestDraft";
+    const onboardingKey = account?.email
+      ? `onboarding:${String(account.email).trim().toLowerCase()}`
+      : "onboarding:current";
 
     try {
-      await requestCoachCreation(backendPayload);
-      // Also save locally as a backup
-      const key = requestStorageKey || "coachRequestDraft";
-      localStorage.setItem(key, JSON.stringify({
-        ...form,
-        yearsExperience: Number(form.yearsExperience),
-        status: "submitted",
-        submittedAt: new Date().toISOString(),
-      }));
-      setSubmitMessage(isEditMode ? "Coach request updated." : "Coach request submitted successfully! An admin will review your application.");
+      if (!isEditMode && !payload.coach_request_id && !payload.backend_submitted) {
+        const onboardingRaw = localStorage.getItem(onboardingKey);
+        const onboardingData = onboardingRaw ? JSON.parse(onboardingRaw) : null;
+        const requestBody = buildCoachRequestPayload(
+          form,
+          onboardingData?.trainingAvailability || {}
+        );
+
+        if (!requestBody.availabilities.length) {
+          setError("Please set your availability in your client onboarding/profile before submitting a coach request.");
+          return;
+        }
+
+        const response = await createCoachRequest(requestBody);
+        payload.coach_request_id = response?.coach_request_id;
+        payload.coach_id = response?.coach_id;
+        payload.backend_submitted = true;
+        clearCoachRequestResolution(response?.coach_request_id);
+      }
+
+      localStorage.setItem(key, JSON.stringify(payload));
+      if (isEditMode) {
+        setSubmitMessage("Coach request updated locally.");
+      } else {
+        navigate("/profile", {
+          state: {
+            coachRequestSubmitted: true,
+            successMessage: "Application successfully sent.",
+          },
+        });
+      }
     } catch (err) {
-      setError(err.message || "Failed to submit coach request. Please try again.");
-    } finally {
-      setSubmitting(false);
+      setError(err.message || "Failed to submit coach request.");
     }
   };
 
@@ -635,10 +648,9 @@ function CoachRequestFormPage() {
               ) : (
                 <button
                   type="submit"
-                  disabled={submitting}
-                  className="rounded-xl bg-gradient-to-r from-amber-500 to-orange-400 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="rounded-xl bg-gradient-to-r from-amber-500 to-orange-400 px-5 py-3 text-sm font-semibold text-white"
                 >
-                  {submitting ? "Submitting..." : isEditMode ? "Save Request" : "Submit Request"}
+                  {isEditMode ? "Save Request" : "Submit Request"}
                 </button>
               )}
             </div>

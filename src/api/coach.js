@@ -6,8 +6,6 @@ const DEFAULT_TIME_OPTIONS = [
   "12PM", "1PM", "2PM", "3PM", "4PM", "5PM", "6PM", "7PM", "8PM", "9PM",
 ];
 
-/* ─── coach profile ───────────────────────────────────────────────── */
-
 export async function fetchCoachProfile() {
   return apiPost("/roles/coach/me", {});
 }

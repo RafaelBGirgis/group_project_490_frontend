@@ -23,7 +23,6 @@ import {
   updateCoachInformation,
 } from "../api/coach";
 import { getCoachAccessState } from "../utils/roleAccess";
-import { resolveRoleState } from "../utils/sessionAuth";
 
 const PRIMARY_GOALS = [
   "Weight Loss",
@@ -234,10 +233,17 @@ function ProfilePage({ role = "client" }) {
   }, [profile.profilePicture, profilePicturePreviewUrl]);
 
   useEffect(() => {
+    const token = localStorage.getItem("jwt");
+    if (!token) {
+      setLoadError("You are not logged in.");
+      setLoadingProfile(false);
+      navigate("/login");
+      return;
+    }
+
     const loadProfile = async () => {
       try {
         const data = await fetchMe();
-        const roleState = await resolveRoleState();
         const coachAccess = await getCoachAccessState(data);
         setCanSwitchToCoach(coachAccess.canAccessCoach);
         if (isCoach && !coachAccess.canAccessCoach) {
@@ -246,14 +252,14 @@ function ProfilePage({ role = "client" }) {
         }
         let clientProfile = null;
         let coachProfile = null;
-        if (!isCoach && roleState.hasClientRole) {
+        if (!isCoach && data.client_id) {
           try {
             clientProfile = await fetchClientProfile();
           } catch {
             clientProfile = null;
           }
         }
-        if (isCoach && roleState.hasCoachRole) {
+        if (isCoach && data.coach_id) {
           try {
             coachProfile = await fetchCoachProfile();
             setCoachProfileData(coachProfile);

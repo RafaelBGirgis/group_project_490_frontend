@@ -34,7 +34,6 @@ import {
 import { cacheConversationForAccount, createConversation } from "../api/chat";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { updateClientCoachRequestByRequestId } from "../utils/coachRequests";
-import { resolveRoleState } from "../utils/sessionAuth";
 import ClientsDetail from "../components/overlays/clients_detail";
 import SessionsDetail from "../components/overlays/sessions_detail";
 import ReviewsDetail from "../components/overlays/reviews_detail";
@@ -56,7 +55,12 @@ export default function CoachDashboard() {
   const navigate = useNavigate();
 
   /* ── auth guard ──────────────────────────────────────────────────── */
-  const [authed] = useState(true);
+  const [authed, setAuthed] = useState(false);
+  useEffect(() => {
+    const token = localStorage.getItem("jwt");
+    if (!token) { navigate("/login"); return; }
+    setAuthed(true);
+  }, [navigate]);
 
   /* ── overlay ─────────────────────────────────────────────────────── */
   const [overlay, setOverlay] = useState(null);
@@ -79,7 +83,6 @@ export default function CoachDashboard() {
   const [clientReportDrafts, setClientReportDrafts] = useState({});
   const [clientReports, setClientReports] = useState({});
   const [availabilityError, setAvailabilityError] = useState("");
-  const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(false);
 
   /* ── load account ────────────────────────────────────────────────── */
   useEffect(() => {
@@ -87,10 +90,8 @@ export default function CoachDashboard() {
     (async () => {
       try {
         const me = await fetchMe();
-        const roleState = await resolveRoleState();
-        setCanSwitchToAdmin(roleState.hasAdminRole);
-        const coachAccess = await getCoachAccessState(me, roleState);
-        if (!coachAccess.canAccessCoach && !roleState.hasAdminRole) {
+        const coachAccess = await getCoachAccessState(me);
+        if (!coachAccess.canAccessCoach) {
           navigate("/profile");
           return;
         }
@@ -291,14 +292,7 @@ export default function CoachDashboard() {
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: "#080D19" }}>
-      <Navbar
-        role={role}
-        userName={initials}
-        switchOptions={[
-          { label: "Client", to: "/client" },
-          ...(canSwitchToAdmin ? [{ label: "Admin", to: "/admin" }] : []),
-        ]}
-      />
+      <Navbar role={role} userName={initials} />
 
       <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
 

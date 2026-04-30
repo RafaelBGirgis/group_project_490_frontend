@@ -15,7 +15,6 @@ export default defineConfig({
     },
   },
   server: {
-    allowedHosts: ['till-failure.us'],
     proxy: {
       '/auth': {
         target: 'http://localhost:9090',

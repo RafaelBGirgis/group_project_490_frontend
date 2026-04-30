@@ -1,22 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import clientLogo from "../assets/Client Logo.svg";
-import { initiateGoogleOAuth, isAuthenticated, login as loginRequest, storeToken } from "../api/auth";
-import { fetchBackendHealth, fetchMe } from "../api/client";
-import { getCoachAccessState } from "../utils/roleAccess";
-import { resolveRoleState } from "../utils/sessionAuth";
-
-async function resolvePostLoginPath(account) {
-  const roleState = await resolveRoleState();
-  const coachAccess = await getCoachAccessState(account, roleState);
-
-  if (roleState.hasAdminRole) return "/admin";
-  if (coachAccess.canAccessCoach) return "/coach";
-  if (roleState.hasClientRole) return "/client";
-  return "/onboarding";
-}
-
-const API_BASE_URL = import.meta.env.PROD ? "https://api.till-failure.us" : "";
+import { initiateGoogleOAuth, login as loginRequest, storeToken } from "../api/auth";
+import { fetchBackendHealth } from "../api/client";
 
 function LoginPage() {
   const [email, setEmail] = useState("");
@@ -30,35 +16,6 @@ function LoginPage() {
       .catch(() => setBackendReady(false));
   }, []);
 
-  useEffect(() => {
-    if (!isAuthenticated()) {
-      return;
-    }
-
-    let cancelled = false;
-
-    const restoreSession = async () => {
-      try {
-        const account = await fetchMe();
-        const normalizedEmail = String(account?.email || "").trim().toLowerCase();
-        if (normalizedEmail) {
-          localStorage.setItem("active_user_email", normalizedEmail);
-        }
-        if (!cancelled) {
-          window.location.href = await resolvePostLoginPath(account);
-        }
-      } catch {
-        // Ignore failed silent restore attempts and keep the login form visible.
-      }
-    };
-
-    restoreSession();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const handleSubmit = async (e) => {
     e.preventDefault(); // prevent page reload
     setError("");
@@ -66,12 +23,13 @@ function LoginPage() {
     try {
       const data = await loginRequest(email, password);
       storeToken(data.access_token);
-      const account = await fetchMe();
-      const normalizedEmail = String(account?.email || email).trim().toLowerCase();
-      if (normalizedEmail) {
-        localStorage.setItem("active_user_email", normalizedEmail);
-      }
-      window.location.href = await resolvePostLoginPath(account);
+
+      const normalizedEmail = email.trim().toLowerCase();
+      localStorage.setItem("active_user_email", normalizedEmail);
+      const hasOnboarded = localStorage.getItem(`onboarding_complete:${normalizedEmail}`) === "true";
+
+      // Redirect to required onboarding unless completed
+      window.location.href = hasOnboarded ? "/client" : "/onboarding";
     } catch (err) {
       console.error(err);
       setError(err.message);
@@ -217,6 +175,15 @@ function LoginPage() {
                 Create one free
               </Link>
             </p>
+
+            <div className="mt-8 flex justify-center">
+              <Link
+                to="/admin"
+                className="rounded-full border border-red-500/30 bg-red-500/10 px-4 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-red-400 transition hover:bg-red-500/15"
+              >
+                Admin Login
+              </Link>
+            </div>
           </div>
         </section>
       </main>

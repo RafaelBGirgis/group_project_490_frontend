@@ -1,5 +1,7 @@
 import { apiGet, apiPatch, apiPost } from "./api";
 
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
 /* ─── coach profile ───────────────────────────────────────────────── */
 
 export async function fetchCoachProfile() {

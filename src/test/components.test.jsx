@@ -5,11 +5,22 @@
  * and assert on visible output and interactions.
  */
 
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { beforeEach, describe, it, expect, vi } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { Navbar, StatCard, DashboardCard } from "../components";
 import StatusBadge from "../components/status_badge";
+import {
+  queryNotifications,
+  readAllNotifications,
+  readNotification,
+} from "../api/notifications";
+
+vi.mock("../api/notifications", () => ({
+  queryNotifications: vi.fn(),
+  readNotification: vi.fn(),
+  readAllNotifications: vi.fn(),
+}));
 
 /* ─── helpers ────────────────────────────────────────────────────────── */
 
@@ -112,6 +123,40 @@ describe("StatusBadge", () => {
    ═══════════════════════════════════════════════════════════════════════ */
 
 describe("Navbar", () => {
+  const backendNotifications = [
+    {
+      id: 1,
+      fav_category: "workout_plan",
+      message: "Your coach prescribed a new workout plan.",
+      details: "Workout plan 7 is ready.",
+      is_read: false,
+      created_at: "2026-04-30",
+    },
+    {
+      id: 2,
+      fav_category: "payment",
+      message: "A new invoice was issued.",
+      details: "Invoice 12",
+      is_read: false,
+      created_at: "2026-04-29",
+    },
+  ];
+
+  beforeEach(() => {
+    localStorage.clear();
+    queryNotifications.mockReset();
+    readNotification.mockReset();
+    readAllNotifications.mockReset();
+    queryNotifications.mockResolvedValue(backendNotifications);
+    readNotification.mockImplementation((id) =>
+      Promise.resolve({
+        ...backendNotifications.find((notification) => notification.id === id),
+        is_read: true,
+      })
+    );
+    readAllNotifications.mockResolvedValue({ message: "2 notifications marked as read" });
+  });
+
   it("renders brand name and role badge", () => {
     renderWithRouter(<Navbar role="client" userName="JD" />);
     expect(screen.getByText("Till Failure")).toBeInTheDocument();
@@ -128,40 +173,46 @@ describe("Navbar", () => {
     expect(screen.getByText("MK")).toBeInTheDocument();
   });
 
-  it("shows notification dropdown on click", () => {
+  it("loads notifications from backend and shows dropdown on click", async () => {
+    localStorage.setItem("jwt", "token");
     renderWithRouter(<Navbar role="client" userName="JD" />);
-    // Click the notification bell (second icon button)
-    const buttons = screen.getAllByRole("button");
-    const bellButton = buttons.find((b) =>
-      b.querySelector("svg path[d*='M15 17h5']")
-    );
-    expect(bellButton).toBeTruthy();
+    await waitFor(() => expect(queryNotifications).toHaveBeenCalled());
+    const bellButton = screen.getByRole("button", { name: /notifications/i });
     fireEvent.click(bellButton);
     expect(screen.getByText("Notifications")).toBeInTheDocument();
+    expect(screen.getByText("Your coach prescribed a new workout plan.")).toBeInTheDocument();
   });
 
-  it("shows unread count badge", () => {
+  it("shows unread count badge", async () => {
+    localStorage.setItem("jwt", "token");
     renderWithRouter(<Navbar role="client" userName="JD" />);
-    // Client mock has 2 unread notifications
-    const badge = screen.getByText("2");
-    expect(badge).toBeInTheDocument();
+    expect(await screen.findByText("2")).toBeInTheDocument();
   });
 
-  it("marks all notifications as read", () => {
+  it("marks all notifications as read", async () => {
+    localStorage.setItem("jwt", "token");
     renderWithRouter(<Navbar role="client" userName="JD" />);
-    // Open dropdown
-    const buttons = screen.getAllByRole("button");
-    const bellButton = buttons.find((b) =>
-      b.querySelector("svg path[d*='M15 17h5']")
-    );
+    await screen.findByText("2");
+    const bellButton = screen.getByRole("button", { name: /notifications/i });
     fireEvent.click(bellButton);
 
-    // Click mark all read
-    const markAllBtn = screen.getByText("Mark all read");
+    const markAllBtn = screen.getByText("Read all");
     fireEvent.click(markAllBtn);
 
-    // Unread count badge should be gone (no "2" badge)
-    expect(screen.queryByText("Mark all read")).not.toBeInTheDocument();
+    await waitFor(() => expect(readAllNotifications).toHaveBeenCalled());
+    expect(screen.queryByText("2")).not.toBeInTheDocument();
+  });
+
+  it("marks one notification as read when selected", async () => {
+    localStorage.setItem("jwt", "token");
+    renderWithRouter(<Navbar role="client" userName="JD" />);
+    await screen.findByText("2");
+    const bellButton = screen.getByRole("button", { name: /notifications/i });
+    fireEvent.click(bellButton);
+
+    fireEvent.click(screen.getByText("A new invoice was issued."));
+
+    await waitFor(() => expect(readNotification).toHaveBeenCalledWith(2));
   });
 
   it("shows 'Switch to Coach' for approved client role", () => {
@@ -174,12 +225,11 @@ describe("Navbar", () => {
     expect(screen.getByText("Switch to Client")).toBeInTheDocument();
   });
 
-  it("closes notification dropdown on Escape", () => {
+  it("closes notification dropdown on Escape", async () => {
+    localStorage.setItem("jwt", "token");
     renderWithRouter(<Navbar role="client" userName="JD" />);
-    const buttons = screen.getAllByRole("button");
-    const bellButton = buttons.find((b) =>
-      b.querySelector("svg path[d*='M15 17h5']")
-    );
+    await screen.findByText("2");
+    const bellButton = screen.getByRole("button", { name: /notifications/i });
     fireEvent.click(bellButton);
     expect(screen.getByText("Notifications")).toBeInTheDocument();
 

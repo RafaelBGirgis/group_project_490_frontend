@@ -1,4 +1,5 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
+const SESSION_COOKIE_NAMES = ["jwt", "access_token", "token", "auth_token"];
 
 function buildUrl(path) {
   return `${API_BASE}${path}`;
@@ -18,8 +19,52 @@ function normalizeErrorDetail(detail) {
   return null;
 }
 
+function readCookie(name) {
+  if (typeof document === "undefined" || !document.cookie) {
+    return null;
+  }
+
+  const prefix = `${name}=`;
+  const match = document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(prefix));
+
+  if (!match) {
+    return null;
+  }
+
+  const value = match.slice(prefix.length).trim();
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function getToken() {
+  const storedToken = localStorage.getItem("jwt");
+  if (storedToken) {
+    return storedToken;
+  }
+
+  for (const cookieName of SESSION_COOKIE_NAMES) {
+    const cookieToken = readCookie(cookieName);
+    if (cookieToken) {
+      localStorage.setItem("jwt", cookieToken);
+      return cookieToken;
+    }
+  }
+
+  return null;
+}
+
 export async function apiFetch(path, opts = {}) {
-  const token = localStorage.getItem("jwt");
+  const token = getToken();
   const headers = { ...(opts.headers || {}) };
   const isFormData = typeof FormData !== "undefined" && opts.body instanceof FormData;
 
@@ -30,7 +75,11 @@ export async function apiFetch(path, opts = {}) {
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const res = await fetch(buildUrl(path), { ...opts, headers });
+  const res = await fetch(buildUrl(path), {
+    credentials: opts.credentials || "include",
+    ...opts,
+    headers,
+  });
 
   if (res.status === 401) {
     const error = new Error("Unauthorized");

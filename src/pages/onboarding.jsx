@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AvailabilityDetail from "../components/overlays/availability_detail";
-import { buildInitialSurveyPayload, createClientInitialSurvey, fetchMe } from "../api/client";
+import {
+  buildClientInformationPayload,
+  buildInitialSurveyPayload,
+  createClientInitialSurvey,
+  fetchMe,
+  updateAccount,
+  updateClientInformation,
+} from "../api/client";
 import { getOnboardingStorageKey, loadProfileDraft, saveOnboardingDraft } from "../utils/profileDrafts";
 
 const PRIMARY_GOALS = [
@@ -21,6 +28,26 @@ const EMPTY_TRAINING_AVAILABILITY = {
 };
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+const buildAccountUpdatePayload = ({ age, email, bio, gender }) => {
+  const payload = {};
+
+  const parsedAge = Number(age);
+  if (Number.isFinite(parsedAge) && parsedAge > 0) {
+    payload.age = parsedAge;
+  }
+  if (email) {
+    payload.email = email;
+  }
+  if (typeof bio === "string") {
+    payload.bio = bio;
+  }
+  if (gender) {
+    payload.gender = gender;
+  }
+
+  return payload;
+};
 
 const normalizeTrainingAvailability = (value, fallbackDays = []) => {
   const base = {
@@ -119,12 +146,6 @@ function OnboardingPage() {
   }, [form]);
 
   useEffect(() => {
-    const token = localStorage.getItem("jwt");
-    if (!token) {
-      navigate("/login");
-      return;
-    }
-
     const load = async () => {
       try {
         const account = await fetchMe();
@@ -153,6 +174,10 @@ function OnboardingPage() {
           profilePicture: savedData?.profilePicture || prev.profilePicture,
         }));
       } catch (err) {
+        if (err?.status === 401) {
+          navigate("/login");
+          return;
+        }
         setError(err.message || "Failed to initialize onboarding.");
       } finally {
         setLoading(false);
@@ -186,8 +211,40 @@ function OnboardingPage() {
 
     try {
       setSubmitting(true);
+      const accountPayload = buildAccountUpdatePayload({
+        age: form.age,
+        email: form.email,
+        bio: form.bio,
+        gender: form.gender,
+      });
       const surveyPayload = buildInitialSurveyPayload(form);
-      const response = await createClientInitialSurvey(surveyPayload);
+
+      if (Object.keys(accountPayload).length > 0) {
+        await updateAccount(accountPayload);
+      }
+
+      let response = null;
+
+      try {
+        response = await createClientInitialSurvey(surveyPayload);
+      } catch (initialSurveyError) {
+        const clientInformationPayload = buildClientInformationPayload({
+          primaryGoal: form.primaryGoal,
+          weight: form.weight,
+          trainingAvailability: form.trainingAvailability,
+          paymentMethod: {
+            ccnum: form.cardNumber,
+            cv: form.cardCvv,
+            exp_date: form.cardExpiry,
+          },
+        });
+
+        if (Object.keys(clientInformationPayload).length === 0) {
+          throw initialSurveyError;
+        }
+
+        response = await updateClientInformation(clientInformationPayload);
+      }
 
       saveOnboardingDraft(localPayload);
       if (form.email) {

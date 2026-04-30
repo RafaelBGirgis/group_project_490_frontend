@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import clientLogo from "../assets/Client Logo.svg";
-import { initiateGoogleOAuth, signup as signupRequest, storeToken } from "../api/auth";
+import { initiateGoogleOAuth, isAuthenticated, signup as signupRequest, storeToken } from "../api/auth";
+import { fetchMe } from "../api/client";
 import { saveSignupPrefill } from "../utils/profileDrafts";
 
 export default function SignupPage() {
@@ -16,6 +17,35 @@ export default function SignupPage() {
     bio: "",
   });
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!isAuthenticated()) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const restoreSession = async () => {
+      try {
+        const account = await fetchMe();
+        const normalizedEmail = String(account?.email || "").trim().toLowerCase();
+        if (normalizedEmail) {
+          localStorage.setItem("active_user_email", normalizedEmail);
+        }
+        if (!cancelled) {
+          window.location.href = account?.client_id ? "/client" : "/onboarding";
+        }
+      } catch {
+        // Keep the signup screen available if silent auth restoration fails.
+      }
+    };
+
+    restoreSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleChange = (e) => {
     const { name, value } = e.target;

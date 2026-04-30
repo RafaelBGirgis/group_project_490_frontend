@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 import os
+import time
 import pytest
 from dotenv import load_dotenv
 from selenium import webdriver
@@ -39,7 +40,7 @@ def make_edge_driver(headless: bool = False) -> webdriver.Edge:
     options = EdgeOptions()
 
     if headless:
-        options.add_argument("--headless")
+        options.add_argument("--headless=new")
         options.add_argument("--disable-gpu")
 
     options.add_argument("--no-sandbox")
@@ -51,6 +52,17 @@ def make_edge_driver(headless: bool = False) -> webdriver.Edge:
     driver = webdriver.Edge(options=options)
     driver.implicitly_wait(5)  # seconds — fallback for all find_element calls
     return driver
+
+
+def generate_unique_test_email(prefix: str = "testuser") -> str:
+    """
+    Generate a unique email for test signup.
+    Uses timestamp to ensure uniqueness across test runs.
+    
+    Example: testuser_1234567890@test.local
+    """
+    timestamp = int(time.time() * 1000)  # milliseconds for extra uniqueness
+    return f"{prefix}_{timestamp}@test.local"
 
 
 # ---------------------------------------------------------------------------

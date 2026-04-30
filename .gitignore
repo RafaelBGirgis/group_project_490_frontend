@@ -24,3 +24,19 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Pytest cache
+.pytest_cache/
+
+# Egg / build metadata
+*.egg-info/
+dist/
+build/
+
+# Reports (optional)
+report.html

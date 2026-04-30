@@ -25,7 +25,7 @@ class BasePage:
                 self.type(self.EMAIL_INPUT, email)
     """
 
-    DEFAULT_TIMEOUT = 10  # seconds
+    DEFAULT_TIMEOUT = 5  # seconds
 
     def __init__(self, driver: WebDriver, base_url: str):
         self.driver = driver

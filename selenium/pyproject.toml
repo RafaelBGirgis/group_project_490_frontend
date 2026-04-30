@@ -1,0 +1,18 @@
+[project]
+name = "selenium-tests"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "selenium>=4.20.0",
+    "pytest>=8.0.0",
+    "pytest-html>=4.1.0",
+    "python-dotenv>=1.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+pythonpath = ["."]
+addopts = "-v --html=report.html --self-contained-html"

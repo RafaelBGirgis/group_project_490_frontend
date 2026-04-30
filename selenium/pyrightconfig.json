@@ -1,0 +1,7 @@
+{
+  "pythonVersion": "3.13",
+  "pythonPath": ".venv/Scripts/python.exe",
+  "typeCheckingMode": "basic",
+  "include": ["."],
+  "exclude": [".venv", "__pycache__", "*.pyc"]
+}

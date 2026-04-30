@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import clientLogo from "../assets/Client Logo.svg";
+import { initiateGoogleOAuth, signup as signupRequest, storeToken } from "../api/auth";
+import { saveSignupPrefill } from "../utils/profileDrafts";
 
 const API_BASE_URL = import.meta.env.PROD ? "https://api.till-failure.us" : "";
 
@@ -50,32 +52,24 @@ export default function SignupPage() {
     }
 
     try {
-      const payload = {
-        email: formData.email.trim(),
-        password: formData.password,
-        name: formData.name.trim(),
+      const data = await signupRequest(
+        formData.email,
+        formData.password,
+        formData.name,
+        parsedAge,
+        formData.gender,
+        formData.pfpUrl.trim() || undefined,
+        formData.bio.trim() || undefined
+      );
+      storeToken(data.access_token);
+      saveSignupPrefill({
+        name: formData.name,
+        email: formData.email,
         age: parsedAge,
         gender: formData.gender,
-      };
-
-      if (formData.pfpUrl.trim()) payload.pfp_url = formData.pfpUrl.trim();
-      if (formData.bio.trim()) payload.bio = formData.bio.trim();
-
-      const res = await fetch(`${API_BASE_URL}/auth/signup`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        bio: formData.bio.trim(),
+        pfpUrl: formData.pfpUrl.trim(),
       });
-
-      if (!res.ok) {
-        const message = await getErrorMessage(res, "Signup failed");
-        throw new Error(message);
-      }
-
-      const data = await res.json();
-      console.log("Signup successful:", data);
-      localStorage.setItem("jwt", data.access_token);
-      localStorage.setItem("active_user_email", formData.email.trim().toLowerCase());
       window.location.href = "/onboarding";
     } catch (err) {
       console.error(err);

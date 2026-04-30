@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:api.till-failure.us)",
+      "Bash(xargs grep *)",
+      "Bash(npx vitest *)",
+      "Bash(npx eslint *)",
+      "Bash(git stash *)",
+      "Bash(cp C:/Users/User/GitHub/group_project_490_frontend/.claude/worktrees/practical-knuth-574e2e/src/api/workouts.js C:/Users/User/GitHub/group_project_490_frontend/src/api/workouts.js)",
+      "Bash(cp C:/Users/User/GitHub/group_project_490_frontend/.claude/worktrees/practical-knuth-574e2e/src/pages/workouts.jsx C:/Users/User/GitHub/group_project_490_frontend/src/pages/workouts.jsx)",
+      "Bash(cp C:/Users/User/GitHub/group_project_490_frontend/.claude/worktrees/practical-knuth-574e2e/src/test/routing.test.jsx C:/Users/User/GitHub/group_project_490_frontend/src/test/routing.test.jsx)",
+      "Bash(C:/Users/User/GitHub/group_project_490_backend/.venv/Scripts/python.exe -c \"from src.database.session import bootstrap_db; print\\('import ok'\\)\")",
+      "Bash(C:/Users/User/GitHub/group_project_490_backend/.venv/Scripts/python.exe -c \"from src.database.session import bootstrap_db; bootstrap_db\\(\\); print\\('bootstrap ok'\\)\")",
+      "Bash(C:/Users/User/GitHub/group_project_490_backend/.venv/Scripts/python.exe -c ' *)",
+      "Bash(C:/Users/User/GitHub/group_project_490_backend/.venv/Scripts/python.exe -c \"from src.database.session import bootstrap_db; bootstrap_db\\(\\); bootstrap_db\\(\\); bootstrap_db\\(\\); print\\('ran 3x ok'\\)\")",
+      "Bash(C:/Users/User/GitHub/group_project_490_backend/.venv/Scripts/python.exe -m pytest tests -x --tb=short)",
+      "Bash(C:/Users/User/GitHub/group_project_490_backend/.venv/Scripts/python.exe -c \"from src.api.app import app; print\\('app routes:', len\\(app.routes\\)\\); print\\('startup handlers:', len\\(app.router.on_startup\\)\\)\")",
+      "Bash(C:/Users/User/GitHub/group_project_490_backend/.venv/Scripts/python.exe -c \"from pydantic import PydanticSerializationUnexpectedValue; print\\(PydanticSerializationUnexpectedValue\\)\")"
+    ]
+  }
+}

@@ -1,152 +1,144 @@
-/**
- * Chat API calls.
- * Same pattern — real endpoint first, mock fallback.
- *
- * Backend endpoints (under /roles/shared/chat):
- *   POST /new_chat         — create a new chat for a relationship
- *   POST /send_message/{chatId} — send a message (query param: message_text)
- *   GET  /get_messages/{chatId} — paginated messages
- */
+import { apiGet, apiPost, withQuery } from "./api";
 
-import { apiGet, apiPost, apiPatch, apiDelete } from "./api";
+function getConversationCacheKey(accountId, role = "client") {
+  return `chat:conversations:${role}:${accountId ?? "current"}`;
+}
 
-/* ─── create a new chat ─────────────────────────────────────────── */
+function getRelationshipChatKey(relationshipId) {
+  return `chat:relationship:${relationshipId}`;
+}
 
-export async function createChat(relationshipId) {
-  try {
-    // Backend: POST /roles/shared/chat/new_chat → { chat_id }
-    return await apiPost("/roles/shared/chat/new_chat", {
+function mergeConversationLists(lists = []) {
+  const merged = [];
+  const seen = new Set();
+  lists.flat().forEach((conversation) => {
+    if (!conversation || seen.has(conversation.id)) return;
+    seen.add(conversation.id);
+    merged.push(conversation);
+  });
+  return merged;
+}
+
+export async function fetchConversations(accountId, role = "client", options = {}) {
+  const legacyIds = Array.isArray(options.legacyAccountIds) ? options.legacyAccountIds.filter(Boolean) : [];
+  const keys = [getConversationCacheKey(accountId, role), ...legacyIds.map((id) => getConversationCacheKey(id, role))];
+  const conversationLists = keys.map((key) => {
+    const parsed = readJson(key);
+    return Array.isArray(parsed) ? parsed : [];
+  });
+  const merged = mergeConversationLists(conversationLists);
+
+  if (merged.length > 0) {
+    localStorage.setItem(getConversationCacheKey(accountId, role), JSON.stringify(merged));
+    legacyIds.forEach((id) => {
+      if (id !== accountId) {
+        localStorage.removeItem(getConversationCacheKey(id, role));
+      }
+    });
+  }
+
+  return merged;
+}
+
+export async function createConversation(relationshipId, partner, options = {}) {
+  const relationshipChatKey = getRelationshipChatKey(relationshipId);
+  const existingChatId = localStorage.getItem(relationshipChatKey);
+  let chatId = existingChatId ? Number(existingChatId) : null;
+
+  if (!chatId) {
+    const response = await apiPost("/roles/shared/chat/new_chat", {
       relationship_id: relationshipId,
     });
-  } catch {
-    return { chat_id: Date.now() };
-  }
-}
-
-/* ─── conversations list ─────────────────────────────────────────── */
-
-export async function fetchConversations(accountId, role = "client") {
-  try {
-    // No direct "list conversations" endpoint in backend — keep mock for now
-    return await apiGet(`/chat/conversations?account_id=${accountId}`);
-  } catch {
-    // Mock data based on role
-    if (role === "coach") {
-      return [
-        {
-          id: 1,
-          partner_id: 201,
-          partner_name: "John Doe",
-          partner_role: "client",
-          last_message: "Thanks for the program update!",
-          last_message_at: "10:32 AM",
-          unread_count: 2,
-        },
-        {
-          id: 2,
-          partner_id: 202,
-          partner_name: "Sarah Chen",
-          partner_role: "client",
-          last_message: "Hit a new PR today!",
-          last_message_at: "Yesterday",
-          unread_count: 0,
-        },
-        {
-          id: 3,
-          partner_id: 203,
-          partner_name: "Mike Johnson",
-          partner_role: "client",
-          last_message: "Question about my diet plan",
-          last_message_at: "Mon",
-          unread_count: 1,
-        },
-      ];
-    } else {
-      return [
-        {
-          id: 1,
-          partner_id: 101,
-          partner_name: "Coach Rafael",
-          partner_role: "coach",
-          last_message: "Great work today! Keep it up.",
-          last_message_at: "10:32 AM",
-          unread_count: 2,
-        },
-        {
-          id: 2,
-          partner_id: 102,
-          partner_name: "Coach Sandra",
-          partner_role: "coach",
-          last_message: "Your meal plan for next week is ready.",
-          last_message_at: "Yesterday",
-          unread_count: 0,
-        },
-      ];
+    chatId = Number(response?.chat_id);
+    if (chatId) {
+      localStorage.setItem(relationshipChatKey, String(chatId));
     }
   }
+
+  const conversation = {
+    id: chatId,
+    partner_id: partner?.id,
+    partner_name: partner?.name || "New conversation",
+    partner_role: partner?.role || "coach",
+    last_message: "",
+    last_message_at: null,
+    unread_count: 0,
+  };
+
+  const cacheKey = getConversationCacheKey(options.accountId, options.role || partner?.role || "client");
+  const cached = readJson(cacheKey) || [];
+  const next = [conversation, ...cached.filter((item) => item.id !== conversation.id)];
+  localStorage.setItem(cacheKey, JSON.stringify(next));
+  return conversation;
 }
 
-/* ─── messages for a conversation ────────────────────────────────── */
-
-export async function fetchMessages(chatId, skip = 0, limit = 50) {
-  try {
-    // Backend: GET /roles/shared/chat/get_messages/{chat_id}?skip=&limit=
-    const data = await apiGet(
-      `/roles/shared/chat/get_messages/${chatId}?skip=${skip}&limit=${limit}`
-    );
-    // Backend returns { messages: [...] }
-    return data.messages ?? data;
-  } catch {
-    const now = new Date();
-    const t = (mins) => {
-      const d = new Date(now.getTime() - mins * 60000);
-      return d.toISOString();
-    };
-
-    if (chatId === 1) {
-      return [
-        { id: 1, from_account_id: 201, content: "Hey Coach! How's my progress looking?", created_at: t(120), is_read: true },
-        { id: 2, from_account_id: 0,   content: "Looking great! You're hitting all your targets.", created_at: t(115), is_read: true },
-        { id: 3, from_account_id: 201, content: "Thanks! I hit a new PR on bench today - 195 lbs!", created_at: t(110), is_read: true },
-        { id: 4, from_account_id: 0,   content: "That's awesome! Keep pushing those weights.", created_at: t(60), is_read: true },
-        { id: 5, from_account_id: 201, content: "Will do! What's next in my program?", created_at: t(55), is_read: true },
-        { id: 6, from_account_id: 0,   content: "I updated it with more volume. Check your dashboard.", created_at: t(30), is_read: false },
-        { id: 7, from_account_id: 0,   content: "Great work today! Keep it up.", created_at: t(5), is_read: false },
-      ];
-    } else if (chatId === 2) {
-      return [
-        { id: 1, from_account_id: 202, content: "Hit a new PR today!", created_at: t(1440), is_read: true },
-        { id: 2, from_account_id: 0,   content: "Congratulations! That's excellent progress.", created_at: t(1435), is_read: true },
-      ];
-    } else {
-      return [
-        { id: 1, from_account_id: 101, content: "Hey! How's your training going this week?", created_at: t(120), is_read: true },
-        { id: 2, from_account_id: 0,   content: "Pretty good! Hit a new PR on bench press 195 lbs.", created_at: t(115), is_read: true },
-        { id: 3, from_account_id: 101, content: "That's awesome! You've been making great progress.", created_at: t(110), is_read: true },
-      ];
-    }
-  }
+export function cacheConversationForAccount(conversation, { accountId, role = "client" } = {}) {
+  if (!conversation || !accountId) return;
+  const cacheKey = getConversationCacheKey(accountId, role);
+  const cached = readJson(cacheKey) || [];
+  const next = [conversation, ...cached.filter((item) => item.id !== conversation.id)];
+  localStorage.setItem(cacheKey, JSON.stringify(next));
 }
 
-/* ─── send a message ─────────────────────────────────────────────── */
+export function updateConversationPreview(chatId, updater, { accountId, role = "client" } = {}) {
+  if (!chatId || !accountId || typeof updater !== "function") return;
+  const cacheKey = getConversationCacheKey(accountId, role);
+  const cached = readJson(cacheKey);
+  if (!Array.isArray(cached)) return;
+  const next = cached.map((conversation) =>
+    conversation.id === chatId ? { ...conversation, ...updater(conversation) } : conversation
+  );
+  localStorage.setItem(cacheKey, JSON.stringify(next));
+}
+
+export async function fetchMessages(chatId, { skip = 0, limit = 100 } = {}) {
+  const result = await apiGet(withQuery(`/roles/shared/chat/get_messages/${chatId}`, { skip, limit }));
+  const messages = Array.isArray(result?.messages) ? result.messages : [];
+  return messages.map((message) => ({
+    id: message.id,
+    from_account_id: message.from_account_id,
+    content: message.message_text,
+    created_at: message.last_updated || new Date().toISOString(),
+    is_read: message.is_read,
+  }));
+}
 
 export async function sendMessage(chatId, content) {
+  const result = await apiPost(withQuery(`/roles/shared/chat/send_message/${chatId}`, {
+    message_text: content,
+  }));
+  const createdAt = new Date().toISOString();
+  return {
+    id: result?.message_id,
+    from_account_id: result?.from_account_id,
+    content: result?.message_text,
+    created_at: createdAt,
+    is_read: true,
+  };
+}
+
+export function formatChatTimestamp(value, { includeZone = false } = {}) {
+  if (!value) return "";
   try {
-    // Backend: POST /roles/shared/chat/send_message/{chat_id}?message_text=...
-    // The backend takes message_text as a query parameter
-    const encoded = encodeURIComponent(content);
-    return await apiPost(
-      `/roles/shared/chat/send_message/${chatId}?message_text=${encoded}`,
-      {}
-    );
+    const date = new Date(value);
+    const formatted = date.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: "America/New_York",
+    });
+    return includeZone ? `${formatted} ET` : formatted;
   } catch {
-    return {
-      id: Date.now(),
-      from_account_id: 0,
-      content,
-      created_at: new Date().toISOString(),
-      is_read: true,
-    };
+    return "";
+  }
+}
+
+function readJson(key) {
+  const raw = localStorage.getItem(key);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
   }
 }
 

@@ -2,26 +2,40 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useState, useEffect, useRef } from "react";
 import { Navbar, SkeletonMessage } from "../components";
 import { fetchMe } from "../api/client";
-import { fetchConversations, fetchMessages, sendMessage } from "../api/chat";
+import {
+  fetchConversations,
+  fetchMessages,
+  formatChatTimestamp,
+  sendMessage,
+  updateConversationPreview,
+} from "../api/chat";
 import { ROLE_THEMES } from "../components/theme";
+import { getCoachAccessState } from "../utils/roleAccess";
 
 export default function CoachChatPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const preselectedClient = searchParams.get("client");
 
-  /* ── auth + account ──────────────────────────────────────────────── */
   const [account, setAccount] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [chatError, setChatError] = useState("");
 
   useEffect(() => {
     const token = localStorage.getItem("jwt");
-    if (!token) { navigate("/login"); return; }
+    if (!token) {
+      navigate("/login");
+      return;
+    }
 
     fetchMe()
-      .then((me) => {
+      .then(async (me) => {
+        const coachAccess = await getCoachAccessState(me);
+        if (!coachAccess.canAccessCoach) {
+          navigate("/client-chat");
+          return;
+        }
         setAccount(me);
-        // No role checking needed - routing ensures only coaches access this page
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -30,30 +44,46 @@ export default function CoachChatPage() {
   const role = "coach";
   const theme = ROLE_THEMES.coach;
 
-  /* ── conversations ───────────────────────────────────────────────── */
   const [conversations, setConversations] = useState([]);
   const [activeChat, setActiveChat] = useState(null);
   const [loadingConvos, setLoadingConvos] = useState(true);
 
+  const findPreferredConversation = (convos, partnerId) => {
+    const matches = convos.filter((conversation) => String(conversation.partner_id) === String(partnerId));
+    if (matches.length === 0) return null;
+    return [...matches].sort((a, b) => {
+      const aTime = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
+      const bTime = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
+      return bTime - aTime;
+    })[0];
+  };
+
   useEffect(() => {
     if (!account) return;
-    fetchConversations(account.id, "coach")
+    setLoadingConvos(true);
+    setChatError("");
+    fetchConversations(account.id, "coach", {
+      legacyAccountIds: [account.coach_id],
+    })
       .then((convos) => {
         setConversations(convos);
-        // Auto-select conversation if preselected or first one
         if (preselectedClient) {
-          const match = convos.find((c) => String(c.partner_id) === preselectedClient);
-          if (match) setActiveChat(match);
-          else if (convos.length > 0) setActiveChat(convos[0]);
+          const match = findPreferredConversation(convos, preselectedClient);
+          setActiveChat(match);
         } else if (convos.length > 0) {
-          setActiveChat(convos[0]);
+          setActiveChat((current) => current && convos.some((item) => item.id === current.id) ? current : convos[0]);
+        } else {
+          setActiveChat(null);
         }
       })
-      .catch(() => {})
+      .catch((error) => {
+        setConversations([]);
+        setActiveChat(null);
+        setChatError(error.message || "Unable to load conversations.");
+      })
       .finally(() => setLoadingConvos(false));
   }, [account, preselectedClient]);
 
-  /* ── messages ────────────────────────────────────────────────────── */
   const [messages, setMessages] = useState([]);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
   const messagesEndRef = useRef(null);
@@ -61,56 +91,103 @@ export default function CoachChatPage() {
   useEffect(() => {
     if (!activeChat) return;
     setLoadingMsgs(true);
+    setChatError("");
     fetchMessages(activeChat.id)
       .then(setMessages)
-      .catch(() => {})
+      .catch((error) => {
+        setMessages([]);
+        setChatError(error.message || "Unable to load messages.");
+      })
       .finally(() => setLoadingMsgs(false));
   }, [activeChat]);
 
-  // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  /* ── send ────────────────────────────────────────────────────────── */
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
 
   const handleSend = async () => {
     if (!draft.trim() || !activeChat || sending) return;
     const text = draft.trim();
+    const previewTimestamp = new Date().toISOString();
+    const previousPreview = {
+      last_message: activeChat.last_message,
+      last_message_at: activeChat.last_message_at,
+      unread_count: activeChat.unread_count,
+    };
+
     setDraft("");
     setSending(true);
+    setChatError("");
 
-    // Optimistic add
     const tempMsg = {
       id: Date.now(),
       from_account_id: account.id,
       content: text,
-      created_at: new Date().toISOString(),
+      created_at: previewTimestamp,
       is_read: true,
     };
     setMessages((prev) => [...prev, tempMsg]);
 
-    // Update conversation preview
     setConversations((prev) =>
       prev.map((c) =>
         c.id === activeChat.id
-          ? { ...c, last_message: text, last_message_at: "Just now", unread_count: 0 }
+          ? { ...c, last_message: text, last_message_at: previewTimestamp, unread_count: 0 }
           : c
       )
     );
+    setActiveChat((prev) =>
+      prev && prev.id === activeChat.id
+        ? { ...prev, last_message: text, last_message_at: previewTimestamp, unread_count: 0 }
+        : prev
+    );
 
     try {
-      await sendMessage(activeChat.id, text);
-    } catch {
-      // Message already shown optimistically
+      const sentMessage = await sendMessage(activeChat.id, text);
+      setMessages((prev) => prev.map((message) => (message.id === tempMsg.id ? sentMessage : message)));
+      updateConversationPreview(
+        activeChat.id,
+        () => ({
+          last_message: text,
+          last_message_at: sentMessage.created_at,
+          unread_count: 0,
+        }),
+        { accountId: account.id, role: "coach" }
+      );
+      setConversations((prev) =>
+        prev.map((conversation) =>
+          conversation.id === activeChat.id
+            ? { ...conversation, last_message: text, last_message_at: sentMessage.created_at, unread_count: 0 }
+            : conversation
+        )
+      );
+      setActiveChat((prev) =>
+        prev && prev.id === activeChat.id
+          ? { ...prev, last_message: text, last_message_at: sentMessage.created_at, unread_count: 0 }
+          : prev
+      );
+    } catch (error) {
+      setMessages((prev) => prev.filter((message) => message.id !== tempMsg.id));
+      setConversations((prev) =>
+        prev.map((conversation) =>
+          conversation.id === activeChat.id
+            ? { ...conversation, ...previousPreview }
+            : conversation
+        )
+      );
+      setActiveChat((prev) =>
+        prev && prev.id === activeChat.id
+          ? { ...prev, ...previousPreview }
+          : prev
+      );
+      setChatError(error.message || "Unable to send message.");
     } finally {
       setSending(false);
     }
   };
 
-  /* ── initials helper ─────────────────────────────────────────────── */
   const getInitials = (name) =>
     name ? name.split(" ").map((n) => n[0]).join("").toUpperCase() : "?";
 
@@ -121,17 +198,6 @@ export default function CoachChatPage() {
     return ROLE_THEMES[senderRole] || ROLE_THEMES.client;
   };
 
-  /* ── format time ─────────────────────────────────────────────────── */
-  const formatTime = (iso) => {
-    try {
-      const d = new Date(iso);
-      return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-    } catch {
-      return "";
-    }
-  };
-
-  /* ── loading state ───────────────────────────────────────────────── */
   if (loading) {
     return (
       <div className="min-h-screen" style={{ backgroundColor: "#080D19" }}>
@@ -160,17 +226,19 @@ export default function CoachChatPage() {
       <Navbar role={role} userName={userInitials} />
 
       <div className="max-w-7xl mx-auto px-6 py-6">
-        <div className="flex gap-4 h-[calc(100vh-120px)]">
+        {chatError ? (
+          <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+            {chatError}
+          </div>
+        ) : null}
 
-          {/* ─── Conversation List (Left Sidebar) ─────────────────── */}
+        <div className="flex gap-4 h-[calc(100vh-120px)]">
           <div className="w-80 shrink-0 flex flex-col rounded-2xl border border-white/6 bg-[#0F1729]">
-            {/* Header */}
             <div className="px-4 py-4 border-b border-white/5">
               <h2 className="text-lg font-bold text-white">Coach Messages</h2>
               <p className="text-xs text-gray-500 mt-0.5">{conversations.length} conversation{conversations.length !== 1 ? "s" : ""}</p>
             </div>
 
-            {/* List */}
             <div className="flex-1 overflow-y-auto">
               {loadingConvos ? (
                 <div className="p-4 space-y-3">
@@ -191,7 +259,6 @@ export default function CoachChatPage() {
                         isActive ? "bg-white/5" : "hover:bg-white/3"
                       }`}
                     >
-                      {/* Avatar */}
                       <div
                         className="w-10 h-10 rounded-full shrink-0 flex items-center justify-center text-white text-sm font-bold"
                         style={{
@@ -200,15 +267,13 @@ export default function CoachChatPage() {
                       >
                         {getInitials(convo.partner_name)}
                       </div>
-                      {/* Info */}
                       <div className="flex-1 min-w-0">
                         <div className="flex justify-between items-center">
                           <p className="text-white text-sm font-medium truncate">{convo.partner_name}</p>
-                          <span className="text-gray-500 text-[10px] shrink-0 ml-2">{convo.last_message_at}</span>
+                          <span className="text-gray-500 text-[10px] shrink-0 ml-2">{formatChatTimestamp(convo.last_message_at)}</span>
                         </div>
                         <p className="text-gray-400 text-xs truncate mt-0.5">{convo.last_message}</p>
                       </div>
-                      {/* Unread badge */}
                       {convo.unread_count > 0 && (
                         <span
                           className="w-5 h-5 rounded-full text-white text-[10px] font-bold flex items-center justify-center shrink-0"
@@ -224,7 +289,6 @@ export default function CoachChatPage() {
             </div>
           </div>
 
-          {/* ─── Chat Area (Right) ────────────────────────────────── */}
           <div className="flex-1 flex flex-col rounded-2xl border border-white/6 bg-[#0F1729]">
             {!activeChat ? (
               <div className="flex-1 flex items-center justify-center">
@@ -232,7 +296,6 @@ export default function CoachChatPage() {
               </div>
             ) : (
               <>
-                {/* Chat Header */}
                 <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5">
                   <div
                     className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-bold"
@@ -250,7 +313,6 @@ export default function CoachChatPage() {
                   </div>
                 </div>
 
-                {/* Messages */}
                 <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
                   {loadingMsgs ? (
                     <>
@@ -274,7 +336,7 @@ export default function CoachChatPage() {
                         >
                           <div className={`max-w-[70%] ${isMe ? "items-end" : "items-start"} flex flex-col`}>
                             <span className="text-[10px] text-gray-500 mb-1 px-1">
-                              {formatTime(msg.created_at)}
+                              {formatChatTimestamp(msg.created_at, { includeZone: true })}
                             </span>
                             <div
                               className={`px-4 py-2.5 rounded-2xl text-sm leading-relaxed border border-white/10 backdrop-blur-sm ${
@@ -296,7 +358,6 @@ export default function CoachChatPage() {
                   <div ref={messagesEndRef} />
                 </div>
 
-                {/* Input */}
                 <div className="px-6 py-4 border-t border-white/5">
                   <form
                     onSubmit={(e) => { e.preventDefault(); handleSend(); }}

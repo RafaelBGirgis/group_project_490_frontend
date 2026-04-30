@@ -120,6 +120,19 @@ describe("Page smoke tests", () => {
     localStorage.setItem("jwt", "valid");
   });
 
+  function mockVerifiedCoachAccount() {
+    const account = {
+      name: "Coach Test",
+      client_id: null,
+      coach_id: 9,
+      email: "coach@test.com",
+      coach_account: { verified: true },
+    };
+    global.fetch = vi.fn(() =>
+      Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(account) })
+    );
+  }
+
   it("workouts page renders title after load", async () => {
     const WorkoutsPage = (await import("../pages/workouts")).default;
     renderInRouter(WorkoutsPage);
@@ -128,12 +141,22 @@ describe("Page smoke tests", () => {
     });
   });
 
-  it("workouts page shows 'New Workout' button", async () => {
+  it("workouts page shows 'New Workout' button for verified coaches", async () => {
+    mockVerifiedCoachAccount();
     const WorkoutsPage = (await import("../pages/workouts")).default;
     renderInRouter(WorkoutsPage);
     await waitFor(() => {
       expect(screen.getByText("New Workout")).toBeInTheDocument();
     });
+  });
+
+  it("workouts page hides 'New Workout' button for clients", async () => {
+    const WorkoutsPage = (await import("../pages/workouts")).default;
+    renderInRouter(WorkoutsPage);
+    await waitFor(() => {
+      expect(screen.getByText("Workouts")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("New Workout")).not.toBeInTheDocument();
   });
 
   it("workouts page shows tabs (My Workouts, Preset Library)", async () => {
@@ -225,5 +248,16 @@ describe("API helper auth behavior", () => {
     expect(url).toBe("/update/1");
     expect(opts.method).toBe("PUT");
     expect(JSON.parse(opts.body)).toEqual({ name: "updated" });
+  });
+
+  it("apiPatch sends JSON body with PATCH method", async () => {
+    const { apiPatch } = await import("../api/api");
+    mockFetchOk({ success: true });
+    await apiPatch("/update/profile", { goal: "muscle gain" });
+
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe("/update/profile");
+    expect(opts.method).toBe("PATCH");
+    expect(JSON.parse(opts.body)).toEqual({ goal: "muscle gain" });
   });
 });

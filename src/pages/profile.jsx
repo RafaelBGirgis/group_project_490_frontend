@@ -1,83 +1,34 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Navbar } from "../components/navbar";
-import AvailabilityDetail from "../components/overlays/availability_detail";
-import { deactivateAccount, deleteAccount } from "../api/client";
-import { deactivateCoachAccount, deleteCoachAccount } from "../api/coach";
+import {
+  buildClientInformationPayload,
+  deactivateAccount,
+  deleteAccount,
+  extractUploadedAssetUrl,
+  fetchClientProfile,
+  fetchMe,
+  updateAccount,
+  updateClientInformation,
+  uploadProfilePicture,
+} from "../api/client";
+import TelemetryCharts from "../components/overlays/telemetry_charts";
+import { loadProfileDraft, saveOnboardingDraft } from "../utils/profileDrafts";
+import { readCoachRequestResolution, clearCoachRequestResolution } from "../utils/coachRequests";
+import {
+  buildCoachInformationPayload,
+  deactivateCoachAccount,
+  deleteCoachAccount,
+  fetchCoachProfile,
+  updateCoachInformation,
+} from "../api/coach";
+import { getCoachAccessState } from "../utils/roleAccess";
 
 const PRIMARY_GOALS = [
   "Weight Loss",
   "Maintenance",
   "Muscle Gain",
 ];
-const EMPTY_TRAINING_AVAILABILITY = {
-  Mon: [],
-  Tue: [],
-  Wed: [],
-  Thu: [],
-  Fri: [],
-  Sat: [],
-  Sun: [],
-};
-
-const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
-const normalizeTrainingAvailability = (value, fallbackDays = []) => {
-  const base = {
-    Mon: [],
-    Tue: [],
-    Wed: [],
-    Thu: [],
-    Fri: [],
-    Sat: [],
-    Sun: [],
-  };
-
-  if (!value || typeof value !== "object") {
-    fallbackDays.forEach((day) => {
-      if (base[day]) base[day] = [];
-    });
-    return base;
-  }
-
-  Object.keys(base).forEach((day) => {
-    const slots = value[day];
-    base[day] = Array.isArray(slots) ? slots : [];
-  });
-
-  return base;
-};
-
-// Convert from { Mon: ["9AM", "10AM"], ... } to [{ time, slots: [...] }, ...]
-const convertToSlotsFormat = (trainingAvailability) => {
-  const allTimes = new Set();
-  Object.values(trainingAvailability).forEach(slots => {
-    slots.forEach(time => allTimes.add(time));
-  });
-
-  const sortedTimes = Array.from(allTimes).sort((a, b) => {
-    const timeOrder = ["5AM","6AM","7AM","8AM","9AM","10AM","11AM","12PM","1PM","2PM","3PM","4PM","5PM","6PM","7PM","8PM","9PM"];
-    return timeOrder.indexOf(a) - timeOrder.indexOf(b);
-  });
-
-  return sortedTimes.map(time => ({
-    time,
-    slots: WEEKDAYS.map(day => trainingAvailability[day].includes(time) ? "available" : null)
-  }));
-};
-
-// Convert from [{ time, slots: [...] }, ...] to { Mon: ["9AM", "10AM"], ... }
-const convertFromSlotsFormat = (slots) => {
-  const result = { ...EMPTY_TRAINING_AVAILABILITY };
-  slots.forEach(({ time, slots: daySlots }) => {
-    daySlots.forEach((status, dayIndex) => {
-      if (status === "available") {
-        result[WEEKDAYS[dayIndex]].push(time);
-      }
-    });
-  });
-  return result;
-};
 
 const normalizeGenderToSignupValue = (value) => {
   const normalized = String(value || "").trim().toLowerCase().replaceAll("_", "-");
@@ -90,16 +41,92 @@ const normalizeGenderToSignupValue = (value) => {
   return value || "";
 };
 
+const buildAccountUpdatePayload = ({ age, email, bio, pfp_url, gender }) => {
+  const payload = {};
+
+  const parsedAge = Number(age);
+  if (Number.isFinite(parsedAge) && parsedAge > 0) {
+    payload.age = parsedAge;
+  }
+  if (email) {
+    payload.email = email;
+  }
+  if (typeof bio === "string") {
+    payload.bio = bio;
+  }
+  if (pfp_url) {
+    payload.pfp_url = pfp_url;
+  }
+  if (gender) {
+    payload.gender = gender;
+  }
+
+  return payload;
+};
+
+const normalizeCoachProfileSeed = (requestData) => {
+  if (!requestData || typeof requestData !== "object") {
+    return null;
+  }
+
+  const certifications = Array.isArray(requestData.certifications)
+    ? requestData.certifications.map((item, index) => ({
+        id: item?.id || `cert-${index}-${Date.now()}`,
+        title: item?.title || item?.certification_name || "",
+        issuer: item?.issuer || item?.certification_organization || "",
+        year: item?.year || item?.certification_date || "",
+        description: item?.description || item?.certification_score || "",
+      }))
+    : [];
+
+  const experiences = Array.isArray(requestData.experiences)
+    ? requestData.experiences.map((item, index) => ({
+        id: item?.id || `exp-${index}-${Date.now()}`,
+        title: item?.title || item?.experience_title || item?.experience_name || "",
+        issuer: item?.issuer || item?.organization || item?.experience_name || "",
+        year: item?.year || item?.experience_start || "",
+        description: item?.description || item?.experience_description || "",
+      }))
+    : [];
+
+  const specializations = Array.isArray(requestData.specializations)
+    ? requestData.specializations.filter(Boolean)
+    : [];
+
+  if (!certifications.length && !experiences.length && !specializations.length) {
+    return null;
+  }
+
+  return {
+    certifications,
+    experiences,
+    specializations,
+    pricingInterval: requestData?.paymentInterval || requestData?.payment_interval || "",
+    amount:
+      requestData?.amount != null
+        ? String(requestData.amount)
+        : requestData?.priceCents != null
+          ? String(Number(requestData.priceCents) / 100)
+          : requestData?.price_cents != null
+            ? String(Number(requestData.price_cents) / 100)
+            : "",
+  };
+};
+
 function ProfilePage({ role = "client" }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const isCoach = role === "coach";
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 
   const accent = isCoach ? "#F59E0B" : "#3B82F6";
   const accentSoft = isCoach ? "rgba(245, 158, 11, 0.12)" : "rgba(59, 130, 246, 0.12)";
   const accentBorder = isCoach ? "rgba(245, 158, 11, 0.30)" : "rgba(59, 130, 246, 0.30)";
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [saveMessage, setSaveMessage] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [coachProfileData, setCoachProfileData] = useState(null);
   const [coachRequest, setCoachRequest] = useState(null);
   const [coachRequestStorageKey, setCoachRequestStorageKey] = useState("");
 
@@ -113,23 +140,11 @@ function ProfilePage({ role = "client" }) {
     age: "",
     gender: "",
     primaryGoal: "",
-    trainingAvailability: { ...EMPTY_TRAINING_AVAILABILITY },
     weight: "",
     height: "",
     profilePicture: null,
     pricingInterval: "",
     amount: "",
-    openToNewClients: "",
-  });
-
-  const [availability, setAvailability] = useState({
-    Mon: [],
-    Tue: [],
-    Wed: [],
-    Thu: [],
-    Fri: [],
-    Sat: [],
-    Sun: [],
   });
 
   const [specializations, setSpecializations] = useState([]);
@@ -172,22 +187,50 @@ function ProfilePage({ role = "client" }) {
 
   const [newPaymentMethod, setNewPaymentMethod] = useState({
     type: "",
-    lastFour: "",
-    expiryMonth: "",
-    expiryYear: "",
+    ccnum: "",
+    cv: "",
+    exp_date: "",
   });
   const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
 
   const fullName = useMemo(
     () => `${profile.firstName} ${profile.lastName}`.trim(),
     [profile.firstName, profile.lastName]
   );
 
+  const profilePicturePreviewUrl = useMemo(() => {
+    if (typeof profile.profilePicture === "string") {
+      return profile.profilePicture || "";
+    }
+    if (profile.profilePicture instanceof File) {
+      return URL.createObjectURL(profile.profilePicture);
+    }
+    return "";
+  }, [profile.profilePicture]);
+
   const initials = useMemo(() => {
     const f = profile.firstName?.[0] || "";
     const l = profile.lastName?.[0] || "";
     return `${f}${l}`.toUpperCase() || "?";
   }, [profile.firstName, profile.lastName]);
+
+
+  useEffect(() => {
+    if (!location.state?.coachRequestSubmitted) return;
+    setSaveMessage(location.state.successMessage || "Application successfully sent.");
+    navigate(location.pathname, { replace: true, state: {} });
+  }, [location.pathname, location.state, navigate]);
+
+  useEffect(() => {
+    if (!(profile.profilePicture instanceof File) || !profilePicturePreviewUrl) {
+      return undefined;
+    }
+
+    return () => {
+      URL.revokeObjectURL(profilePicturePreviewUrl);
+    };
+  }, [profile.profilePicture, profilePicturePreviewUrl]);
 
   useEffect(() => {
     const token = localStorage.getItem("jwt");
@@ -200,32 +243,36 @@ function ProfilePage({ role = "client" }) {
 
     const loadProfile = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/me`, {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        if (!res.ok) {
-          throw new Error("Failed to load profile.");
+        const data = await fetchMe();
+        const coachAccess = await getCoachAccessState(data);
+        setCanSwitchToCoach(coachAccess.canAccessCoach);
+        if (isCoach && !coachAccess.canAccessCoach) {
+          navigate("/profile");
+          return;
         }
-
-        const data = await res.json();
-        const [firstName = "", ...rest] = (data.name || "").trim().split(/\s+/);
-        const lastName = rest.join(" ");
-        const onboardingKey = data.email
-          ? `onboarding:${String(data.email).trim().toLowerCase()}`
-          : "onboarding:current";
-        let onboardingData = null;
-        const onboardingRaw = localStorage.getItem(onboardingKey);
-        if (onboardingRaw) {
+        let clientProfile = null;
+        let coachProfile = null;
+        if (!isCoach && data.client_id) {
           try {
-            onboardingData = JSON.parse(onboardingRaw);
+            clientProfile = await fetchClientProfile();
           } catch {
-            onboardingData = null;
+            clientProfile = null;
           }
         }
+        if (isCoach && data.coach_id) {
+          try {
+            coachProfile = await fetchCoachProfile();
+            setCoachProfileData(coachProfile);
+          } catch {
+            coachProfile = null;
+            setCoachProfileData(null);
+          }
+        }
+        const draftData = loadProfileDraft(data.email);
+        const resolvedName = data.name || draftData?.name || "";
+        const [firstName = "", ...rest] = resolvedName.trim().split(/\s+/);
+        const lastName = rest.join(" ");
+        const onboardingData = draftData;
         const requestKey = `coachRequest:${data.id || data.email || "current"}`;
         setCoachRequestStorageKey(requestKey);
 
@@ -233,7 +280,28 @@ function ProfilePage({ role = "client" }) {
           localStorage.getItem(requestKey) || localStorage.getItem("coachRequestDraft");
         if (savedRequestRaw) {
           try {
-            setCoachRequest(JSON.parse(savedRequestRaw));
+            const parsedRequest = JSON.parse(savedRequestRaw);
+            const resolution = readCoachRequestResolution(parsedRequest?.coach_request_id);
+            const isResolved =
+              coachAccess.canAccessCoach || resolution?.status === "approved" || resolution?.status === "rejected";
+
+            if (isResolved) {
+              const coachProfileSeed = normalizeCoachProfileSeed(parsedRequest);
+              const coachStorageKey = `coach_profile:${data.coach_id || data.id || "current"}`;
+              const hasStoredCoachProfile = Boolean(localStorage.getItem(coachStorageKey));
+              if (coachProfileSeed && !hasStoredCoachProfile) {
+                localStorage.setItem(coachStorageKey, JSON.stringify(coachProfileSeed));
+              }
+            }
+
+            if (isResolved) {
+              localStorage.removeItem(requestKey);
+              localStorage.removeItem("coachRequestDraft");
+              clearCoachRequestResolution(parsedRequest?.coach_request_id);
+              setCoachRequest(null);
+            } else {
+              setCoachRequest(parsedRequest);
+            }
           } catch {
             setCoachRequest(null);
           }
@@ -257,12 +325,78 @@ function ProfilePage({ role = "client" }) {
           weight: onboardingData?.weight || "",
           height: onboardingData?.height || "",
           primaryGoal: onboardingData?.primaryGoal || "",
-          trainingAvailability: normalizeTrainingAvailability(
-            onboardingData?.trainingAvailability,
-            onboardingData?.availableDays
-          ),
-          profilePicture: data.pfp_url || null,
+          profilePicture: data.pfp_url || onboardingData?.profilePicture || null,
         }));
+
+        if (!isCoach) {
+          const paymentInfo = clientProfile?.client_account?.payment_information;
+          const fallbackPaymentInfo =
+            !paymentInfo && onboardingData?.cardNumber
+              ? {
+                  id: Date.now(),
+                  ccnum: onboardingData.cardNumber,
+                  cv: onboardingData.cardCvv || "",
+                  exp_date: onboardingData.cardExpiry || "",
+                }
+              : null;
+          const resolvedPaymentInfo = paymentInfo || fallbackPaymentInfo;
+
+          if (resolvedPaymentInfo) {
+            setPaymentMethods([
+              {
+                id: resolvedPaymentInfo.id || Date.now(),
+                type: "credit",
+                lastFour: String(resolvedPaymentInfo.ccnum || "").slice(-4),
+                expiryMonth: String(resolvedPaymentInfo.exp_date || "").slice(5, 7),
+                expiryYear: String(resolvedPaymentInfo.exp_date || "").slice(0, 4),
+                ccnum: resolvedPaymentInfo.ccnum || "",
+                cv: resolvedPaymentInfo.cv || "",
+                exp_date: resolvedPaymentInfo.exp_date || "",
+              },
+            ]);
+          }
+
+        }
+
+        if (isCoach) {
+          const coachStorageKey = `coach_profile:${data.coach_id || data.id || "current"}`;
+          const coachStoredRaw = localStorage.getItem(coachStorageKey);
+          let coachStored = null;
+          if (coachStoredRaw) {
+            try {
+              coachStored = JSON.parse(coachStoredRaw);
+            } catch {
+              coachStored = null;
+            }
+          }
+
+          if (!coachStored) {
+            const requestSeedRaw =
+              localStorage.getItem(requestKey) || localStorage.getItem("coachRequestDraft");
+            if (requestSeedRaw) {
+              try {
+                coachStored = normalizeCoachProfileSeed(JSON.parse(requestSeedRaw));
+              } catch {
+                coachStored = null;
+              }
+            }
+          }
+
+          setSpecializations(
+            coachStored?.specializations ||
+            String(coachProfile?.coach_account?.specialties || "")
+              .split(",")
+              .map((item) => item.trim())
+              .filter(Boolean)
+          );
+          setCertifications(Array.isArray(coachStored?.certifications) ? coachStored.certifications : []);
+          setExperiences(Array.isArray(coachStored?.experiences) ? coachStored.experiences : []);
+          setProfile((prev) => ({
+            ...prev,
+            pricingInterval: coachStored?.pricingInterval || "",
+            amount: coachStored?.amount || "",
+          }));
+        }
       } catch (err) {
         setLoadError(err.message || "Failed to load profile.");
       } finally {
@@ -271,10 +405,143 @@ function ProfilePage({ role = "client" }) {
     };
 
     loadProfile();
-  }, [API_BASE_URL, navigate]);
+  }, [isCoach, navigate]);
 
   const handleProfileChange = (field, value) => {
     setProfile((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSaveClientProfile = async () => {
+    setSaveMessage("");
+    setSaveError("");
+    setSavingProfile(true);
+
+    try {
+      let profilePictureUrl =
+        typeof profile.profilePicture === "string" ? profile.profilePicture : null;
+
+      if (profile.profilePicture instanceof File) {
+        const upload = await uploadProfilePicture(profile.profilePicture);
+        profilePictureUrl = extractUploadedAssetUrl(upload) || profilePictureUrl;
+        setProfile((prev) => ({
+          ...prev,
+          profilePicture: profilePictureUrl || prev.profilePicture,
+        }));
+      }
+
+      const latestPayment = paymentMethods[0]
+        ? {
+            ccnum: paymentMethods[0].ccnum || "",
+            cv: paymentMethods[0].cv || "",
+            exp_date:
+              paymentMethods[0].exp_date ||
+              `${paymentMethods[0].expiryYear}-${paymentMethods[0].expiryMonth}-01`,
+          }
+        : null;
+
+      const payload = buildClientInformationPayload({
+        primaryGoal: profile.primaryGoal,
+        weight: profile.weight,
+        paymentMethod: latestPayment,
+      });
+
+      if (Object.keys(payload).length > 0) {
+        await updateClientInformation(payload);
+      }
+
+      const accountPayload = buildAccountUpdatePayload({
+        age: profile.age,
+        email: profile.email,
+        bio: profile.bio,
+        pfp_url: profilePictureUrl,
+        gender: profile.gender,
+      });
+      if (Object.keys(accountPayload).length > 0) {
+        await updateAccount(accountPayload);
+      }
+
+      saveOnboardingDraft({
+        ...loadProfileDraft(profile.email),
+        name: `${profile.firstName} ${profile.lastName}`.trim(),
+        email: profile.email,
+        primaryGoal: profile.primaryGoal,
+        weight: profile.weight,
+        height: profile.height,
+        age: profile.age,
+        gender: profile.gender,
+        bio: profile.bio,
+        profilePicture: profilePictureUrl,
+        cardNumber: latestPayment?.ccnum || "",
+        cardCvv: latestPayment?.cv || "",
+        cardExpiry: latestPayment?.exp_date || "",
+      });
+
+      setSaveMessage("Client profile changes saved.");
+    } catch (error) {
+      setSaveError(error.message || "Unable to save your client profile.");
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const handleSaveCoachProfile = async () => {
+    setSaveMessage("");
+    setSaveError("");
+    setSavingProfile(true);
+
+    try {
+      let profilePictureUrl =
+        typeof profile.profilePicture === "string" ? profile.profilePicture : null;
+
+      if (profile.profilePicture instanceof File) {
+        const upload = await uploadProfilePicture(profile.profilePicture);
+        profilePictureUrl = extractUploadedAssetUrl(upload) || profilePictureUrl;
+        setProfile((prev) => ({
+          ...prev,
+          profilePicture: profilePictureUrl || prev.profilePicture,
+        }));
+      }
+
+      const payload = buildCoachInformationPayload({
+        availability: null,
+        certifications,
+        experiences,
+        specializations,
+      });
+
+      if (Object.keys(payload).length > 0) {
+        await updateCoachInformation(payload);
+      }
+
+      const accountPayload = buildAccountUpdatePayload({
+        age: profile.age,
+        email: profile.email,
+        bio: profile.bio,
+        pfp_url: profilePictureUrl,
+        gender: profile.gender,
+      });
+      if (Object.keys(accountPayload).length > 0) {
+        await updateAccount(accountPayload);
+      }
+
+      const coachId = coachProfileData?.coach_account?.id || "current";
+      localStorage.setItem(
+        `coach_profile:${coachId}`,
+        JSON.stringify({
+          certifications,
+          experiences,
+          specializations,
+          pricingInterval: profile.pricingInterval,
+          amount: profile.amount,
+        })
+      );
+
+      setSaveMessage("Coach profile changes saved.");
+    } catch (error) {
+      setSaveError(error.message || "Unable to save your coach profile.");
+    } finally {
+      setSavingProfile(false);
+    }
   };
 
   const handleDeleteAccountRequest = async () => {
@@ -376,15 +643,18 @@ function ProfilePage({ role = "client" }) {
   };
 
   const addPaymentMethod = () => {
-    if (!newPaymentMethod.type || !newPaymentMethod.lastFour || !newPaymentMethod.expiryMonth || !newPaymentMethod.expiryYear) return;
+    if (!newPaymentMethod.type || !newPaymentMethod.ccnum || !newPaymentMethod.cv || !newPaymentMethod.exp_date) return;
     setPaymentMethods((prev) => [
       ...prev,
       {
         id: Date.now(),
         ...newPaymentMethod,
+        lastFour: String(newPaymentMethod.ccnum).slice(-4),
+        expiryMonth: String(newPaymentMethod.exp_date).slice(5, 7),
+        expiryYear: String(newPaymentMethod.exp_date).slice(0, 4),
       },
     ]);
-    setNewPaymentMethod({ type: "", lastFour: "", expiryMonth: "", expiryYear: "" });
+    setNewPaymentMethod({ type: "", ccnum: "", cv: "", exp_date: "" });
     setShowPaymentForm(false);
   };
 
@@ -417,6 +687,7 @@ function ProfilePage({ role = "client" }) {
       <Navbar
         role={role}
         userName={initials}
+        canSwitchToCoach={!isCoach && canSwitchToCoach}
         onSwitch={() => navigate(role === "coach" ? "/client" : "/coach")}
       />
 
@@ -433,10 +704,28 @@ function ProfilePage({ role = "client" }) {
           </div>
         )}
 
+        {!loadingProfile && saveError && (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+            {saveError}
+          </div>
+        )}
+
+        {!loadingProfile && saveMessage && (
+          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+            {saveMessage}
+          </div>
+        )}
+
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold">{isCoach ? "Edit Profile" : "Profile Settings"}</h1>
           {isCoach && (
             <button
+              onClick={() => {
+                if (coachProfileData?.coach_account?.id) {
+                  navigate(`/coaches/${coachProfileData.coach_account.id}?preview=1`);
+                }
+              }}
+              disabled={!coachProfileData?.coach_account?.id}
               className="rounded-lg border px-4 py-2 text-xs font-medium text-slate-300"
               style={{ borderColor: accentBorder, backgroundColor: accentSoft }}
             >
@@ -453,9 +742,9 @@ function ProfilePage({ role = "client" }) {
                   className="relative flex h-24 w-24 items-center justify-center rounded-full text-3xl font-bold text-white shadow-lg"
                   style={{ backgroundColor: accent }}
                 >
-                  {typeof profile.profilePicture === "string" && profile.profilePicture ? (
+                  {profilePicturePreviewUrl ? (
                     <img
-                      src={profile.profilePicture}
+                      src={profilePicturePreviewUrl}
                       alt={fullName}
                       className="h-full w-full rounded-full object-cover"
                     />
@@ -467,7 +756,9 @@ function ProfilePage({ role = "client" }) {
 
                 <h2 className="mt-4 text-xl font-bold">{fullName}</h2>
                 <p className="text-sm" style={{ color: accent }}>
-                  {isCoach ? "Coach · Verified" : "Client"}
+                  {isCoach
+                    ? `Coach · ${coachProfileData?.coach_account?.verified ? "Verified" : "Pending"}`
+                    : "Client"}
                 </p>
 
                 <label className="mt-5 w-full cursor-pointer rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] px-4 py-3 text-sm font-medium text-slate-200 hover:bg-[rgba(255,255,255,0.05)]">
@@ -487,10 +778,10 @@ function ProfilePage({ role = "client" }) {
             {isCoach && (
               <SidebarCard title="Account Stats">
                 <div className="grid grid-cols-2 gap-3">
-                  <StatBox label="Clients" value="--" />
-                  <StatBox label="Rating" value="--" />
-                  <StatBox label="Reviews" value="--" />
-                  <StatBox label="Coach Since" value="--" />
+                  <StatBox label="Coach ID" value={coachProfileData?.coach_account?.id ?? "--"} />
+                  <StatBox label="Verified" value={coachProfileData?.coach_account?.verified ? "Yes" : "No"} />
+                  <StatBox label="Specialties" value={specializations.length || "--"} />
+                  <StatBox label="Certs" value={certifications.length || "--"} />
                 </div>
               </SidebarCard>
             )}
@@ -732,6 +1023,12 @@ function ProfilePage({ role = "client" }) {
             </Panel>
 
             {!isCoach && (
+              <Panel title="Progress &amp; Telemetry" accent={accent}>
+                <TelemetryCharts accent={accent} />
+              </Panel>
+            )}
+
+            {!isCoach && (
               <Panel title="Payment Methods" accent={accent}>
                 <div className="space-y-3">
                   {paymentMethods.map((method) => (
@@ -792,25 +1089,22 @@ function ProfilePage({ role = "client" }) {
                           </select>
                         </div>
                         <Input
-                          label="Last 4 Digits"
-                          value={newPaymentMethod.lastFour}
-                          onChange={(v) => setNewPaymentMethod((prev) => ({ ...prev, lastFour: v }))}
-                          placeholder="1234"
-                          maxLength="4"
+                          label="Card Number"
+                          value={newPaymentMethod.ccnum}
+                          onChange={(v) => setNewPaymentMethod((prev) => ({ ...prev, ccnum: v }))}
+                          placeholder="4111111111111111"
                         />
                         <Input
-                          label="Expiry Month"
-                          value={newPaymentMethod.expiryMonth}
-                          onChange={(v) => setNewPaymentMethod((prev) => ({ ...prev, expiryMonth: v }))}
-                          placeholder="12"
-                          maxLength="2"
+                          label="CVV"
+                          value={newPaymentMethod.cv}
+                          onChange={(v) => setNewPaymentMethod((prev) => ({ ...prev, cv: v }))}
+                          placeholder="123"
                         />
                         <Input
-                          label="Expiry Year"
-                          value={newPaymentMethod.expiryYear}
-                          onChange={(v) => setNewPaymentMethod((prev) => ({ ...prev, expiryYear: v }))}
-                          placeholder="2025"
-                          maxLength="4"
+                          label="Expiry Date"
+                          value={newPaymentMethod.exp_date}
+                          onChange={(v) => setNewPaymentMethod((prev) => ({ ...prev, exp_date: v }))}
+                          placeholder="2027-12-01"
                         />
                       </div>
 
@@ -832,35 +1126,6 @@ function ProfilePage({ role = "client" }) {
                     </div>
                   )}
                 </div>
-              </Panel>
-            )}
-
-            {!isCoach && (
-              <Panel title="Availability" accent={accent}>
-                <AvailabilityDetail
-                  slots={convertToSlotsFormat(profile.trainingAvailability)}
-                  weekdays={WEEKDAYS}
-                  onSave={(updatedSlots) => {
-                    setProfile((prev) => ({
-                      ...prev,
-                      trainingAvailability: convertFromSlotsFormat(updatedSlots)
-                    }));
-                  }}
-                  role="client"
-                />
-              </Panel>
-            )}
-
-            {isCoach && (
-              <Panel title="Availability" accent={accent}>
-                <AvailabilityDetail
-                  slots={convertToSlotsFormat(availability)}
-                  weekdays={WEEKDAYS}
-                  onSave={(updatedSlots) => {
-                    setAvailability(convertFromSlotsFormat(updatedSlots));
-                  }}
-                  role="coach"
-                />
               </Panel>
             )}
 
@@ -890,26 +1155,23 @@ function ProfilePage({ role = "client" }) {
 
                 <Panel title="Pricing Plan" accent={accent}>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Input
-                      label="Payment Interval"
-                      value={profile.pricingInterval}
-                      onChange={(v) => handleProfileChange("pricingInterval", v)}
-                      placeholder="Monthly"
-                    />
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-slate-400">Payment Interval</label>
+                      <select
+                        value={profile.pricingInterval}
+                        onChange={(event) => handleProfileChange("pricingInterval", event.target.value)}
+                        className="h-12 w-full rounded-xl border border-white/8 bg-[#101827] px-4 text-sm text-white outline-none transition focus:border-orange-400/50 focus:ring-2 focus:ring-orange-400/10"
+                      >
+                        <option value="">Select interval</option>
+                        <option value="monthly">Monthly</option>
+                        <option value="yearly">Yearly</option>
+                      </select>
+                    </div>
                     <Input
                       label="Amount"
                       value={profile.amount}
                       onChange={(v) => handleProfileChange("amount", v)}
-                      placeholder="$160.00"
-                    />
-                  </div>
-
-                  <div className="mt-4">
-                    <Input
-                      label="Open to New Clients"
-                      value={profile.openToNewClients}
-                      onChange={(v) => handleProfileChange("openToNewClients", v)}
-                      placeholder="Yes - accepting clients"
+                      placeholder="160.00"
                     />
                   </div>
                 </Panel>
@@ -951,10 +1213,12 @@ function ProfilePage({ role = "client" }) {
                 Discard
               </button>
               <button
+                onClick={isCoach ? handleSaveCoachProfile : handleSaveClientProfile}
+                disabled={savingProfile}
                 className="rounded-xl px-5 py-3 text-sm font-semibold text-white shadow-lg"
                 style={{ backgroundColor: accent }}
               >
-                Save Changes
+                {savingProfile ? "Saving..." : "Save Changes"}
               </button>
             </div>
 

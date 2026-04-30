@@ -14,27 +14,17 @@ import {
   fetchAssignableClients,
   fetchAssignedWorkouts,
   fetchWeeklyPlan,
+  publishWeeklyPlan,
   saveWeeklyPlan,
+  fetchSupportedEquipment,
   EXERCISE_DATABASE,
   MUSCLE_GROUPS,
 } from "../api/workouts";
+import { getCoachAccessState } from "../utils/roleAccess";
 
 /* ─── constants ──────────────────────────────────────────────────────── */
 
-const DIFFICULTY_COLORS = {
-  Beginner:     "text-green-400 bg-green-500/15",
-  Intermediate: "text-yellow-400 bg-yellow-500/15",
-  Advanced:     "text-red-400 bg-red-500/15",
-};
-
-const CATEGORY_ICONS = {
-  Strength: "🏋️",
-  Cardio:   "🏃",
-  Recovery: "🧘",
-  General:  "💪",
-};
-
-const EQUIPMENT_OPTIONS = ["Barbell", "Dumbbell", "Cable", "Machine", "Bodyweight", "Bands", "Kettlebell", "Other"];
+const DEFAULT_EQUIPMENT_OPTIONS = ["Barbell", "Dumbbell", "Cable", "Machine", "Bodyweight", "Bands", "Kettlebell", "Other"];
 
 const EMPTY_EXERCISE = {
   name: "", sets: 3, reps: 10, weight: 0, intensity_measure: "lbs", notes: "",
@@ -53,20 +43,22 @@ export default function WorkoutsPage() {
 
   const [account, setAccount] = useState(null);
   const [role, setRole] = useState(roleFromUrl || "client");
+  const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
   const [loading, setLoading] = useState(true);
   const [initials, setInitials] = useState("??");
+  const [publishStatus, setPublishStatus] = useState(null);
 
   // Data
   const [presets, setPresets] = useState([]);
   const [myWorkouts, setMyWorkouts] = useState([]);
   const [assignedWorkouts, setAssignedWorkouts] = useState([]);
   const [clients, setClients] = useState([]);
+  const [equipmentOptions, setEquipmentOptions] = useState(DEFAULT_EQUIPMENT_OPTIONS);
 
   // UI state
   const [tab, setTab] = useState("my"); // "my" | "presets" | "assigned" (coach only)
   const [search, setSearch] = useState("");
   const [filterGroup, setFilterGroup] = useState("All");
-  const [filterDifficulty, setFilterDifficulty] = useState("All");
 
   // Weekly plan
   const [weeklyPlan, setWeeklyPlan] = useState({
@@ -84,7 +76,13 @@ export default function WorkoutsPage() {
   const [assignSent, setAssignSent] = useState(false);
 
   const theme = ROLE_THEMES[role] ?? ROLE_THEMES.client;
-  const roleId = role === "coach" ? account?.coach_id : account?.client_id;
+  const roleId =
+    role === "coach"
+      ? account?.coach_id
+      : role === "admin"
+        ? account?.admin_id
+        : account?.client_id;
+  const canManageWorkouts = role === "coach" || role === "admin";
 
   /* ── auth + data load ──────────────────────────────────────────────── */
 
@@ -93,21 +91,48 @@ export default function WorkoutsPage() {
       try {
         const me = await fetchMe();
         setAccount(me);
-        const r = roleFromUrl || (me.coach_id ? "coach" : "client");
+        const coachAccess = await getCoachAccessState(me);
+        setCanSwitchToCoach(coachAccess.canAccessCoach);
+        const isAdmin = Boolean(me?.admin_id);
+        let r;
+        if (roleFromUrl === "coach") {
+          r = coachAccess.canAccessCoach ? "coach" : "client";
+        } else if (roleFromUrl === "admin") {
+          r = isAdmin ? "admin" : "client";
+        } else if (roleFromUrl === "client") {
+          r = "client";
+        } else if (isAdmin) {
+          r = "admin";
+        } else if (coachAccess.canAccessCoach) {
+          r = "coach";
+        } else {
+          r = "client";
+        }
         setRole(r);
+        if (roleFromUrl === "coach" && !coachAccess.canAccessCoach) {
+          navigate("/workouts?role=client", { replace: true });
+        }
+        if (roleFromUrl === "admin" && !isAdmin) {
+          navigate("/workouts?role=client", { replace: true });
+        }
         const n = me.name?.split(" ").map((w) => w[0]).join("").toUpperCase() || "??";
         setInitials(n);
       } catch {
         navigate("/login");
       }
     })();
-  }, []);
+  }, [navigate, roleFromUrl]);
 
   useEffect(() => {
     if (!account) return;
     (async () => {
       setLoading(true);
-      const rid = role === "coach" ? account.coach_id : account.client_id;
+      const rid =
+        role === "coach"
+          ? account.coach_id
+          : role === "admin"
+            ? account.admin_id
+            : account.client_id;
       const [p, mw, wp] = await Promise.all([
         fetchPresetWorkouts(),
         fetchMyWorkouts(role, rid),
@@ -118,12 +143,25 @@ export default function WorkoutsPage() {
       setWeeklyPlan(wp);
 
       if (role === "coach" && account.coach_id) {
-        const [aw, cl] = await Promise.all([
+        const [aw, cl, equipment] = await Promise.all([
           fetchAssignedWorkouts(account.coach_id),
           fetchAssignableClients(account.coach_id),
+          fetchSupportedEquipment(),
         ]);
         setAssignedWorkouts(aw);
         setClients(cl);
+        setEquipmentOptions(
+          equipment.length > 0
+            ? Array.from(new Set([...equipment, ...DEFAULT_EQUIPMENT_OPTIONS]))
+            : DEFAULT_EQUIPMENT_OPTIONS
+        );
+      } else {
+        const equipment = await fetchSupportedEquipment().catch(() => []);
+        setEquipmentOptions(
+          equipment.length > 0
+            ? Array.from(new Set([...equipment, ...DEFAULT_EQUIPMENT_OPTIONS]))
+            : DEFAULT_EQUIPMENT_OPTIONS
+        );
       }
       setLoading(false);
     })();
@@ -137,10 +175,9 @@ export default function WorkoutsPage() {
       if (search && !w.name.toLowerCase().includes(search.toLowerCase()) &&
           !w.description?.toLowerCase().includes(search.toLowerCase())) return false;
       if (filterGroup !== "All" && !w.muscle_groups?.includes(filterGroup)) return false;
-      if (filterDifficulty !== "All" && w.difficulty !== filterDifficulty) return false;
       return true;
     });
-  }, [activeList, search, filterGroup, filterDifficulty]);
+  }, [activeList, search, filterGroup]);
 
   /* ── handlers ──────────────────────────────────────────────────────── */
 
@@ -187,14 +224,33 @@ export default function WorkoutsPage() {
 
   const handleSaveWeeklyPlan = async () => {
     setWeeklySaving(true);
-    // Save just the workout IDs per day
-    const planPayload = {};
-    for (const day of ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]) {
-      planPayload[day] = weeklyPlan[day]?.id ?? null;
-    }
-    await saveWeeklyPlan(role, roleId, planPayload);
+    await saveWeeklyPlan(role, roleId, weeklyPlan);
     setWeeklyDirty(false);
     setWeeklySaving(false);
+  };
+
+  const handlePublishWeeklyPlan = async () => {
+    setWeeklySaving(true);
+    setPublishStatus(null);
+    try {
+      const result = await publishWeeklyPlan(role, roleId, weeklyPlan, `${role} weekly plan`);
+      const successCount = (result?.published || []).filter((entry) => entry.plan_id != null).length;
+      const failCount = (result?.published || []).filter((entry) => entry.error).length;
+      if (successCount === 0 && failCount === 0) {
+        setPublishStatus({ kind: "info", message: "No populated days to publish." });
+      } else if (failCount === 0) {
+        setPublishStatus({ kind: "success", message: `Published ${successCount} day${successCount === 1 ? "" : "s"}.` });
+      } else {
+        setPublishStatus({
+          kind: "partial",
+          message: `Published ${successCount} day${successCount === 1 ? "" : "s"}, ${failCount} failed (activities may need backend IDs).`,
+        });
+      }
+    } catch (error) {
+      setPublishStatus({ kind: "error", message: error?.message || "Failed to publish plan." });
+    } finally {
+      setWeeklySaving(false);
+    }
   };
 
   const handleAssign = async () => {
@@ -219,7 +275,7 @@ export default function WorkoutsPage() {
 
   return (
     <div className="min-h-screen bg-[#080D19]">
-      <Navbar role={role} userName={initials} />
+      <Navbar role={role} userName={initials} canSwitchToCoach={role === "client" && canSwitchToCoach} />
 
       <div className="mx-auto max-w-6xl px-6 py-8">
         {/* Header */}
@@ -228,20 +284,24 @@ export default function WorkoutsPage() {
             <h1 className="text-2xl font-bold text-white">Workouts</h1>
             <p className="text-gray-400 text-sm mt-1">
               {role === "coach"
-                ? "Create, manage, and assign workout programs to your clients."
-                : "Browse presets, build custom workouts, and track your programs."}
+                ? "Create workouts, define their activities, and assign weekly plans."
+                : role === "admin"
+                  ? "Publish workouts and activities to the shared library."
+                  : "Browse the workout library and pick activities to build your weekly plan."}
             </p>
           </div>
-          <button
-            onClick={() => setEditWorkout({ exercises: [{ ...EMPTY_EXERCISE }] })}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-colors"
-            style={{ backgroundColor: theme.accent }}
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            New Workout
-          </button>
+          {canManageWorkouts && (
+            <button
+              onClick={() => setEditWorkout({ exercises: [{ ...EMPTY_EXERCISE }] })}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-colors"
+              style={{ backgroundColor: theme.accent }}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              New Workout
+            </button>
+          )}
         </div>
 
         {/* Tabs */}
@@ -291,18 +351,6 @@ export default function WorkoutsPage() {
                   {g}
                 </button>
               ))}
-              <div className="ml-auto">
-                <select
-                  value={filterDifficulty}
-                  onChange={(e) => setFilterDifficulty(e.target.value)}
-                  className="bg-[#0A1020] border border-white/10 rounded-lg px-3 py-1.5 text-xs text-gray-300 focus:outline-none"
-                >
-                  <option value="All">All Levels</option>
-                  <option value="Beginner">Beginner</option>
-                  <option value="Intermediate">Intermediate</option>
-                  <option value="Advanced">Advanced</option>
-                </select>
-              </div>
             </div>
           </div>
         )}
@@ -323,6 +371,9 @@ export default function WorkoutsPage() {
             onSetDay={handleSetDay}
             onClearDay={handleClearDay}
             onSave={handleSaveWeeklyPlan}
+            onPublish={handlePublishWeeklyPlan}
+            publishLabel={role === "client" ? "Publish My Plan" : "Publish Plan"}
+            publishStatus={publishStatus}
             dirty={weeklyDirty}
             saving={weeklySaving}
           />
@@ -370,9 +421,10 @@ export default function WorkoutsPage() {
                   workout={w}
                   theme={theme}
                   role={role}
+                  canManage={canManageWorkouts}
                   onView={() => setViewWorkout(w)}
-                  onEdit={() => setEditWorkout({ ...w })}
-                  onDuplicate={tab === "presets" ? () => handleDuplicate(w) : undefined}
+                  onEdit={canManageWorkouts ? () => setEditWorkout({ ...w }) : undefined}
+                  onDuplicate={tab === "presets" && canManageWorkouts ? () => handleDuplicate(w) : undefined}
                   onAssign={role === "coach" ? () => { setAssignOverlay(w); setSelectedClients([]); setAssignSent(false); } : undefined}
                 />
               ))
@@ -388,9 +440,11 @@ export default function WorkoutsPage() {
             workout={viewWorkout}
             theme={theme}
             role={role}
-            onEdit={() => { setEditWorkout({ ...viewWorkout }); setViewWorkout(null); }}
-            onDelete={viewWorkout.type === "custom" ? () => handleDelete(viewWorkout.id) : undefined}
-            onDuplicate={viewWorkout.type === "preset" ? () => { handleDuplicate(viewWorkout); setViewWorkout(null); } : undefined}
+            canManage={canManageWorkouts}
+            onAddToPlan={role === "client" ? (dayKey) => { handleSetDay(dayKey, viewWorkout); setViewWorkout(null); setTab("weekly"); } : undefined}
+            onEdit={canManageWorkouts ? () => { setEditWorkout({ ...viewWorkout }); setViewWorkout(null); } : undefined}
+            onDelete={canManageWorkouts && viewWorkout.type === "custom" ? () => handleDelete(viewWorkout.id) : undefined}
+            onDuplicate={canManageWorkouts && viewWorkout.type === "preset" ? () => { handleDuplicate(viewWorkout); setViewWorkout(null); } : undefined}
             onAssign={role === "coach" ? () => { setAssignOverlay(viewWorkout); setSelectedClients([]); setAssignSent(false); setViewWorkout(null); } : undefined}
           />
         )}
@@ -407,6 +461,7 @@ export default function WorkoutsPage() {
           <WorkoutBuilder
             initial={editWorkout}
             theme={theme}
+            equipmentOptions={equipmentOptions}
             onSave={handleSaveWorkout}
             onCancel={() => setEditWorkout(null)}
           />
@@ -465,21 +520,23 @@ export default function WorkoutsPage() {
    WORKOUT CARD — grid card for each workout
    ═══════════════════════════════════════════════════════════════════════ */
 
-function WorkoutCard({ workout, theme, role, onView, onEdit, onDuplicate, onAssign }) {
+function WorkoutCard({ workout, theme, role, canManage, onView, onEdit, onDuplicate, onAssign }) {
+  void role;
   const w = workout;
+  const hasActions = Boolean((canManage && (onEdit || w.type === "custom")) || onDuplicate || onAssign);
   return (
     <div
       className="bg-[#0D1424] border border-white/5 rounded-2xl p-5 flex flex-col justify-between hover:border-white/10 transition-colors cursor-pointer"
       onClick={onView}
     >
-      {/* Top row: category icon + difficulty badge */}
       <div>
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-lg">{CATEGORY_ICONS[w.category] ?? "💪"}</span>
-          <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${DIFFICULTY_COLORS[w.difficulty] ?? "text-gray-400 bg-white/5"}`}>
-            {w.difficulty}
-          </span>
-        </div>
+        {w.workout_type && (
+          <div className="flex items-center justify-end mb-3">
+            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-white/5 text-gray-300">
+              {w.workout_type}
+            </span>
+          </div>
+        )}
 
         <h3 className="text-white font-bold text-base mb-1">{w.name}</h3>
         <p className="text-gray-400 text-xs leading-relaxed line-clamp-2 mb-3">{w.description}</p>
@@ -507,34 +564,38 @@ function WorkoutCard({ workout, theme, role, onView, onEdit, onDuplicate, onAssi
       </div>
 
       {/* Action buttons */}
-      <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
-        {w.type === "custom" && (
-          <button
-            onClick={onEdit}
-            className="flex-1 py-2 rounded-lg text-xs font-semibold border transition-colors"
-            style={{ borderColor: `${theme.accent}40`, color: theme.accentText }}
-          >
-            Edit
-          </button>
-        )}
-        {onDuplicate && (
-          <button
-            onClick={onDuplicate}
-            className="flex-1 py-2 rounded-lg text-xs font-semibold border border-white/10 text-gray-300 hover:bg-white/5 transition-colors"
-          >
-            + My Library
-          </button>
-        )}
-        {onAssign && (
-          <button
-            onClick={onAssign}
-            className="flex-1 py-2 rounded-lg text-xs font-semibold text-white transition-colors"
-            style={{ backgroundColor: theme.accent }}
-          >
-            Assign
-          </button>
-        )}
-      </div>
+      {hasActions ? (
+        <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+          {canManage && w.type === "custom" && onEdit && (
+            <button
+              onClick={onEdit}
+              className="flex-1 py-2 rounded-lg text-xs font-semibold border transition-colors"
+              style={{ borderColor: `${theme.accent}40`, color: theme.accentText }}
+            >
+              Edit
+            </button>
+          )}
+          {onDuplicate && (
+            <button
+              onClick={onDuplicate}
+              className="flex-1 py-2 rounded-lg text-xs font-semibold border border-white/10 text-gray-300 hover:bg-white/5 transition-colors"
+            >
+              + My Library
+            </button>
+          )}
+          {onAssign && (
+            <button
+              onClick={onAssign}
+              className="flex-1 py-2 rounded-lg text-xs font-semibold text-white transition-colors"
+              style={{ backgroundColor: theme.accent }}
+            >
+              Assign
+            </button>
+          )}
+        </div>
+      ) : (
+        <p className="text-[11px] text-gray-500 text-center pt-1">Tap to view activities</p>
+      )}
     </div>
   );
 }
@@ -543,8 +604,11 @@ function WorkoutCard({ workout, theme, role, onView, onEdit, onDuplicate, onAssi
    WORKOUT VIEW — overlay detail view
    ═══════════════════════════════════════════════════════════════════════ */
 
-function WorkoutView({ workout, theme, onEdit, onDelete, onDuplicate, onAssign }) {
+function WorkoutView({ workout, theme, role, canManage, onAddToPlan, onEdit, onDelete, onDuplicate, onAssign }) {
+  void role;
+  void canManage;
   const w = workout;
+  const [addPlanDay, setAddPlanDay] = useState("");
   const totalVolume = (w.exercises ?? []).reduce((sum, e) => sum + e.sets * e.reps * (e.weight || 0), 0);
   const totalSets = (w.exercises ?? []).reduce((sum, e) => sum + e.sets, 0);
   const totalCalories = (w.exercises ?? []).reduce(
@@ -555,10 +619,11 @@ function WorkoutView({ workout, theme, onEdit, onDelete, onDuplicate, onAssign }
     <div className="space-y-5">
       {/* Meta */}
       <div className="flex flex-wrap gap-2 items-center">
-        <span className={`px-2.5 py-1 rounded text-xs font-bold uppercase ${DIFFICULTY_COLORS[w.difficulty] ?? "text-gray-400 bg-white/5"}`}>
-          {w.difficulty}
-        </span>
-        <span className="text-xs text-gray-500">{w.est_duration_min} min</span>
+        {w.workout_type && (
+          <span className="px-2.5 py-1 rounded text-xs font-bold uppercase bg-white/5 text-gray-300">
+            {w.workout_type}
+          </span>
+        )}
         <span className="text-xs text-gray-500">{totalSets} total sets</span>
         {totalVolume > 0 && <span className="text-xs text-gray-500">{totalVolume.toLocaleString()} lbs volume</span>}
         {totalCalories > 0 && <span className="text-xs text-orange-400 font-semibold">🔥 ~{totalCalories} kcal</span>}
@@ -604,42 +669,70 @@ function WorkoutView({ workout, theme, onEdit, onDelete, onDuplicate, onAssign }
       </div>
 
       {/* Action bar */}
-      <div className="flex gap-3 pt-3 border-t border-white/5">
-        {w.type === "custom" && (
-          <button
-            onClick={onEdit}
-            className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-colors"
-            style={{ backgroundColor: theme.accent }}
-          >
-            Edit Workout
-          </button>
+      <div className="flex flex-col gap-3 pt-3 border-t border-white/5">
+        {onAddToPlan && (
+          <div className="flex gap-2">
+            <select
+              value={addPlanDay}
+              onChange={(e) => setAddPlanDay(e.target.value)}
+              className="flex-1 bg-[#0A1020] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-gray-200 focus:outline-none"
+            >
+              <option value="">Select a day...</option>
+              <option value="monday">Monday</option>
+              <option value="tuesday">Tuesday</option>
+              <option value="wednesday">Wednesday</option>
+              <option value="thursday">Thursday</option>
+              <option value="friday">Friday</option>
+              <option value="saturday">Saturday</option>
+              <option value="sunday">Sunday</option>
+            </select>
+            <button
+              onClick={() => addPlanDay && onAddToPlan(addPlanDay)}
+              disabled={!addPlanDay}
+              className="px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-colors disabled:opacity-40"
+              style={{ backgroundColor: theme.accent }}
+            >
+              Add to Plan
+            </button>
+          </div>
         )}
-        {onDuplicate && (
-          <button
-            onClick={onDuplicate}
-            className="flex-1 py-2.5 rounded-xl text-sm font-bold border transition-colors"
-            style={{ borderColor: `${theme.accent}40`, color: theme.accentText }}
-          >
-            Copy to My Library
-          </button>
-        )}
-        {onAssign && (
-          <button
-            onClick={onAssign}
-            className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-colors"
-            style={{ backgroundColor: theme.accent }}
-          >
-            Assign to Client
-          </button>
-        )}
-        {onDelete && (
-          <button
-            onClick={onDelete}
-            className="px-4 py-2.5 rounded-xl text-sm font-bold text-red-400 border border-red-500/30 hover:bg-red-500/10 transition-colors"
-          >
-            Delete
-          </button>
-        )}
+        <div className="flex gap-3">
+          {onEdit && w.type === "custom" && (
+            <button
+              onClick={onEdit}
+              className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-colors"
+              style={{ backgroundColor: theme.accent }}
+            >
+              Edit Workout
+            </button>
+          )}
+          {onDuplicate && (
+            <button
+              onClick={onDuplicate}
+              className="flex-1 py-2.5 rounded-xl text-sm font-bold border transition-colors"
+              style={{ borderColor: `${theme.accent}40`, color: theme.accentText }}
+            >
+              Copy to My Library
+            </button>
+          )}
+          {onAssign && (
+            <button
+              onClick={onAssign}
+              className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-colors"
+              style={{ backgroundColor: theme.accent }}
+            >
+              Assign to Client
+            </button>
+          )}
+          {onDelete && (
+            <button
+              onClick={onDelete}
+              className="px-4 py-2.5 rounded-xl text-sm font-bold text-red-400 border border-red-500/30 hover:bg-red-500/10 transition-colors"
+            >
+              Delete
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -649,11 +742,11 @@ function WorkoutView({ workout, theme, onEdit, onDelete, onDuplicate, onAssign }
    WORKOUT BUILDER — create / edit a workout
    ═══════════════════════════════════════════════════════════════════════ */
 
-function WorkoutBuilder({ initial, theme, onSave, onCancel }) {
+function WorkoutBuilder({ initial, theme, equipmentOptions, onSave, onCancel }) {
   const [name, setName] = useState(initial.name ?? "");
   const [description, setDescription] = useState(initial.description ?? "");
-  const [category, setCategory] = useState(initial.category ?? "Strength");
-  const [difficulty, setDifficulty] = useState(initial.difficulty ?? "Intermediate");
+  const [instructions, setInstructions] = useState(initial.instructions ?? "");
+  const [workoutType, setWorkoutType] = useState(initial.workout_type ?? "rep");
   const [duration, setDuration] = useState(initial.est_duration_min ?? 45);
   const [exercises, setExercises] = useState(
     initial.exercises?.length ? initial.exercises.map((e, i) => ({ ...e, _key: i })) : [{ ...EMPTY_EXERCISE, _key: 0 }]
@@ -716,8 +809,8 @@ function WorkoutBuilder({ initial, theme, onSave, onCancel }) {
       ...initial,
       name: name.trim(),
       description: description.trim(),
-      category,
-      difficulty,
+      instructions: instructions.trim(),
+      workout_type: workoutType,
       est_duration_min: Number(duration),
       muscle_groups: muscleGroups,
       exercises: cleaned,
@@ -744,25 +837,21 @@ function WorkoutBuilder({ initial, theme, onSave, onCancel }) {
           rows={2}
           className="w-full bg-[#0A1020] border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 focus:outline-none resize-none"
         />
-        <div className="grid grid-cols-3 gap-3">
+        <textarea
+          placeholder="Instructions (optional)"
+          value={instructions}
+          onChange={(e) => setInstructions(e.target.value)}
+          rows={2}
+          className="w-full bg-[#0A1020] border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 focus:outline-none resize-none"
+        />
+        <div className="grid grid-cols-2 gap-3">
           <select
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
+            value={workoutType}
+            onChange={(e) => setWorkoutType(e.target.value)}
             className="bg-[#0A1020] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-gray-300 focus:outline-none"
           >
-            <option value="Strength">Strength</option>
-            <option value="Cardio">Cardio</option>
-            <option value="Recovery">Recovery</option>
-            <option value="General">General</option>
-          </select>
-          <select
-            value={difficulty}
-            onChange={(e) => setDifficulty(e.target.value)}
-            className="bg-[#0A1020] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-gray-300 focus:outline-none"
-          >
-            <option value="Beginner">Beginner</option>
-            <option value="Intermediate">Intermediate</option>
-            <option value="Advanced">Advanced</option>
+            <option value="rep">Rep-based</option>
+            <option value="duration">Duration-based</option>
           </select>
           <div className="flex items-center gap-2 bg-[#0A1020] border border-white/10 rounded-xl px-3 py-2.5">
             <input
@@ -910,7 +999,7 @@ function WorkoutBuilder({ initial, theme, onSave, onCancel }) {
                   className="w-full bg-[#080D19] border border-white/10 rounded-lg px-2 py-1.5 text-sm text-gray-300 focus:outline-none"
                 >
                   <option value="">None</option>
-                  {EQUIPMENT_OPTIONS.map((eq) => (
+                  {(equipmentOptions || DEFAULT_EQUIPMENT_OPTIONS).map((eq) => (
                     <option key={eq} value={eq}>{eq}</option>
                   ))}
                 </select>
@@ -962,7 +1051,19 @@ function WorkoutBuilder({ initial, theme, onSave, onCancel }) {
    WEEKLY PLANNER — assign workouts to each day of the week
    ═══════════════════════════════════════════════════════════════════════ */
 
-function WeeklyPlanner({ weeklyPlan, allWorkouts, theme, onSetDay, onClearDay, onSave, dirty, saving }) {
+function WeeklyPlanner({
+  weeklyPlan,
+  allWorkouts,
+  theme,
+  onSetDay,
+  onClearDay,
+  onSave,
+  onPublish,
+  publishLabel,
+  publishStatus,
+  dirty,
+  saving,
+}) {
   const [pickerDay, setPickerDay] = useState(null); // day key currently being assigned
   const [pickerSearch, setPickerSearch] = useState("");
 
@@ -1009,14 +1110,43 @@ function WeeklyPlanner({ weeklyPlan, allWorkouts, theme, onSetDay, onClearDay, o
             <p className="text-orange-400 font-bold text-lg">~{weekTotals.calories} <span className="text-xs font-normal">kcal</span></p>
           </div>
         </div>
-        <button
-          onClick={onSave}
-          disabled={!dirty || saving}
-          className="px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-colors disabled:opacity-30"
-          style={{ backgroundColor: theme.accent }}
-        >
-          {saving ? "Saving..." : dirty ? "Save Plan" : "Saved ✓"}
-        </button>
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex items-center gap-2">
+            {onPublish ? (
+              <button
+                onClick={onPublish}
+                disabled={saving}
+                className="px-5 py-2.5 rounded-xl text-sm font-bold transition-colors disabled:opacity-30 border border-white/10"
+                style={{ backgroundColor: `${theme.accent}20`, color: theme.accentText }}
+              >
+                {saving ? "Publishing..." : (publishLabel || "Publish Plan")}
+              </button>
+            ) : null}
+            <button
+              onClick={onSave}
+              disabled={!dirty || saving}
+              className="px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-colors disabled:opacity-30"
+              style={{ backgroundColor: theme.accent }}
+            >
+              {saving ? "Saving..." : dirty ? "Save Plan" : "Saved ✓"}
+            </button>
+          </div>
+          {publishStatus && (
+            <p
+              className={`text-[11px] font-medium ${
+                publishStatus.kind === "success"
+                  ? "text-green-400"
+                  : publishStatus.kind === "error"
+                    ? "text-red-400"
+                    : publishStatus.kind === "partial"
+                      ? "text-yellow-400"
+                      : "text-gray-400"
+              }`}
+            >
+              {publishStatus.message}
+            </p>
+          )}
+        </div>
       </div>
 
       {/* Day grid */}
@@ -1055,9 +1185,11 @@ function WeeklyPlanner({ weeklyPlan, allWorkouts, theme, onSetDay, onClearDay, o
                 /* ── Workout assigned ────── */
                 <div className="flex-1 flex flex-col">
                   <p className="text-white font-semibold text-sm mb-1 leading-tight">{workout.name}</p>
-                  <span className={`self-start px-1.5 py-0.5 rounded text-[9px] font-bold uppercase mb-2 ${DIFFICULTY_COLORS[workout.difficulty] ?? "text-gray-400 bg-white/5"}`}>
-                    {workout.difficulty}
-                  </span>
+                  {workout.workout_type && (
+                    <span className="self-start px-1.5 py-0.5 rounded text-[9px] font-bold uppercase mb-2 bg-white/5 text-gray-300">
+                      {workout.workout_type}
+                    </span>
+                  )}
 
                   <div className="space-y-1 flex-1">
                     {(workout.exercises ?? []).slice(0, 3).map((ex, i) => (
@@ -1142,9 +1274,11 @@ function WeeklyPlanner({ weeklyPlan, allWorkouts, theme, onSetDay, onClearDay, o
                     >
                       <div className="flex items-center justify-between mb-1">
                         <p className="text-white font-semibold text-sm">{w.name}</p>
-                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${DIFFICULTY_COLORS[w.difficulty] ?? "text-gray-400 bg-white/5"}`}>
-                          {w.difficulty}
-                        </span>
+                        {w.workout_type && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-white/5 text-gray-300">
+                            {w.workout_type}
+                          </span>
+                        )}
                       </div>
                       <div className="flex gap-3 text-[10px] text-gray-500">
                         <span>{w.exercises?.length ?? 0} exercises</span>

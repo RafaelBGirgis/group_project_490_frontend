@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import clientLogo from "../assets/Client Logo.svg";
+import { initiateGoogleOAuth, login as loginRequest, storeToken } from "../api/auth";
+import { fetchBackendHealth } from "../api/client";
 
 const API_BASE_URL = import.meta.env.PROD ? "https://api.till-failure.us" : "";
 
@@ -8,37 +10,21 @@ function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [backendReady, setBackendReady] = useState(null);
 
-  const getErrorMessage = async (response, fallback) => {
-    try {
-      const errorData = await response.json();
-      return errorData?.detail || fallback;
-    } catch {
-      return fallback;
-    }
-  };
+  useEffect(() => {
+    fetchBackendHealth()
+      .then(() => setBackendReady(true))
+      .catch(() => setBackendReady(false));
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault(); // prevent page reload
     setError("");
 
     try {
-      const res = await fetch(`${API_BASE_URL}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), password }),
-      });
-
-      if (!res.ok) {
-        const message = await getErrorMessage(res, "Login failed");
-        throw new Error(message);
-      }
-
-      const data = await res.json();
-      console.log("Login successful:", data);
-
-      // Save JWT token from backend
-      localStorage.setItem("jwt", data.access_token);
+      const data = await loginRequest(email, password);
+      storeToken(data.access_token);
 
       const normalizedEmail = email.trim().toLowerCase();
       localStorage.setItem("active_user_email", normalizedEmail);
@@ -123,11 +109,14 @@ function LoginPage() {
             <p className="mt-2 text-sm text-slate-400">
               Sign in to continue your fitness journey
             </p>
+            <p className={`mt-2 text-xs ${backendReady === false ? "text-red-400" : "text-slate-500"}`}>
+              Backend status: {backendReady == null ? "checking..." : backendReady ? "online" : "offline"}
+            </p>
 
             <div className="mt-6">
               <button
                 type="button"
-                onClick={() => { window.location.href = `${API_BASE_URL}/auth/google`; }}
+                onClick={initiateGoogleOAuth}
                 className="flex w-full items-center justify-center gap-3 rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-[rgba(255,255,255,0.06)]"
               >
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-[10px] font-bold text-white">
@@ -170,15 +159,6 @@ function LoginPage() {
                   className="w-full rounded-xl border border-white/10 bg-[#0B1220] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-blue-400/60 focus:ring-2 focus:ring-blue-500/20"
                   required
                 />
-              </div>
-
-              <div className="flex justify-end">
-                <Link
-                  to="/forgot-password"
-                  className="text-xs font-medium text-blue-400 transition hover:text-cyan-300"
-                >
-                  Forgot password?
-                </Link>
               </div>
 
               <button

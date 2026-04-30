@@ -38,7 +38,15 @@ const NOTIF_ICONS = {
   account: "👥",
 };
 
-export function Navbar({ role = "client", userName = "JD", onMessage, onNotification, notifications: externalNotifs }) {
+export function Navbar({
+  role = "client",
+  userName = "JD",
+  onMessage,
+  onNotification,
+  notifications: externalNotifs,
+  onSwitch,
+  canSwitchToCoach = false,
+}) {
   const theme = ROLE_THEMES[role];
   const navigate = useNavigate();
   const [showNotifs, setShowNotifs] = useState(false);
@@ -81,13 +89,17 @@ export function Navbar({ role = "client", userName = "JD", onMessage, onNotifica
   };
 
   const switchText =
-    role === "client" ? "Switch to Coach" :
-    role === "coach"  ? "Switch to Client" :
+    role === "client" && canSwitchToCoach ? "Switch to Coach" :
+    role === "coach" ? "Switch to Client" :
     null;
 
   const handleSwitch = () => {
-    if (role === "client") navigate("/coach");
-    if (role === "coach")  navigate("/client");
+    if (typeof onSwitch === "function") {
+      onSwitch();
+      return;
+    }
+    if (role === "client" && canSwitchToCoach) navigate("/coach");
+    if (role === "coach") navigate("/client");
   };
 
   const handleProfileClick = () => {

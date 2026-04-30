@@ -5,7 +5,7 @@
  * and exercise database integrity.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   fetchPresetWorkouts,
   fetchMyWorkouts,
@@ -83,11 +83,11 @@ describe("fetchPresetWorkouts", () => {
     });
   });
 
-  it("returns API data when endpoint succeeds", async () => {
-    const mockData = [{ id: "p1", name: "Test Preset", type: "preset", exercises: [] }];
-    mockFetchOk(mockData);
+  it("returns the frontend preset library even if a backend preset route exists", async () => {
     const result = await fetchPresetWorkouts();
-    expect(result).toEqual(mockData);
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBeGreaterThanOrEqual(5);
+    expect(result[0].type).toBe("preset");
   });
 
   it("every preset exercise has required fields", async () => {
@@ -109,14 +109,10 @@ describe("fetchPresetWorkouts", () => {
    ═══════════════════════════════════════════════════════════════════════ */
 
 describe("fetchMyWorkouts", () => {
-  it("returns mock custom workouts on API failure", async () => {
+  it("returns an empty list on API failure when nothing is cached locally", async () => {
     mockFetchFail();
     const workouts = await fetchMyWorkouts("client", 1);
-    expect(workouts.length).toBeGreaterThanOrEqual(1);
-    workouts.forEach((w) => {
-      expect(w.type).toBe("custom");
-      expect(w.exercises.length).toBeGreaterThan(0);
-    });
+    expect(workouts).toEqual([]);
   });
 });
 
@@ -131,11 +127,15 @@ describe("createWorkout", () => {
   });
 
   it("posts to correct endpoint", async () => {
-    mockFetchOk({ success: true, id: "new-1" });
+    mockFetchOk({ workout_id: 99 });
     localStorage.setItem("jwt", "test-token");
-    await createWorkout("coach", 42, { name: "Plan" });
+    await createWorkout("coach", 42, {
+      name: "Plan",
+      description: "Coach plan",
+      exercises: [{ name: "Bench Press", weight: 185, intensity_measure: "lbs", estimated_calories_per_unit_frequency: 8, equipment: "Barbell" }],
+    });
     expect(global.fetch).toHaveBeenCalledWith(
-      "/roles/coach/42/workouts",
+      "/roles/coach/fitness/workout",
       expect.objectContaining({ method: "POST" })
     );
   });
@@ -193,25 +193,17 @@ describe("assignWorkout", () => {
 });
 
 describe("fetchAssignableClients", () => {
-  it("returns mock client list on fallback", async () => {
+  it("returns an empty list because the backend has no assignable-clients route", async () => {
     mockFetchFail();
     const clients = await fetchAssignableClients(1);
-    expect(clients.length).toBeGreaterThan(0);
-    clients.forEach((c) => {
-      expect(c.id).toBeTruthy();
-      expect(c.name).toBeTruthy();
-    });
+    expect(clients).toEqual([]);
   });
 });
 
 describe("fetchAssignedWorkouts", () => {
-  it("returns assigned workouts with client lists on fallback", async () => {
+  it("returns an empty list because the backend has no assigned-workouts route", async () => {
     mockFetchFail();
     const assigned = await fetchAssignedWorkouts(1);
-    expect(assigned.length).toBeGreaterThan(0);
-    assigned.forEach((a) => {
-      expect(a.workout_name).toBeTruthy();
-      expect(a.assigned_to.length).toBeGreaterThan(0);
-    });
+    expect(assigned).toEqual([]);
   });
 });

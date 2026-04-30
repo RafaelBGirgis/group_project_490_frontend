@@ -4,6 +4,7 @@ import { Navbar, SkeletonMessage } from "../components";
 import { fetchMe } from "../api/client";
 import { fetchConversations, fetchMessages, sendMessage } from "../api/chat";
 import { ROLE_THEMES } from "../components/theme";
+import { getCoachAccessState } from "../utils/roleAccess";
 
 const CHAT_THEME = {
   client: {
@@ -33,19 +34,24 @@ export default function ChatPage() {
   /* ── auth + account ──────────────────────────────────────────────── */
   const [account, setAccount] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [resolvedRole, setResolvedRole] = useState("client");
 
   useEffect(() => {
     const token = localStorage.getItem("jwt");
     if (!token) { navigate("/login"); return; }
 
     fetchMe()
-      .then((me) => setAccount(me))
+      .then(async (me) => {
+        setAccount(me);
+        const coachAccess = await getCoachAccessState(me);
+        setResolvedRole(coachAccess.canAccessCoach ? "coach" : "client");
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [navigate]);
 
   /* ── determine role from account ─────────────────────────────────── */
-  const role = account && 'coach_id' in account ? "coach" : "client";
+  const role = resolvedRole;
   const theme = ROLE_THEMES[role] || ROLE_THEMES.client;
   const roleTheme = CHAT_THEME[role];
 
@@ -62,7 +68,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!account) return;
-    fetchConversations(account.id)
+    fetchConversations(account.id, role)
       .then((convos) => {
         const scopedConversations = convos.filter(
           (convo) => convo.partner_role === roleTheme.partnerRole

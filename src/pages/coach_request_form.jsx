@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Navbar } from "../components/navbar";
-import { requestCoachCreation } from "../api/coach";
+import { fetchMe } from "../api/client";
+import { buildCoachRequestPayload, createCoachRequest } from "../api/coach";
+import { clearCoachRequestResolution } from "../utils/coachRequests";
 
 const SPECIALIZATION_OPTIONS = [
   "Strength Training",
@@ -24,6 +26,7 @@ function CoachRequestFormPage() {
   const isViewMode = mode === "view";
   const isEditMode = mode === "edit";
   const [loading, setLoading] = useState(true);
+  const [account, setAccount] = useState(null);
   const [error, setError] = useState("");
   const [submitMessage, setSubmitMessage] = useState("");
   const [requestStorageKey, setRequestStorageKey] = useState("");
@@ -70,18 +73,8 @@ function CoachRequestFormPage() {
 
     const loadNameFromSession = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/me`, {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        if (!res.ok) {
-          throw new Error("Failed to load your account session.");
-        }
-
-        const data = await res.json();
+        const data = await fetchMe();
+        setAccount(data);
         const key = `coachRequest:${data.id || data.email || "current"}`;
         setRequestStorageKey(key);
 
@@ -117,7 +110,7 @@ function CoachRequestFormPage() {
     };
 
     loadNameFromSession();
-  }, [API_BASE_URL, navigate]);
+  }, [navigate]);
 
   const toggleSpecialization = (item) => {
     if (isViewMode) return;

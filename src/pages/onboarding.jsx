@@ -1,8 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AvailabilityDetail from "../components/overlays/availability_detail";
-import { buildInitialSurveyPayload, createClientInitialSurvey, fetchMe } from "../api/client";
+import {
+  buildClientInformationPayload,
+  buildInitialSurveyPayload,
+  createClientInitialSurvey,
+  fetchMe,
+  updateAccount,
+  updateClientInformation,
+} from "../api/client";
 import { getOnboardingStorageKey, loadProfileDraft, saveOnboardingDraft } from "../utils/profileDrafts";
+import { getCoachAccessState } from "../utils/roleAccess";
+import { resolveRoleState } from "../utils/sessionAuth";
 
 const PRIMARY_GOALS = [
   "Weight Loss",
@@ -21,6 +30,26 @@ const EMPTY_TRAINING_AVAILABILITY = {
 };
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+const buildAccountUpdatePayload = ({ age, email, bio, gender }) => {
+  const payload = {};
+
+  const parsedAge = Number(age);
+  if (Number.isFinite(parsedAge) && parsedAge > 0) {
+    payload.age = parsedAge;
+  }
+  if (email) {
+    payload.email = email;
+  }
+  if (typeof bio === "string") {
+    payload.bio = bio;
+  }
+  if (gender) {
+    payload.gender = gender;
+  }
+
+  return payload;
+};
 
 const normalizeTrainingAvailability = (value, fallbackDays = []) => {
   const base = {
@@ -119,15 +148,25 @@ function OnboardingPage() {
   }, [form]);
 
   useEffect(() => {
-    const token = localStorage.getItem("jwt");
-    if (!token) {
-      navigate("/login");
-      return;
-    }
-
     const load = async () => {
       try {
         const account = await fetchMe();
+        const roleState = await resolveRoleState();
+        const coachAccess = await getCoachAccessState(account, roleState);
+
+        if (roleState.hasAdminRole) {
+          navigate("/admin");
+          return;
+        }
+        if (coachAccess.canAccessCoach) {
+          navigate("/coach");
+          return;
+        }
+        if (roleState.hasClientRole) {
+          navigate("/client");
+          return;
+        }
+
         const email = (account.email || localStorage.getItem("active_user_email") || "")
           .trim()
           .toLowerCase();
@@ -153,6 +192,10 @@ function OnboardingPage() {
           profilePicture: savedData?.profilePicture || prev.profilePicture,
         }));
       } catch (err) {
+        if (err?.status === 401) {
+          navigate("/login");
+          return;
+        }
         setError(err.message || "Failed to initialize onboarding.");
       } finally {
         setLoading(false);
@@ -186,14 +229,43 @@ function OnboardingPage() {
 
     try {
       setSubmitting(true);
+      const accountPayload = buildAccountUpdatePayload({
+        age: form.age,
+        email: form.email,
+        bio: form.bio,
+        gender: form.gender,
+      });
       const surveyPayload = buildInitialSurveyPayload(form);
-      const response = await createClientInitialSurvey(surveyPayload);
+
+      if (Object.keys(accountPayload).length > 0) {
+        await updateAccount(accountPayload);
+      }
+
+      let response = null;
+
+      try {
+        response = await createClientInitialSurvey(surveyPayload);
+      } catch (initialSurveyError) {
+        const clientInformationPayload = buildClientInformationPayload({
+          primaryGoal: form.primaryGoal,
+          weight: form.weight,
+          trainingAvailability: form.trainingAvailability,
+          paymentMethod: {
+            ccnum: form.cardNumber,
+            cv: form.cardCvv,
+            exp_date: form.cardExpiry,
+          },
+        });
+
+        if (Object.keys(clientInformationPayload).length === 0) {
+          throw initialSurveyError;
+        }
+
+        response = await updateClientInformation(clientInformationPayload);
+      }
 
       saveOnboardingDraft(localPayload);
-      if (form.email) {
-        localStorage.setItem(`onboarding_complete:${form.email}`, "true");
-        localStorage.setItem("active_user_email", form.email);
-      }
+      if (form.email) localStorage.setItem("active_user_email", form.email);
       if (response?.client_id) {
         localStorage.setItem("active_client_id", String(response.client_id));
       }

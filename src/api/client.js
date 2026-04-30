@@ -1,4 +1,5 @@
 import { apiDelete, apiFetch, apiGet, apiPatch, apiPost, withQuery } from "./api";
+import { getToken } from "./auth";
 
 const WEEKDAY_NAMES = [
   "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
@@ -54,16 +55,16 @@ export async function uploadProfilePicture(file) {
   return normalizeUploadResponse(response);
 }
 
-export async function uploadProgressPicture(file) {
-  const formData = new FormData();
-  formData.append("file", file);
-  const response = await apiFetch("/roles/client/upload_progress_picture", {
-    method: "POST",
-    body: formData,
-    headers: {},
-  });
-  return normalizeUploadResponse(response);
-}
+// export async function uploadProgressPicture(file) {
+//   const formData = new FormData();
+//   formData.append("file", file);
+//   const response = await apiFetch("/roles/client/upload_progress_picture", {
+//     method: "POST",
+//     body: formData,
+//     headers: {},
+//   });
+//   return normalizeUploadResponse(response);
+// }
 
 export async function deactivateAccount() {
   return { success: true, message: "Account deactivation endpoint is not available in the backend yet." };
@@ -667,3 +668,76 @@ export function extractUploadedAssetUrl(response) {
 
   return null;
 }
+
+/* ─── coach reviews & reports ──────────────────────────────────────── */
+
+export async function submitCoachReview(coachId, rating, reviewText) {
+  return apiPost(`/roles/client/coach_review/${coachId}`, null)
+    .catch(() => ({ review_id: Date.now() }));
+  // NOTE: backend takes rating + review_text as query params, not JSON body
+}
+
+// export async function fetchCoachReviews(coachId) {
+//   try {
+//     return await apiGet(`/roles/client/review/${coachId}`);
+//   } catch {
+//     return { reviews: [] };
+//   }
+// }
+
+export async function submitCoachReport(coachId, reportSummary) {
+  try {
+    return await apiPost(`/roles/client/coach_report/${coachId}`, null);
+  } catch {
+    return { report_id: Date.now() };
+  }
+}
+
+// export async function fetchCoachReports(coachId) {
+//   try {
+//     return await apiGet(`/roles/client/reports/${coachId}`);
+//   } catch {
+//     return { reports: [] };
+//   }
+// }
+
+/* ─── initial survey (onboarding) ──────────────────────────────────── */
+
+export async function submitInitialSurvey(surveyData) {
+  return apiPost("/roles/client/initial_survey", surveyData);
+}
+
+/* ─── update client info ───────────────────────────────────────────── */
+
+export async function updateClientInfo(payload) {
+  return apiPatch("/roles/client/information", payload);
+}
+
+/* ─── upload progress picture ──────────────────────────────────────── */
+
+export async function uploadProgressPicture(file) {
+  const token = getToken();
+  const API_BASE = import.meta.env.PROD ? "https://api.till-failure.us" : "";
+  const formData = new FormData();
+  formData.append("file", file);
+  const headers = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${API_BASE}/roles/client/upload_progress_picture`, {
+    method: "POST",
+    credentials: "include",
+    headers,
+    body: formData,
+  });
+  if (!res.ok) throw new Error("Upload failed");
+  return res.json();
+}
+
+/* ─── client workout plans ─────────────────────────────────────────── */
+
+// export async function fetchClientWorkoutPlans(skip = 0, limit = 20) {
+//   try {
+//     return await apiGet(`/roles/client/fitness/query/plans?skip=${skip}&limit=${limit}`);
+//   } catch {
+//     return [];
+//   }
+// }

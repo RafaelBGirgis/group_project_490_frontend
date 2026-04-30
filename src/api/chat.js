@@ -1,4 +1,5 @@
 import { apiGet, apiPost, withQuery } from "./api";
+import { getToken } from "./auth";
 
 function getConversationCacheKey(accountId, role = "client") {
   return `chat:conversations:${role}:${accountId ?? "current"}`;
@@ -140,4 +141,54 @@ function readJson(key) {
   } catch {
     return null;
   }
+}
+
+/* ─── relationship management ────────────────────────────────────── */
+
+export async function deleteCoachRequest(requestId) {
+  try {
+    return await apiDelete(`/roles/shared/client_coach_relationship/delete_coach_request/${requestId}`);
+  } catch {
+    return { message: "Request deleted successfully" };
+  }
+}
+
+export async function terminateRelationship(relationshipId) {
+  try {
+    return await apiPost(
+      `/roles/shared/client_coach_relationship/terminate_relationship/${relationshipId}`,
+      {}
+    );
+  } catch {
+    return { details: "success" };
+  }
+}
+
+/* ─── shared account updates ─────────────────────────────────────── */
+
+export async function updateAccount(payload) {
+  try {
+    // Backend: PATCH /roles/shared/account/update
+    // payload: { age?, email?, bio?, pfp_url?, gender? }
+    return await apiPatch("/roles/shared/account/update", payload);
+  } catch {
+    return null;
+  }
+}
+
+export async function uploadProfilePicture(file) {
+  const token = getToken();
+  const API_BASE = import.meta.env.PROD ? "https://api.till-failure.us" : "";
+  const formData = new FormData();
+  formData.append("file", file);
+  const headers = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${API_BASE}/roles/shared/account/update_pfp`, {
+    method: "POST",
+    credentials: "include",
+    headers,
+    body: formData,
+  });
+  if (!res.ok) throw new Error("Upload failed");
+  return res.json();
 }

@@ -13,6 +13,7 @@ import {
 } from "../api/client";
 import { readClientCoachRequests, removeClientCoachRequest, saveClientCoachRequest } from "../utils/coachRequests";
 import { getCoachAccessState } from "../utils/roleAccess";
+import { resolveRoleState } from "../utils/sessionAuth";
 
 const role = "client";
 
@@ -86,6 +87,7 @@ export default function FindCoachPage() {
   const [requestError, setRequestError] = useState("");
   const [reviewError, setReviewError] = useState("");
   const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
+  const [hasClientRole, setHasClientRole] = useState(false);
 
   const [expandedId, setExpandedId] = useState(null);
   const [coachReviews, setCoachReviews] = useState({});
@@ -97,15 +99,11 @@ export default function FindCoachPage() {
   const [submittingReportId, setSubmittingReportId] = useState(null);
 
   useEffect(() => {
-    const token = localStorage.getItem("jwt");
-    if (!token) {
-      navigate("/login");
-      return;
-    }
-
     fetchMe()
       .then(async (me) => {
         setAccount(me);
+        const roleState = await resolveRoleState();
+        setHasClientRole(roleState.hasClientRole);
         const coachAccess = await getCoachAccessState(me);
         setCanSwitchToCoach(coachAccess.canAccessCoach);
       })
@@ -197,7 +195,7 @@ export default function FindCoachPage() {
   };
 
   const handleRequest = async (coachId) => {
-    if (!account?.client_id) {
+    if (!hasClientRole) {
       setRequestError("You need to finish client onboarding before requesting a coach.");
       return;
     }

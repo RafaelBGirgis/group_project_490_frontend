@@ -46,6 +46,7 @@ export function Navbar({
   notifications: externalNotifs,
   onSwitch,
   canSwitchToCoach = false,
+  switchOptions = null,
 }) {
   const theme = ROLE_THEMES[role];
   const navigate = useNavigate();
@@ -88,11 +89,6 @@ export function Navbar({
     setNotifs((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
   };
 
-  const switchText =
-    role === "client" && canSwitchToCoach ? "Switch to Coach" :
-    role === "coach" ? "Switch to Client" :
-    null;
-
   const handleSwitch = () => {
     if (typeof onSwitch === "function") {
       onSwitch();
@@ -101,6 +97,17 @@ export function Navbar({
     if (role === "client" && canSwitchToCoach) navigate("/coach");
     if (role === "coach") navigate("/client");
   };
+
+  const resolvedSwitchOptions = Array.isArray(switchOptions)
+    ? switchOptions.filter((option) => option?.label && option?.to)
+    : [
+        role === "client" && canSwitchToCoach
+          ? { label: "Coach", to: "/coach" }
+          : null,
+        role === "coach"
+          ? { label: "Client", to: "/client" }
+          : null,
+      ].filter(Boolean);
 
   const handleProfileClick = () => {
     if (role === "coach") navigate("/coach-profile");
@@ -143,7 +150,7 @@ export function Navbar({
 
         {/* Right: Actions */}
         <div className="flex items-center gap-3">
-          {switchText && (
+          {switchOptions == null && resolvedSwitchOptions.length === 1 && (
             <button
               onClick={handleSwitch}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${theme.btnOutline}`}
@@ -152,8 +159,26 @@ export function Navbar({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                   d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
               </svg>
-              {switchText}
+              {`Switch to ${resolvedSwitchOptions[0].label}`}
             </button>
+          )}
+
+          {switchOptions != null && resolvedSwitchOptions.length > 0 && (
+            <div className="flex items-center gap-2">
+              {resolvedSwitchOptions.map((option) => (
+                <button
+                  key={option.to}
+                  onClick={() => navigate(option.to)}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${theme.btnOutline}`}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                  </svg>
+                  {`Switch to ${option.label}`}
+                </button>
+              ))}
+            </div>
           )}
 
           {/* Message Button */}

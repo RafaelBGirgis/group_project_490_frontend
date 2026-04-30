@@ -1,8 +1,23 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import clientLogo from "../assets/Client Logo.svg";
-import { initiateGoogleOAuth, signup as signupRequest, storeToken } from "../api/auth";
+import { initiateGoogleOAuth, isAuthenticated, signup as signupRequest, storeToken } from "../api/auth";
+import { fetchMe } from "../api/client";
+import { getCoachAccessState } from "../utils/roleAccess";
+import { resolveRoleState } from "../utils/sessionAuth";
 import { saveSignupPrefill } from "../utils/profileDrafts";
+
+async function resolvePostSignupPath(account) {
+  const roleState = await resolveRoleState();
+  const coachAccess = await getCoachAccessState(account, roleState);
+
+  if (roleState.hasAdminRole) return "/admin";
+  if (coachAccess.canAccessCoach) return "/coach";
+  if (roleState.hasClientRole) return "/client";
+  return "/onboarding";
+}
+
+const API_BASE_URL = import.meta.env.PROD ? "https://api.till-failure.us" : "";
 
 export default function SignupPage() {
   const [formData, setFormData] = useState({
@@ -16,6 +31,43 @@ export default function SignupPage() {
     bio: "",
   });
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!isAuthenticated()) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const restoreSession = async () => {
+      try {
+        const account = await fetchMe();
+        const normalizedEmail = String(account?.email || "").trim().toLowerCase();
+        if (normalizedEmail) {
+          localStorage.setItem("active_user_email", normalizedEmail);
+        }
+        if (!cancelled) {
+          window.location.href = await resolvePostSignupPath(account);
+        }
+      } catch {
+        // Keep the signup screen available if silent auth restoration fails.
+      }
+    };
+
+    restoreSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const getErrorMessage = async (response, fallback) => {
+    try {
+      const errorData = await response.json();
+      return errorData?.detail || fallback;
+    } catch {
+      return fallback;
+    }
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -59,7 +111,8 @@ export default function SignupPage() {
         bio: formData.bio.trim(),
         pfpUrl: formData.pfpUrl.trim(),
       });
-      window.location.href = "/onboarding";
+      const account = await fetchMe();
+      window.location.href = await resolvePostSignupPath(account);
     } catch (err) {
       console.error(err);
       setError(err.message);
@@ -143,7 +196,7 @@ export default function SignupPage() {
             <div className="mt-6">
               <button
                 type="button"
-                onClick={initiateGoogleOAuth}
+                onClick={() => { window.location.href = `${API_BASE_URL}/auth/google`; }}
                 className="flex w-full items-center justify-center gap-3 rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] px-4 py-3 text-sm font-medium text-slate-200 transition hover:bg-[rgba(255,255,255,0.06)]"
               >
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-[10px] font-bold text-white">

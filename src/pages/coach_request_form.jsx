@@ -65,12 +65,6 @@ function CoachRequestFormPage() {
   }, [form.name]);
 
   useEffect(() => {
-    const token = localStorage.getItem("jwt");
-    if (!token) {
-      navigate("/login");
-      return;
-    }
-
     const loadNameFromSession = async () => {
       try {
         const data = await fetchMe();

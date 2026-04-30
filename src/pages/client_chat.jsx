@@ -22,12 +22,6 @@ export default function ClientChatPage() {
   const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
 
   useEffect(() => {
-    const token = localStorage.getItem("jwt");
-    if (!token) {
-      navigate("/login");
-      return;
-    }
-
     fetchMe()
       .then(async (me) => {
         setAccount(me);

@@ -21,6 +21,7 @@ import {
   MUSCLE_GROUPS,
 } from "../api/workouts";
 import { getCoachAccessState } from "../utils/roleAccess";
+import { resolveRoleState } from "../utils/sessionAuth";
 
 /* ─── constants ──────────────────────────────────────────────────────── */
 
@@ -91,9 +92,10 @@ export default function WorkoutsPage() {
       try {
         const me = await fetchMe();
         setAccount(me);
-        const coachAccess = await getCoachAccessState(me);
+        const roleState = await resolveRoleState();
+        const coachAccess = await getCoachAccessState(me, roleState);
         setCanSwitchToCoach(coachAccess.canAccessCoach);
-        const isAdmin = Boolean(me?.admin_id);
+        const isAdmin = roleState.hasAdminRole;
         let r;
         if (roleFromUrl === "coach") {
           r = coachAccess.canAccessCoach ? "coach" : "client";

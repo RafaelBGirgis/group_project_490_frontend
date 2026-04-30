@@ -45,6 +45,7 @@ import { removeAcceptedClientForCoach } from "../api/coach";
 import { createConversation, fetchConversations } from "../api/chat";
 import { readClientCoachRequests, removeClientCoachRequest } from "../utils/coachRequests";
 import { getCoachAccessState } from "../utils/roleAccess";
+import { resolveRoleState } from "../utils/sessionAuth";
 
 const role = "client";
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -67,16 +68,7 @@ export default function ClientDash() {
   const navigate = useNavigate();
 
   /* ── auth guard ──────────────────────────────────────────────────── */
-  const [authed, setAuthed] = useState(false);
-
-  useEffect(() => {
-    const token = localStorage.getItem("jwt");
-    if (!token) {
-      navigate("/login");
-      return;
-    }
-    setAuthed(true);
-  }, [navigate]);
+  const [authed] = useState(true);
 
   /* ── overlay state ──────────────────────────────────────────────── */
   const [overlay, setOverlay] = useState(null); // "workout" | "coach" | "availability" | "meals" | "survey" | "steps" | null
@@ -139,6 +131,7 @@ export default function ClientDash() {
   const [loading, setLoading]           = useState(true);
   const [relationshipId, setRelationshipId] = useState(null);
   const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
+  const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(false);
   const [pendingCoachRequest, setPendingCoachRequest] = useState(null);
   const [approvedCoachRequest, setApprovedCoachRequest] = useState(null);
   const [requestStatusError, setRequestStatusError] = useState("");
@@ -152,6 +145,8 @@ export default function ClientDash() {
       try {
         const me = await fetchMe();
         setAccount(me);
+        const roleState = await resolveRoleState();
+        setCanSwitchToAdmin(roleState.hasAdminRole);
         const coachAccess = await getCoachAccessState(me);
         setCanSwitchToCoach(coachAccess.canAccessCoach);
         const storedRequests = readClientCoachRequests(me.email);
@@ -368,7 +363,10 @@ export default function ClientDash() {
     <div className="min-h-screen" style={{ backgroundColor: "#080D19" }}>
       <Navbar
         role={role}
-        canSwitchToCoach={canSwitchToCoach}
+        switchOptions={[
+          ...(canSwitchToCoach ? [{ label: "Coach", to: "/coach" }] : []),
+          ...(canSwitchToAdmin ? [{ label: "Admin", to: "/admin" }] : []),
+        ]}
         userName={
           account?.name
             ? account.name.split(" ").map((n) => n[0]).join("").toUpperCase()

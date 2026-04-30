@@ -1,4 +1,5 @@
 import { apiGet, apiPost, withQuery } from "./api";
+import { getToken } from "./auth";
 
 function getConversationCacheKey(accountId, role = "client") {
   return `chat:conversations:${role}:${accountId ?? "current"}`;
@@ -176,7 +177,7 @@ export async function updateAccount(payload) {
 }
 
 export async function uploadProfilePicture(file) {
-  const token = localStorage.getItem("jwt");
+  const token = getToken();
   const API_BASE = import.meta.env.PROD ? "https://api.till-failure.us" : "";
   const formData = new FormData();
   formData.append("file", file);
@@ -184,6 +185,7 @@ export async function uploadProfilePicture(file) {
   if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await fetch(`${API_BASE}/roles/shared/account/update_pfp`, {
     method: "POST",
+    credentials: "include",
     headers,
     body: formData,
   });

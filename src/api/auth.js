@@ -1,4 +1,4 @@
-import { apiFetch, apiPost } from "./api";
+import { apiFetch, apiGet, apiPost } from "./api";
 
 const SESSION_COOKIE_NAMES = ["jwt", "access_token", "token", "auth_token"];
 
@@ -87,6 +87,10 @@ export function storeToken(token) {
   if (token) {
     localStorage.setItem("jwt", token);
   }
+}
+
+export async function fetchAuthRoles() {
+  return apiGet("/auth/roles");
 }
 
 export function getToken() {

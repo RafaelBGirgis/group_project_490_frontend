@@ -19,6 +19,7 @@ import {
   saveClientCoachRequest,
 } from "../utils/coachRequests";
 import { getCoachAccessState } from "../utils/roleAccess";
+import { resolveRoleState } from "../utils/sessionAuth";
 
 function SolidStar({ className }) {
   return (
@@ -212,6 +213,7 @@ export default function CoachPublicProfilePage() {
   const [pendingRequests, setPendingRequests] = useState({});
   const [loading, setLoading] = useState(true);
   const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
+  const [hasClientRole, setHasClientRole] = useState(false);
   const [actionError, setActionError] = useState("");
   const [actionMessage, setActionMessage] = useState("");
   const [requesting, setRequesting] = useState(false);
@@ -224,16 +226,12 @@ export default function CoachPublicProfilePage() {
   const [submittingReport, setSubmittingReport] = useState(false);
 
   useEffect(() => {
-    const token = localStorage.getItem("jwt");
-    if (!token) {
-      navigate("/login");
-      return;
-    }
-
     const loadPage = async () => {
       try {
         const me = await fetchMe();
         setAccount(me);
+        const roleState = await resolveRoleState();
+        setHasClientRole(roleState.hasClientRole);
         const coachAccess = await getCoachAccessState(me);
         setCanSwitchToCoach(coachAccess.canAccessCoach);
 
@@ -295,7 +293,7 @@ export default function CoachPublicProfilePage() {
   const isApproved = requestStatus === "approved";
 
   const handleRequestCoach = async () => {
-    if (!account?.client_id) {
+    if (!hasClientRole) {
       setActionError("You need to finish client onboarding before requesting a coach.");
       return;
     }

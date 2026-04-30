@@ -1,4 +1,5 @@
 import { apiDelete, apiFetch, apiGet, apiPatch, apiPost, withQuery } from "./api";
+import { getToken } from "./auth";
 
 const WEEKDAY_NAMES = [
   "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
@@ -715,7 +716,7 @@ export async function updateClientInfo(payload) {
 /* ─── upload progress picture ──────────────────────────────────────── */
 
 export async function uploadProgressPicture(file) {
-  const token = localStorage.getItem("jwt");
+  const token = getToken();
   const API_BASE = import.meta.env.PROD ? "https://api.till-failure.us" : "";
   const formData = new FormData();
   formData.append("file", file);
@@ -723,6 +724,7 @@ export async function uploadProgressPicture(file) {
   if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await fetch(`${API_BASE}/roles/client/upload_progress_picture`, {
     method: "POST",
+    credentials: "include",
     headers,
     body: formData,
   });

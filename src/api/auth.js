@@ -1,5 +1,34 @@
 import { apiFetch, apiPost } from "./api";
 
+const SESSION_COOKIE_NAMES = ["jwt", "access_token", "token", "auth_token"];
+
+function readCookie(name) {
+  if (typeof document === "undefined" || !document.cookie) {
+    return null;
+  }
+
+  const prefix = `${name}=`;
+  const match = document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(prefix));
+
+  if (!match) {
+    return null;
+  }
+
+  const value = match.slice(prefix.length).trim();
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 export async function login(email, password) {
   return apiPost("/auth/login", {
     email: String(email || "").trim(),
@@ -61,11 +90,28 @@ export function storeToken(token) {
 }
 
 export function getToken() {
-  return localStorage.getItem("jwt");
+  const storedToken = localStorage.getItem("jwt");
+  if (storedToken) {
+    return storedToken;
+  }
+
+  for (const cookieName of SESSION_COOKIE_NAMES) {
+    const cookieToken = readCookie(cookieName);
+    if (cookieToken) {
+      localStorage.setItem("jwt", cookieToken);
+      return cookieToken;
+    }
+  }
+
+  return null;
 }
 
 export function isAuthenticated() {
-  return Boolean(localStorage.getItem("jwt"));
+  return Boolean(getToken());
+}
+
+export function syncTokenFromCookie() {
+  return getToken();
 }
 
 export function initiateGoogleOAuth() {

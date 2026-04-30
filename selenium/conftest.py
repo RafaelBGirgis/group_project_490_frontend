@@ -38,6 +38,10 @@ def make_edge_driver(headless: bool = False) -> webdriver.Edge:
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--disable-software-rasterizer")
+    options.add_argument("--log-level=3")
+    options.add_experimental_option("excludeSwitches", ["enable-logging"])
  
     # If msedgedriver is on PATH, Service() with no args works fine.
     # To pin a specific binary: EdgeService(executable_path="/path/to/msedgedriver")

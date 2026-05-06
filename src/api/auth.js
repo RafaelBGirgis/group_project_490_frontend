@@ -67,8 +67,16 @@ export async function refreshToken(email, password) {
 export function clearAuth() {
   localStorage.removeItem("jwt");
   localStorage.removeItem("active_client_id");
+  // Delete cookies with and without domain to cover both local and production
+  const cookieConfigs = [
+    "path=/",
+    "path=/; domain=.till-failure.us",
+    "path=/; domain=till-failure.us",
+  ];
   SESSION_COOKIE_NAMES.forEach((name) => {
-    document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+    cookieConfigs.forEach((config) => {
+      document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; ${config}`;
+    });
   });
 }
 

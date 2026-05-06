@@ -47,9 +47,14 @@ export async function fetchAdminStats() {
   }
 }
 
-export async function fetchAllUsers() {
+export async function fetchAllUsers({ sortBy = "name", sortDir = "asc", skip = 0, limit = 1000 } = {}) {
   try {
-    const accounts = await apiGet(withQuery("/roles/admin/accounts", { sort_by: "name", sort_dir: "asc", limit: 1000 }));
+    const accounts = await apiGet(withQuery("/roles/admin/accounts", {
+      sort_by: sortBy,
+      sort_dir: sortDir,
+      skip,
+      limit,
+    }));
     return Array.isArray(accounts) ? accounts.map(normalizeAdminAccount) : [];
   } catch {
     return [

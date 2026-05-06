@@ -34,6 +34,7 @@ import {
 import { cacheConversationForAccount, createConversation } from "../api/chat";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { updateClientCoachRequestByRequestId } from "../utils/coachRequests";
+import { resolveRoleState } from "../utils/sessionAuth";
 import ClientsDetail from "../components/overlays/clients_detail";
 import SessionsDetail from "../components/overlays/sessions_detail";
 import ReviewsDetail from "../components/overlays/reviews_detail";
@@ -54,7 +55,7 @@ const SlotCell = ({ status, time }) => {
 export default function CoachDashboard() {
   const navigate = useNavigate();
 
-  /* ── auth guard ──────────────────────────────────────────────────── */
+  /*  auth guard  */
   const [authed, setAuthed] = useState(false);
   useEffect(() => {
     const token = localStorage.getItem("jwt");
@@ -62,11 +63,11 @@ export default function CoachDashboard() {
     setAuthed(true);
   }, [navigate]);
 
-  /* ── overlay ─────────────────────────────────────────────────────── */
+  /*  overlay  */
   const [overlay, setOverlay] = useState(null);
   const closeOverlay = () => setOverlay(null);
 
-  /* ── state ───────────────────────────────────────────────────────── */
+  /*  state  */
   const [account, setAccount] = useState(null);
   const [coachProfile, setCoachProfile] = useState(null);
   const [coachId, setCoachId] = useState(null);
@@ -83,15 +84,18 @@ export default function CoachDashboard() {
   const [clientReportDrafts, setClientReportDrafts] = useState({});
   const [clientReports, setClientReports] = useState({});
   const [availabilityError, setAvailabilityError] = useState("");
+  const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(false);
 
-  /* ── load account ────────────────────────────────────────────────── */
+  /*  load account  */
   useEffect(() => {
     if (!authed) return;
     (async () => {
       try {
         const me = await fetchMe();
-        const coachAccess = await getCoachAccessState(me);
-        if (!coachAccess.canAccessCoach) {
+        const roleState = await resolveRoleState();
+        setCanSwitchToAdmin(roleState.hasAdminRole);
+        const coachAccess = await getCoachAccessState(me, roleState);
+        if (!coachAccess.canAccessCoach && !roleState.hasAdminRole) {
           navigate("/profile");
           return;
         }
@@ -102,7 +106,7 @@ export default function CoachDashboard() {
     })();
   }, [authed, navigate]);
 
-  /* ── load dashboard data ─────────────────────────────────────────── */
+  /*  load dashboard data  */
   useEffect(() => {
     if (!coachId) return;
     (async () => {
@@ -252,7 +256,7 @@ export default function CoachDashboard() {
     }
   };
 
-  /* ── derived ─────────────────────────────────────────────────────── */
+  /*  derived  */
   const initials = account?.name
     ? account.name.split(" ").map((n) => n[0]).join("").toUpperCase()
     : "?";
@@ -266,7 +270,7 @@ export default function CoachDashboard() {
     return s.weekday === dayNames[new Date().getDay()];
   });
 
-  /* ── loading skeleton ────────────────────────────────────────────── */
+  /*  loading skeleton  */
   if (loading) {
     return (
       <div className="min-h-screen" style={{ backgroundColor: "#080D19" }}>
@@ -292,11 +296,18 @@ export default function CoachDashboard() {
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: "#080D19" }}>
-      <Navbar role={role} userName={initials} />
+      <Navbar
+        role={role}
+        userName={initials}
+        switchOptions={[
+          { label: "Client", to: "/client" },
+          ...(canSwitchToAdmin ? [{ label: "Admin", to: "/admin" }] : []),
+        ]}
+      />
 
       <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
 
-        {/* ─── OVERVIEW ───────────────────────────────────────────── */}
+        {/*  OVERVIEW  */}
         <SectionHeader label="OVERVIEW" role={role} />
 
         <div className="grid grid-cols-4 gap-4">
@@ -331,7 +342,7 @@ export default function CoachDashboard() {
           />
         </div>
 
-        {/* ─── CLIENTS & SESSIONS ─────────────────────────────────── */}
+        {/*  CLIENTS & SESSIONS  */}
         <SectionHeader label="CLIENTS & SESSIONS" role={role} />
 
         <div className="grid grid-cols-1 xl:grid-cols-4 gap-4 items-stretch">
@@ -450,7 +461,7 @@ export default function CoachDashboard() {
           </DashboardCard>
         </div>
 
-        {/* ─── PLANS & REVIEWS ────────────────────────────────────── */}
+        {/*  PLANS & REVIEWS  */}
         <SectionHeader label="PLANS & REVIEWS" role={role} />
 
         <div className="grid grid-cols-2 gap-4">

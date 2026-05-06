@@ -22,12 +22,6 @@ export default function CoachChatPage() {
   const [chatError, setChatError] = useState("");
 
   useEffect(() => {
-    const token = localStorage.getItem("jwt");
-    if (!token) {
-      navigate("/login");
-      return;
-    }
-
     fetchMe()
       .then(async (me) => {
         const coachAccess = await getCoachAccessState(me);

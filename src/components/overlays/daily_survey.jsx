@@ -21,7 +21,7 @@ const SECTION_KEYS = ["mood", "body_metrics"];
  *   onCompleted — called after any successful submission so the dashboard can
  *                 refresh its summary count.
  */
-export default function DailySurvey({ onCompleted, picturesStorageKey }) {
+export default function DailySurvey({ onCompleted }) {
   const [statuses, setStatuses] = useState({ mood: null, body_metrics: null });
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState(null);
@@ -98,7 +98,7 @@ export default function DailySurvey({ onCompleted, picturesStorageKey }) {
       )}
 
       <div className="rounded-xl border border-white/10 bg-[#0A1020] px-4 py-4">
-        <ProgressPictures storageKey={picturesStorageKey} />
+        <ProgressPictures />
       </div>
     </div>
   );

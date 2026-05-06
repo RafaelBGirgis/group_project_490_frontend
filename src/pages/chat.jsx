@@ -31,15 +31,12 @@ export default function ChatPage() {
   const [searchParams] = useSearchParams();
   const preselectedClient = searchParams.get("client");
 
-  /* ── auth + account ──────────────────────────────────────────────── */
+  /*  auth + account  */
   const [account, setAccount] = useState(null);
   const [loading, setLoading] = useState(true);
   const [resolvedRole, setResolvedRole] = useState("client");
 
   useEffect(() => {
-    const token = localStorage.getItem("jwt");
-    if (!token) { navigate("/login"); return; }
-
     fetchMe()
       .then(async (me) => {
         setAccount(me);
@@ -50,7 +47,7 @@ export default function ChatPage() {
       .finally(() => setLoading(false));
   }, [navigate]);
 
-  /* ── determine role from account ─────────────────────────────────── */
+  /*  determine role from account  */
   const role = resolvedRole;
   const theme = ROLE_THEMES[role] || ROLE_THEMES.client;
   const roleTheme = CHAT_THEME[role];
@@ -61,7 +58,7 @@ export default function ChatPage() {
     navigate(`${targetRoute}${location.search}`, { replace: true });
   }, [loading, account, role, location.search, navigate]);
 
-  /* ── conversations ───────────────────────────────────────────────── */
+  /*  conversations  */
   const [conversations, setConversations] = useState([]);
   const [activeChat, setActiveChat] = useState(null);
   const [loadingConvos, setLoadingConvos] = useState(true);
@@ -88,7 +85,7 @@ export default function ChatPage() {
       .finally(() => setLoadingConvos(false));
   }, [account, preselectedClient, roleTheme.partnerRole]);
 
-  /* ── messages ────────────────────────────────────────────────────── */
+  /*  messages  */
   const [messages, setMessages] = useState([]);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
   const messagesEndRef = useRef(null);
@@ -107,7 +104,7 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  /* ── send ────────────────────────────────────────────────────────── */
+  /*  send  */
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
 
@@ -145,7 +142,7 @@ export default function ChatPage() {
     }
   };
 
-  /* ── initials helper ─────────────────────────────────────────────── */
+  /*  initials helper  */
   const getInitials = (name) =>
     name ? name.split(" ").map((n) => n[0]).join("").toUpperCase() : "?";
 
@@ -156,7 +153,7 @@ export default function ChatPage() {
     return ROLE_THEMES[senderRole] || ROLE_THEMES.client;
   };
 
-  /* ── format time ─────────────────────────────────────────────────── */
+  /*  format time  */
   const formatTime = (iso) => {
     try {
       const d = new Date(iso);
@@ -166,21 +163,7 @@ export default function ChatPage() {
     }
   };
 
-  const getMessageRole = (msg) => {
-    if (!activeChat) return role;
-
-    if (msg.from_account_id === account?.id || msg.from_account_id === 0) {
-      return role;
-    }
-
-    if (activeChat.partner_role === "coach" || activeChat.partner_role === "client") {
-      return activeChat.partner_role;
-    }
-
-    return role === "coach" ? "client" : "coach";
-  };
-
-  /* ── loading state ───────────────────────────────────────────────── */
+  /*  loading state  */
   if (loading) {
     return (
       <div className="min-h-screen" style={{ backgroundColor: "#080D19" }}>
@@ -211,7 +194,7 @@ export default function ChatPage() {
       <div className="max-w-7xl mx-auto px-6 py-6">
         <div className="flex gap-4 h-[calc(100vh-120px)]">
 
-          {/* ─── Conversation List (Left Sidebar) ─────────────────── */}
+          {/*  Conversation List (Left Sidebar)  */}
           <div className="w-80 shrink-0 flex flex-col rounded-2xl border border-white/6 bg-[#0F1729]">
             {/* Header */}
             <div className="px-4 py-4 border-b border-white/5">
@@ -276,7 +259,7 @@ export default function ChatPage() {
             </div>
           </div>
 
-          {/* ─── Chat Area (Right) ────────────────────────────────── */}
+          {/*  Chat Area (Right)  */}
           <div className="flex-1 flex flex-col rounded-2xl border border-white/6 bg-[#0F1729]">
             {!activeChat ? (
               <div className="flex-1 flex items-center justify-center">
@@ -319,11 +302,6 @@ export default function ChatPage() {
                   ) : (
                     messages.map((msg) => {
                       const isMe = msg.from_account_id === account.id || msg.from_account_id === 0;
-                      const senderRole = getMessageRole(msg);
-                      const bubbleTone =
-                        senderRole === "coach"
-                          ? "bg-[rgba(234,88,12,0.35)] text-white"
-                          : "bg-[rgba(37,99,235,0.35)] text-white";
 
                       return (
                         <div

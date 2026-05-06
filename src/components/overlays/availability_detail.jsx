@@ -93,7 +93,7 @@ export default function AvailabilityDetail({
   const [hasChanges, setHasChanges] = useState(false);
   const [showAddRow, setShowAddRow] = useState(false);
 
-  /* ── toggle a cell ──────────────────────────────────────────────── */
+  /*  toggle a cell  */
   const toggleCell = useCallback((timeIdx, dayIdx) => {
     setSlots((prev) => {
       const next = prev.map((row, ti) => {
@@ -112,7 +112,7 @@ export default function AvailabilityDetail({
     setSaved(false);
   }, []);
 
-  /* ── add a time row ─────────────────────────────────────────────── */
+  /*  add a time row  */
   const existingTimes = new Set(slots.map((r) => r.time));
   const availableTimes = DEFAULT_TIME_OPTIONS.filter((t) => !existingTimes.has(t));
 
@@ -131,7 +131,7 @@ export default function AvailabilityDetail({
     setSaved(false);
   };
 
-  /* ── remove a time row (only custom/empty rows) ─────────────────── */
+  /*  remove a time row (only custom/empty rows)  */
   const removeTimeRow = (timeIdx) => {
     const row = slots[timeIdx];
     // Don't allow removing rows that have booked slots
@@ -141,7 +141,7 @@ export default function AvailabilityDetail({
     setSaved(false);
   };
 
-  /* ── clear all availability ─────────────────────────────────────── */
+  /*  clear all availability  */
   const clearAll = () => {
     setSlots((prev) =>
       prev.map((row) => ({
@@ -153,7 +153,7 @@ export default function AvailabilityDetail({
     setSaved(false);
   };
 
-  /* ── set full day available ─────────────────────────────────────── */
+  /*  set full day available  */
   const setDayAvailable = (dayIdx) => {
     setSlots((prev) =>
       prev.map((row) => {
@@ -168,7 +168,7 @@ export default function AvailabilityDetail({
     setSaved(false);
   };
 
-  /* ── clear a full day ───────────────────────────────────────────── */
+  /*  clear a full day  */
   const clearDay = (dayIdx) => {
     setSlots((prev) =>
       prev.map((row) => {
@@ -183,7 +183,7 @@ export default function AvailabilityDetail({
     setSaved(false);
   };
 
-  /* ── save ────────────────────────────────────────────────────────── */
+  /*  save  */
   const handleSave = async () => {
     if (!onSave) return;
     setSaving(true);
@@ -195,7 +195,7 @@ export default function AvailabilityDetail({
     finally { setSaving(false); }
   };
 
-  /* ── summary counts ─────────────────────────────────────────────── */
+  /*  summary counts  */
   const totalAvailable = slots.reduce(
     (sum, row) => sum + row.slots.filter((s) => s === "available").length, 0
   );
@@ -208,7 +208,7 @@ export default function AvailabilityDetail({
 
   return (
     <>
-      {/* ── Summary Stats ────────────────────────────────────────── */}
+      {/*  Summary Stats  */}
       <div className="grid grid-cols-3 gap-3">
         <div className="bg-[#0A1020] rounded-xl p-3 text-center">
           <p style={{ color: accentColor }} className="font-bold text-xl">{totalAvailable}</p>
@@ -224,7 +224,7 @@ export default function AvailabilityDetail({
         </div>
       </div>
 
-      {/* ── Instructions ─────────────────────────────────────────── */}
+      {/*  Instructions  */}
       <div className="rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3">
         <p className="text-gray-400 text-xs leading-relaxed">
           Click any cell to toggle between <span style={{ color: accentColor }} className="font-medium">available</span> and unavailable.
@@ -232,7 +232,7 @@ export default function AvailabilityDetail({
         </p>
       </div>
 
-      {/* ── Schedule Grid ────────────────────────────────────────── */}
+      {/*  Schedule Grid  */}
       <div className="rounded-xl border border-white/5 bg-[rgba(255,255,255,0.02)] p-4">
         {/* Header row with clickable day names */}
         <div className="grid grid-cols-[60px_repeat(7,1fr)] gap-2 mb-3">
@@ -261,7 +261,6 @@ export default function AvailabilityDetail({
         ) : (
           slots.map(({ time, slots: daySlots }, timeIdx) => {
             const hasBooked = daySlots.some((s) => s === "booked");
-            const allEmpty = daySlots.every((s) => !s || s === null);
             return (
               <div key={time} className="grid grid-cols-[60px_repeat(7,1fr)_24px] gap-2 mb-2 group">
                 <div className="text-xs text-gray-400 flex items-center font-medium">
@@ -297,7 +296,7 @@ export default function AvailabilityDetail({
         )}
       </div>
 
-      {/* ── Add Row ──────────────────────────────────────────────── */}
+      {/*  Add Row  */}
       {!showAddRow ? (
         <button
           onClick={() => setShowAddRow(true)}
@@ -329,7 +328,7 @@ export default function AvailabilityDetail({
         </div>
       )}
 
-      {/* ── Legend ────────────────────────────────────────────────── */}
+      {/*  Legend  */}
       <div className="flex gap-6 justify-center">
         {[
           { color: isCoach ? "bg-orange-400" : "bg-blue-400", label: "Available" },
@@ -343,7 +342,7 @@ export default function AvailabilityDetail({
         ))}
       </div>
 
-      {/* ── Action Buttons ───────────────────────────────────────── */}
+      {/*  Action Buttons  */}
       <div className="flex items-center gap-3 pt-2 border-t border-white/5">
         <button
           onClick={clearAll}

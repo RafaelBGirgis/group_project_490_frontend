@@ -9,7 +9,9 @@ import {
   updateAccount,
   updateClientInformation,
 } from "../api/client";
-import { getOnboardingStorageKey, loadProfileDraft, saveOnboardingDraft } from "../utils/profileDrafts";
+import { loadProfileDraft, saveOnboardingDraft } from "../utils/profileDrafts";
+import { getCoachAccessState } from "../utils/roleAccess";
+import { resolveRoleState } from "../utils/sessionAuth";
 
 const PRIMARY_GOALS = [
   "Weight Loss",
@@ -127,10 +129,6 @@ function OnboardingPage() {
     cardExpiry: "",
   });
 
-  const onboardingKey = useMemo(() => {
-    return getOnboardingStorageKey(form.email);
-  }, [form.email]);
-
   const isFormValid = useMemo(() => {
     return Boolean(
       form.primaryGoal &&
@@ -149,6 +147,22 @@ function OnboardingPage() {
     const load = async () => {
       try {
         const account = await fetchMe();
+        const roleState = await resolveRoleState();
+        const coachAccess = await getCoachAccessState(account, roleState);
+
+        if (roleState.hasAdminRole) {
+          navigate("/admin");
+          return;
+        }
+        if (coachAccess.canAccessCoach) {
+          navigate("/coach");
+          return;
+        }
+        if (roleState.hasClientRole) {
+          navigate("/client");
+          return;
+        }
+
         const email = (account.email || localStorage.getItem("active_user_email") || "")
           .trim()
           .toLowerCase();
@@ -247,10 +261,7 @@ function OnboardingPage() {
       }
 
       saveOnboardingDraft(localPayload);
-      if (form.email) {
-        localStorage.setItem(`onboarding_complete:${form.email}`, "true");
-        localStorage.setItem("active_user_email", form.email);
-      }
+      if (form.email) localStorage.setItem("active_user_email", form.email);
       if (response?.client_id) {
         localStorage.setItem("active_client_id", String(response.client_id));
       }

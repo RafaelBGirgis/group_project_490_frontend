@@ -379,7 +379,7 @@ export async function duplicatePreset(role, roleId, presetId) {
   };
 }
 
-/* ─── plans ──────────────────────────────────────────────────────────── */
+/*  plans  */
 
 /** Fetch the client's saved workout plans from the backend */
 export async function fetchClientPlans({ skip = 0, limit = 100 } = {}) {
@@ -456,7 +456,7 @@ export async function publishWeeklyPlan(role, roleId, plan, fallbackName = "Week
   return { success: true, published: created };
 }
 
-/* ─── coach-only: assignment ─────────────────────────────────────────── */
+/*  coach-only: assignment  */
 
 /** Fetch clients the coach can assign workouts to */
 export async function fetchAssignableClients(coachId) {

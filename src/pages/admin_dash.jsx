@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Navbar,
@@ -11,7 +11,7 @@ import {
   SkeletonStatCard,
   SkeletonDashCard,
 } from "../components";
-import { fetchMe } from "../api/client";
+import { getToken } from "../api/auth";
 import {
   fetchAdminStats,
   fetchAllUsers,
@@ -23,11 +23,11 @@ import {
   deleteExercise,
   fetchAnalytics,
   fetchCoachRequests,
+  fetchTotalTransactions,
   resolveCoachRequest,
 } from "../api/admin";
 import RoleRequestsDetail from "../components/overlays/role_requests_detail";
 import ReportsDetail from "../components/overlays/reports_detail";
-import { saveCoachRequestResolution } from "../utils/coachRequests";
 
 const role = "admin";
 const MUSCLE_GROUPS = ["Chest", "Back", "Shoulders", "Legs", "Arms", "Core", "Cardio"];
@@ -236,15 +236,13 @@ function DonutChart({ segments, size = 120, strokeWidth = 14 }) {
 export default function AdminDash() {
   const navigate = useNavigate();
 
-  /* ── auth guard ──────────────────────────────────────────────────── */
+  /*  auth guard  */
   const [authed, setAuthed] = useState(false);
   useEffect(() => {
-    const token = localStorage.getItem("jwt");
-    if (!token) { navigate("/login"); return; }
     setAuthed(true);
   }, [navigate]);
 
-  /* ── state ───────────────────────────────────────────────────────── */
+  /*  state  */
   const [initials, setInitials] = useState("?");
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
@@ -253,44 +251,48 @@ export default function AdminDash() {
   const [analytics, setAnalytics] = useState(null);
   const [roleRequests, setRoleRequests] = useState([]);
   const [reports, setReports] = useState([]);
+  const [totalTransactions, setTotalTransactions] = useState(0);
 
-  /* ── overlay state ───────────────────────────────────────────────── */
+  /*  overlay state  */
   const [overlay, setOverlay] = useState(null);
   const closeOverlay = () => setOverlay(null);
 
-  /* ── user management state ───────────────────────────────────────── */
+  /*  user management state  */
   const [userSearch, setUserSearch] = useState("");
   const [userRoleFilter, setUserRoleFilter] = useState("all");
   const [userStatusFilter, setUserStatusFilter] = useState("all");
   const [userPage, setUserPage] = useState(1);
 
-  /* ── exercise bank state ─────────────────────────────────────────── */
+  /*  exercise bank state  */
   const [exSearch, setExSearch] = useState("");
   const [exGroupFilter, setExGroupFilter] = useState("All");
   const [exPage, setExPage] = useState(1);
   const [editingExercise, setEditingExercise] = useState(null);
   const [newExercise, setNewExercise] = useState(null);
 
-  /* ── analytics state ─────────────────────────────────────────────── */
+  /*  analytics state  */
   const [analyticsPeriod, setAnalyticsPeriod] = useState("daily");
 
-  /* ── data loading ────────────────────────────────────────────────── */
+  /*  data loading  */
   useEffect(() => {
     if (!authed) return;
     (async () => {
       // Fetch account info — use a direct fetch to avoid the global 401
       // redirect in apiFetch (admin may not have a backend-valid JWT yet)
       try {
-        const token = localStorage.getItem("jwt");
+        const token = getToken();
         const API_BASE = import.meta.env.PROD ? "https://api.till-failure.us" : "";
         const res = await fetch(`${API_BASE}/me`, {
+          credentials: "include",
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
         if (res.ok) {
           const me = await res.json();
           if (me?.name) setInitials(me.name.split(" ").map((n) => n[0]).join("").toUpperCase());
         }
-      } catch {}
+      } catch {
+        // Initials are decorative; keep loading the dashboard if this request fails.
+      }
 
       const [s, u, ex, an, requests] = await Promise.all([
         fetchAdminStats(),
@@ -299,11 +301,13 @@ export default function AdminDash() {
         fetchAnalytics(),
         fetchCoachRequests(),
       ]);
+      const transactions = await fetchTotalTransactions().catch(() => ({ total_transactions: 0 }));
       setStats(s);
       setUsers(u);
       setExercises(ex);
       setAnalytics(an);
       setRoleRequests(requests);
+      setTotalTransactions(transactions.total_transactions || 0);
       setReports([
         { id: 1, reporter_name: "Aisha Patel",  reported_name: "Coach X", reason: "Inappropriate content", created_at: "1 hr ago" },
         { id: 2, reporter_name: "Chris Nguyen", reported_name: "Coach Y", reason: "No show",               created_at: "3 hrs ago" },
@@ -313,16 +317,14 @@ export default function AdminDash() {
     })();
   }, [authed]);
 
-  /* ── handlers ────────────────────────────────────────────────────── */
+  /*  handlers  */
   const handleApprove = async (id) => {
     await resolveCoachRequest(id, true);
-    saveCoachRequestResolution(id, "approved");
     setRoleRequests((p) => p.map((r) => r.id === id ? { ...r, is_approved: true } : r));
   };
 
   const handleReject = async (id) => {
     await resolveCoachRequest(id, false);
-    saveCoachRequestResolution(id, "rejected");
     setRoleRequests((p) => p.map((r) => r.id === id ? { ...r, is_approved: false } : r));
   };
   const handleDismissReport = (id) => setReports((p) => p.filter((r) => r.id !== id));
@@ -355,7 +357,7 @@ export default function AdminDash() {
     setExercises((prev) => prev.filter((e) => e.id !== exerciseId));
   };
 
-  /* ── computed ────────────────────────────────────────────────────── */
+  /*  computed  */
   const pendingRequests = roleRequests.filter((r) => r.is_approved === null);
 
   const filteredUsers = useMemo(() => {
@@ -388,7 +390,7 @@ export default function AdminDash() {
   const activeAnalytics = analytics?.[analyticsPeriod] ?? [];
   const summary = analytics?.summary ?? {};
 
-  /* ── loading skeleton ────────────────────────────────────────────── */
+  /*  loading skeleton  */
   if (loading) {
     return (
       <div className="min-h-screen bg-[#080D19]">
@@ -414,7 +416,14 @@ export default function AdminDash() {
 
   return (
     <div className="min-h-screen bg-[#080D19]">
-      <Navbar role={role} userName={initials} />
+      <Navbar
+        role={role}
+        userName={initials}
+        switchOptions={[
+          { label: "Client", to: "/client" },
+          { label: "Coach", to: "/coach" },
+        ]}
+      />
 
       <div className="max-w-7xl mx-auto px-6 py-6 space-y-8">
 

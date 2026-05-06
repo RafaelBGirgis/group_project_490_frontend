@@ -1,4 +1,4 @@
-import { apiFetch, apiPost } from "./api";
+import { apiFetch, apiGet, apiPost } from "./api";
 
 const SESSION_COOKIE_NAMES = ["jwt", "access_token", "token", "auth_token"];
 
@@ -78,7 +78,6 @@ export async function getCurrentAccount() {
 
 export function logout() {
   localStorage.removeItem("jwt");
-  localStorage.removeItem("active_user_email");
   localStorage.removeItem("active_client_id");
   window.location.href = "/login";
 }
@@ -87,6 +86,10 @@ export function storeToken(token) {
   if (token) {
     localStorage.setItem("jwt", token);
   }
+}
+
+export async function fetchAuthRoles() {
+  return apiGet("/auth/roles");
 }
 
 export function getToken() {

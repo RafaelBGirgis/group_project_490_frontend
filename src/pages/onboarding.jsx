@@ -9,7 +9,8 @@ import {
   updateAccount,
   updateClientInformation,
 } from "../api/client";
-import { getOnboardingStorageKey, loadProfileDraft, saveOnboardingDraft } from "../utils/profileDrafts";
+import { getCoachAccessState } from "../utils/roleAccess";
+import { resolveRoleState } from "../utils/sessionAuth";
 
 const PRIMARY_GOALS = [
   "Weight Loss",
@@ -127,10 +128,6 @@ function OnboardingPage() {
     cardExpiry: "",
   });
 
-  const onboardingKey = useMemo(() => {
-    return getOnboardingStorageKey(form.email);
-  }, [form.email]);
-
   const isFormValid = useMemo(() => {
     return Boolean(
       form.primaryGoal &&
@@ -149,29 +146,35 @@ function OnboardingPage() {
     const load = async () => {
       try {
         const account = await fetchMe();
-        const email = (account.email || localStorage.getItem("active_user_email") || "")
-          .trim()
-          .toLowerCase();
+        const roleState = await resolveRoleState();
+        const coachAccess = await getCoachAccessState(account, roleState);
 
-        localStorage.setItem("active_user_email", email);
-        const savedData = loadProfileDraft(email);
+        if (roleState.hasAdminRole) {
+          navigate("/admin");
+          return;
+        }
+        if (coachAccess.canAccessCoach) {
+          navigate("/coach");
+          return;
+        }
+        if (roleState.hasClientRole) {
+          navigate("/client");
+          return;
+        }
+
+        const email = String(account.email || "").trim().toLowerCase();
 
         setForm((prev) => ({
           ...prev,
-          ...savedData,
           trainingAvailability: normalizeTrainingAvailability(
-            savedData?.trainingAvailability,
-            savedData?.availableDays
+            prev.trainingAvailability,
+            []
           ),
-          name: account.name || savedData?.name || prev.name,
+          name: account.name || prev.name,
           email,
-          age: account.age != null ? String(account.age) : savedData?.age || prev.age,
-          gender: account.gender || savedData?.gender || prev.gender,
-          bio: account.bio || savedData?.bio || prev.bio,
-          cardNumber: savedData?.cardNumber || prev.cardNumber,
-          cardCvv: savedData?.cardCvv || prev.cardCvv,
-          cardExpiry: savedData?.cardExpiry || prev.cardExpiry,
-          profilePicture: savedData?.profilePicture || prev.profilePicture,
+          age: account.age != null ? String(account.age) : prev.age,
+          gender: account.gender || prev.gender,
+          bio: account.bio || prev.bio,
         }));
       } catch (err) {
         if (err?.status === 401) {
@@ -187,14 +190,6 @@ function OnboardingPage() {
     load();
   }, [navigate]);
 
-  useEffect(() => {
-    if (loading || !form.email) {
-      return;
-    }
-
-    saveOnboardingDraft(form);
-  }, [form, loading]);
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!isFormValid) {
@@ -203,12 +198,6 @@ function OnboardingPage() {
     }
 
     setError("");
-    const localPayload = {
-      ...form,
-      age: Number(form.age),
-      completedAt: new Date().toISOString(),
-    };
-
     try {
       setSubmitting(true);
       const accountPayload = buildAccountUpdatePayload({
@@ -244,15 +233,6 @@ function OnboardingPage() {
         }
 
         response = await updateClientInformation(clientInformationPayload);
-      }
-
-      saveOnboardingDraft(localPayload);
-      if (form.email) {
-        localStorage.setItem(`onboarding_complete:${form.email}`, "true");
-        localStorage.setItem("active_user_email", form.email);
-      }
-      if (response?.client_id) {
-        localStorage.setItem("active_client_id", String(response.client_id));
       }
 
       navigate("/client");

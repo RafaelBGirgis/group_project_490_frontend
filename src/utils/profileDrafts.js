@@ -46,14 +46,10 @@ export function saveSignupPrefill(prefill) {
     ...existingOnboarding,
     email: normalizedEmail || existingOnboarding.email || "",
   });
-
-  if (normalizedEmail) {
-    localStorage.setItem("active_user_email", normalizedEmail);
-  }
 }
 
 export function loadProfileDraft(email) {
-  const normalizedEmail = normalizeEmail(email || localStorage.getItem("active_user_email"));
+  const normalizedEmail = normalizeEmail(email);
   const signupPrefill = readJson(getSignupPrefillKey(normalizedEmail)) || {};
   const onboardingDraft = readJson(getOnboardingStorageKey(normalizedEmail)) || {};
 
@@ -65,7 +61,7 @@ export function loadProfileDraft(email) {
 }
 
 export function saveOnboardingDraft(form) {
-  const normalizedEmail = normalizeEmail(form?.email || localStorage.getItem("active_user_email"));
+  const normalizedEmail = normalizeEmail(form?.email);
   const payload = {
     ...form,
     email: normalizedEmail,
@@ -73,10 +69,6 @@ export function saveOnboardingDraft(form) {
 
   writeJson(getOnboardingStorageKey(normalizedEmail), payload);
   writeJson("onboarding:current", payload);
-
-  if (normalizedEmail) {
-    localStorage.setItem("active_user_email", normalizedEmail);
-  }
 
   return payload;
 }

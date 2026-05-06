@@ -1,7 +1,10 @@
 import { fetchCoachProfile } from "../api/coach";
+import { resolveRoleState } from "./sessionAuth";
 
-export async function getCoachAccessState(account) {
-  if (!account?.coach_id) {
+export async function getCoachAccessState(_account, roleState = null) {
+  const resolvedRoleState = roleState || await resolveRoleState();
+
+  if (!resolvedRoleState.hasCoachRole) {
     return {
       hasCoachRecord: false,
       canAccessCoach: false,

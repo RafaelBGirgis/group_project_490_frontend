@@ -31,6 +31,48 @@ export async function fetchClientProfile() {
   return apiPost("/roles/client/me", {});
 }
 
+export async function fetchUnifiedProfile() {
+  return apiGet("/roles/shared/account/me");
+}
+
+export async function fetchMyCoachRequests() {
+  const result = await apiGet("/roles/client/my_coach_requests");
+  const items = Array.isArray(result)
+    ? result
+    : Array.isArray(result?.requests)
+      ? result.requests
+      : Array.isArray(result?.coach_requests)
+        ? result.coach_requests
+        : [];
+  return items.map(normalizeClientCoachRequest).filter(Boolean);
+}
+
+export async function fetchMyCoach() {
+  try {
+    const result = await apiGet("/roles/client/my_coach");
+    return normalizeMyCoach(result);
+  } catch (error) {
+    if (error?.status === 404) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function fetchInvoices() {
+  const result = await apiGet("/roles/client/invoices");
+  return result?.invoices ?? [];
+}
+
+export async function fetchBillingCycles() {
+  const result = await apiGet("/roles/client/current_billing_cycles");
+  return result?.cycles ?? [];
+}
+
+export async function payInvoice(invoiceId, amount) {
+  return apiPost(`/roles/client/pay_invoice/${invoiceId}`, { amount });
+}
+
 export async function createClientInitialSurvey(payload) {
   return apiPost("/roles/client/initial_survey", payload);
 }
@@ -66,11 +108,15 @@ export async function uploadProfilePicture(file) {
 // }
 
 export async function deactivateAccount() {
-  return { success: true, message: "Account deactivation endpoint is not available in the backend yet." };
+  return apiPost("/roles/shared/account/deactivate", {});
+}
+
+export async function activateAccount() {
+  return apiPost("/roles/shared/account/activate", {});
 }
 
 export async function deleteAccount() {
-  return { success: true, message: "Account deletion endpoint is not available in the backend yet." };
+  return apiDelete("/roles/shared/account/delete");
 }
 
 export async function fetchTelemetryToday(_clientId) {
@@ -107,7 +153,7 @@ export async function logWorkoutActivity(_clientId, _activityId) {
 }
 
 export async function fetchCoachInfo(_clientId) {
-  return null;
+  return fetchMyCoach();
 }
 
 export async function fetchCoachRating(coachId) {
@@ -132,38 +178,33 @@ export async function fetchNextSession(_clientId) {
 }
 
 export async function fetchAvailability(clientId) {
-  const cacheKey = `client_availability_${clientId ?? "me"}`;
-  const cached = localStorage.getItem(cacheKey);
-  if (cached) {
-    try {
-      return JSON.parse(cached);
-    } catch {
-      localStorage.removeItem(cacheKey);
-    }
+  void clientId;
+  try {
+    const profile = await fetchClientProfile().catch(() => null);
+    const unified = profile ? null : await fetchUnifiedProfile().catch(() => null);
+    const clientDetails =
+      profile?.client_account ||
+      profile?.client_details ||
+      unified?.client_details ||
+      unified?.client ||
+      profile ||
+      unified;
+    const availabilities =
+      clientDetails?.availabilities ||
+      clientDetails?.availability ||
+      clientDetails?.client_availabilities ||
+      [];
+    return convertBackendAvailabilitiesToGrid(availabilities);
+  } catch {
+    return [];
   }
-
-  const onboardingAvailability = getOnboardingAvailabilityFromStorage();
-  if (onboardingAvailability.length > 0) {
-    localStorage.setItem(cacheKey, JSON.stringify(onboardingAvailability));
-    return onboardingAvailability;
-  }
-
-  return buildMockAvailability();
 }
 
 export async function saveAvailability(clientId, slots) {
-  const cacheKey = `client_availability_${clientId ?? "me"}`;
-  localStorage.setItem(cacheKey, JSON.stringify(slots));
-
-  try {
-    const availabilities = convertGridToBackendAvailabilities(slots);
-    if (availabilities.length === 0) {
-      return { success: true };
-    }
-    return await updateClientInformation({ availabilities });
-  } catch {
-    return { success: true };
-  }
+  void clientId;
+  const availabilities = convertGridToBackendAvailabilities(slots);
+  await updateClientInformation({ availabilities });
+  return fetchAvailability(clientId);
 }
 
 /**
@@ -395,6 +436,83 @@ function normalizeCoachItem(coach) {
   };
 }
 
+function normalizeClientCoachRequest(item) {
+  if (!item || typeof item !== "object") return null;
+
+  const coachId =
+    item.coach_id ??
+    item.coachId ??
+    item.coach?.id ??
+    item.target_coach_id;
+  const requestId = item.request_id ?? item.requestId ?? item.id;
+
+  if (!coachId || !requestId) return null;
+
+  return {
+    ...item,
+    coach_id: Number(coachId),
+    request_id: Number(requestId),
+    coach_name: item.coach_name || item.coachName || item.coach?.name || "",
+    coach_email: item.coach_email || item.coachEmail || item.coach?.email || "",
+    status: String(item.status || "pending").toLowerCase(),
+    relationship_id:
+      item.relationship_id != null
+        ? Number(item.relationship_id)
+        : item.relationshipId != null
+          ? Number(item.relationshipId)
+          : null,
+    updated_at: item.updated_at || item.last_updated || item.created_at || null,
+  };
+}
+
+function normalizeMyCoach(payload) {
+  if (!payload || typeof payload !== "object") return null;
+
+  const coachId =
+    payload.coach_id ??
+    payload.coachId ??
+    payload.coach?.id ??
+    payload.coach_account?.id ??
+    payload.id;
+  if (!coachId) return null;
+
+  return {
+    ...payload,
+    coach_id: Number(coachId),
+    relationship_id:
+      payload.relationship_id != null
+        ? Number(payload.relationship_id)
+        : payload.relationshipId != null
+          ? Number(payload.relationshipId)
+          : payload.relationship?.id != null
+            ? Number(payload.relationship.id)
+            : payload.client_coach_relationship?.id != null
+              ? Number(payload.client_coach_relationship.id)
+          : null,
+    account_id:
+      payload.account_id ??
+      payload.accountId ??
+      payload.coach?.account_id ??
+      payload.coach?.accountId ??
+      payload.coach_account?.account_id ??
+      payload.coach_account?.accountId ??
+      null,
+    name:
+      payload.name ||
+      payload.coach_name ||
+      payload.coachName ||
+      payload.coach_account?.name ||
+      payload.coach?.name ||
+      `Coach #${coachId}`,
+    specialty:
+      payload.specialty ||
+      payload.primary_specialty ||
+      payload.coach_account?.specialty ||
+      payload.coach?.specialty ||
+      "Active coach",
+  };
+}
+
 function formatExperienceYear(start, end, fallback) {
   if (fallback) return String(fallback);
   const startYear = String(start || "").slice(0, 4);
@@ -455,14 +573,6 @@ function normalizeWorkoutActivity(activity, index) {
   };
 }
 
-function buildMockAvailability() {
-  const times = ["9AM", "10AM", "11AM", "12PM", "1PM", "2PM", "3PM", "4PM"];
-  return times.map((time) => ({
-    time,
-    slots: ["booked", "booked", "available", "booked", "booked", null, null],
-  }));
-}
-
 function normalizeTimeLabel(raw) {
   const value = String(raw || "").trim().toUpperCase().replace(/\s+/g, "");
   if (!value) return "";
@@ -504,27 +614,6 @@ function convertTrainingAvailabilityToGrid(trainingAvailability) {
   }));
 }
 
-function getOnboardingAvailabilityFromStorage() {
-  const email = (localStorage.getItem("active_user_email") || "").trim().toLowerCase();
-  const keysToTry = email
-    ? [`onboarding:${email}`, "onboarding:current"]
-    : ["onboarding:current"];
-
-  for (const key of keysToTry) {
-    const raw = localStorage.getItem(key);
-    if (!raw) continue;
-    try {
-      const parsed = JSON.parse(raw);
-      const converted = convertTrainingAvailabilityToGrid(parsed?.trainingAvailability);
-      if (converted.length > 0) return converted;
-    } catch {
-      // Ignore malformed storage and continue.
-    }
-  }
-
-  return [];
-}
-
 function convertGridToBackendAvailabilities(slots) {
   const trainingAvailability = {
     Mon: [],
@@ -557,6 +646,44 @@ function convertTrainingAvailabilityObjectToBackend(trainingAvailability) {
       .map((label) => buildAvailabilityWindow(label, longWeekday))
       .filter(Boolean);
   });
+}
+
+function convertBackendAvailabilitiesToGrid(availabilities) {
+  const byDay = { Mon: [], Tue: [], Wed: [], Thu: [], Fri: [], Sat: [], Sun: [] };
+  (availabilities || []).forEach((slot) => {
+    const shortDay = longWeekdayToShort(slot?.weekday);
+    const label = backendTimeToLabel(slot?.start_time);
+    if (shortDay && label) {
+      byDay[shortDay].push(label);
+    }
+  });
+  return convertTrainingAvailabilityToGrid(byDay);
+}
+
+function longWeekdayToShort(weekday) {
+  const normalized = String(weekday || "").trim().toLowerCase();
+  const map = {
+    monday: "Mon",
+    tuesday: "Tue",
+    wednesday: "Wed",
+    thursday: "Thu",
+    friday: "Fri",
+    saturday: "Sat",
+    sunday: "Sun",
+  };
+  return map[normalized] ?? null;
+}
+
+function backendTimeToLabel(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const match = raw.match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return normalizeTimeLabel(raw);
+  let hour = Number(match[1]);
+  if (!Number.isFinite(hour) || hour < 0 || hour > 23) return null;
+  const suffix = hour >= 12 ? "PM" : "AM";
+  hour = hour % 12 || 12;
+  return `${hour}${suffix}`;
 }
 
 function shortToLongWeekday(day) {
@@ -668,12 +795,17 @@ export function extractUploadedAssetUrl(response) {
   return null;
 }
 
-/* ─── coach reviews & reports ──────────────────────────────────────── */
+/* coach reviews & reports */
 
 export async function submitCoachReview(coachId, rating, reviewText) {
-  return apiPost(`/roles/client/coach_review/${coachId}`, null)
+  return apiPost(
+    withQuery(`/roles/client/coach_review/${coachId}`, {
+      rating,
+      review_text: reviewText,
+    }),
+    null
+  )
     .catch(() => ({ review_id: Date.now() }));
-  // NOTE: backend takes rating + review_text as query params, not JSON body
 }
 
 // export async function fetchCoachReviews(coachId) {
@@ -686,7 +818,12 @@ export async function submitCoachReview(coachId, rating, reviewText) {
 
 export async function submitCoachReport(coachId, reportSummary) {
   try {
-    return await apiPost(`/roles/client/coach_report/${coachId}`, null);
+    return await apiPost(
+      withQuery(`/roles/client/coach_report/${coachId}`, {
+        report_summary: reportSummary,
+      }),
+      null
+    );
   } catch {
     return { report_id: Date.now() };
   }
@@ -700,37 +837,47 @@ export async function submitCoachReport(coachId, reportSummary) {
 //   }
 // }
 
-/* ─── initial survey (onboarding) ──────────────────────────────────── */
+/* initial survey (onboarding) */
 
 export async function submitInitialSurvey(surveyData) {
   return apiPost("/roles/client/initial_survey", surveyData);
 }
 
-/* ─── update client info ───────────────────────────────────────────── */
+/* update client info */
 
 export async function updateClientInfo(payload) {
   return apiPatch("/roles/client/information", payload);
 }
 
-/* ─── upload progress picture ──────────────────────────────────────── */
+/* progress pictures */
 
+/**
+ * Upload a progress picture. The backend upserts one record per day so
+ * re-uploading on the same day replaces the previous picture.
+ * Returns { id, url, date }.
+ */
 export async function uploadProgressPicture(file) {
-  const token = localStorage.getItem("jwt");
-  const API_BASE = import.meta.env.PROD ? "https://api.till-failure.us" : "";
   const formData = new FormData();
   formData.append("file", file);
-  const headers = {};
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(`${API_BASE}/roles/client/upload_progress_picture`, {
+  const response = await apiFetch("/roles/client/upload_progress_picture", {
     method: "POST",
-    headers,
     body: formData,
+    headers: {},
   });
-  if (!res.ok) throw new Error("Upload failed");
-  return res.json();
+  return response;
 }
 
-/* ─── client workout plans ─────────────────────────────────────────── */
+/** Fetch progress pictures for the current client, newest first. */
+export async function fetchProgressPictures({ skip = 0, limit = 100 } = {}) {
+  try {
+    const result = await apiGet(withQuery("/roles/client/progress_pictures", { skip, limit }));
+    return Array.isArray(result) ? result : [];
+  } catch {
+    return [];
+  }
+}
+
+/*  client workout plans  */
 
 // export async function fetchClientWorkoutPlans(skip = 0, limit = 20) {
 //   try {

@@ -11,6 +11,7 @@ import {
   updateAccount,
   updateClientInformation,
   uploadProfilePicture,
+  payInvoice,
 } from "../api/client";
 import TelemetryCharts from "../components/overlays/telemetry_charts";
 import {
@@ -210,6 +211,10 @@ function ProfilePage({ role = "client" }) {
   const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
   const [progressPicPage, setProgressPicPage] = useState(0);
   const PICS_PER_PAGE = 6;
+  const [showPaymentDialog, setShowPaymentDialog] = useState(false);
+  const [selectedInvoiceForPayment, setSelectedInvoiceForPayment] = useState(null);
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentLoading, setPaymentLoading] = useState(false);
   const profileInputsDisabled = loadingProfile || savingProfile;
 
   const fullName = useMemo(
@@ -613,6 +618,41 @@ function ProfilePage({ role = "client" }) {
   const handleLogout = () => {
     localStorage.removeItem("jwt");
     navigate("/login");
+  };
+
+  const handlePayInvoice = async () => {
+    if (!selectedInvoiceForPayment || !paymentAmount) return;
+
+    const amount = parseFloat(paymentAmount);
+    if (isNaN(amount) || amount <= 0) {
+      setSaveError("Payment amount must be greater than 0");
+      return;
+    }
+
+    if (amount > selectedInvoiceForPayment.outstanding_balance) {
+      setSaveError(`Payment amount exceeds outstanding balance of $${selectedInvoiceForPayment.outstanding_balance.toFixed(2)}`);
+      return;
+    }
+
+    setPaymentLoading(true);
+    setSaveError("");
+
+    try {
+      await payInvoice(selectedInvoiceForPayment.invoice_id, amount);
+
+      setSaveMessage("Payment processed successfully!");
+      setShowPaymentDialog(false);
+      setSelectedInvoiceForPayment(null);
+      setPaymentAmount("");
+
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
+    } catch (error) {
+      setSaveError(error.message || "Failed to process payment");
+    } finally {
+      setPaymentLoading(false);
+    }
   };
 
   const toggleSpecialization = (item) => {
@@ -1145,10 +1185,30 @@ function ProfilePage({ role = "client" }) {
                   return (
                     <div className="space-y-4">
                       {/* Current subscription */}
+
+                      {/* Next billing cycle */}
+                      {(() => {
+                        if (cycles.length === 0) return null;
+                        const outstandingInvoiceForCycle = invoices.find(
+                          inv => inv.coach_name === cycles[0].coach_name && inv.outstanding_balance > 0
+                        );
+                        const amountDue = outstandingInvoiceForCycle?.outstanding_balance ?? (cycles[0].price_cents / 100);
+                        return (
+                          <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 px-4 py-3">
+                            <p className="text-xs font-semibold text-blue-300">
+                              ${amountDue.toFixed(2)} is due by {new Date(cycles[0].end_date).toLocaleDateString()} by 12am
+                            </p>
+                            <p className="text-[10px] text-slate-500 mt-0.5">
+                              {cycles[0].coach_name} &middot; {cycles[0].payment_interval}
+                            </p>
+                          </div>
+                        );
+                      })()}
+                      
                       {activeSub ? (
                         <div className="rounded-xl border border-white/6 bg-[#101827] px-4 py-3">
                           <div className="flex items-center justify-between gap-3">
-                            <div>
+                            <div className="flex-1">
                               <p className="text-sm font-semibold text-white">{activeSub.coach_name}</p>
                               <p className="text-xs text-slate-400 mt-0.5">
                                 {activeSub.payment_interval} &middot; ${(activeSub.price_cents / 100).toFixed(2)}
@@ -1159,6 +1219,24 @@ function ProfilePage({ role = "client" }) {
                               <span className="rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-green-500/15 text-green-400">
                                 Active
                               </span>
+                              {(() => {
+                                const outstandingInvoice = invoices.find(
+                                  inv => inv.coach_name === activeSub.coach_name && inv.outstanding_balance > 0
+                                );
+                                return outstandingInvoice ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedInvoiceForPayment(outstandingInvoice);
+                                      setPaymentAmount("");
+                                      setShowPaymentDialog(true);
+                                    }}
+                                    className="rounded-lg bg-blue-600 hover:bg-blue-700 px-3 py-2 text-xs font-medium text-white transition"
+                                  >
+                                    Pay
+                                  </button>
+                                ) : null;
+                              })()}
                               {activeCoachId && (
                                 <button
                                   type="button"
@@ -1173,18 +1251,6 @@ function ProfilePage({ role = "client" }) {
                         </div>
                       ) : (
                         <p className="text-xs text-slate-500">No active subscription.</p>
-                      )}
-
-                      {/* Next billing cycle */}
-                      {cycles.length > 0 && (
-                        <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 px-4 py-3">
-                          <p className="text-xs font-semibold text-blue-300">
-                            ${(cycles[0].price_cents / 100).toFixed(2)} is due {new Date(cycles[0].end_date).toLocaleDateString()}
-                          </p>
-                          <p className="text-[10px] text-slate-500 mt-0.5">
-                            {cycles[0].coach_name} &middot; {cycles[0].payment_interval}
-                          </p>
-                        </div>
                       )}
 
                       {/* Invoices */}
@@ -1315,6 +1381,61 @@ function ProfilePage({ role = "client" }) {
           </div>
         </div>
       </div>
+
+      {showPaymentDialog && selectedInvoiceForPayment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="rounded-xl border border-white/10 bg-[#0B1120] p-6 shadow-2xl max-w-sm w-full mx-4">
+            <h3 className="text-lg font-bold text-white mb-4">Make a Payment</h3>
+
+            <div className="space-y-4">
+              <div className="rounded-lg bg-[#101827] p-3">
+                <p className="text-xs text-slate-500 uppercase tracking-widest">Outstanding Balance</p>
+                <p className="text-2xl font-bold text-white mt-1">
+                  ${selectedInvoiceForPayment.outstanding_balance.toFixed(2)}
+                </p>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                  Payment Amount
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max={selectedInvoiceForPayment.outstanding_balance}
+                  value={paymentAmount}
+                  onChange={(e) => setPaymentAmount(e.target.value)}
+                  disabled={paymentLoading}
+                  placeholder={`Max: $${selectedInvoiceForPayment.outstanding_balance.toFixed(2)}`}
+                  className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600 disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={() => {
+                    setShowPaymentDialog(false);
+                    setSelectedInvoiceForPayment(null);
+                    setPaymentAmount("");
+                  }}
+                  disabled={paymentLoading}
+                  className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-4 py-2 text-xs font-medium text-slate-300 disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handlePayInvoice}
+                  disabled={paymentLoading || !paymentAmount}
+                  className="rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-60 px-4 py-2 text-xs font-semibold text-white"
+                >
+                  {paymentLoading ? "Processing..." : "Pay Now"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

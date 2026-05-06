@@ -69,6 +69,10 @@ export async function fetchBillingCycles() {
   return result?.cycles ?? [];
 }
 
+export async function payInvoice(invoiceId, amount) {
+  return apiPost(`/roles/client/pay_invoice/${invoiceId}`, { amount });
+}
+
 export async function createClientInitialSurvey(payload) {
   return apiPost("/roles/client/initial_survey", payload);
 }

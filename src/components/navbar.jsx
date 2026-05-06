@@ -31,6 +31,8 @@ const NOTIFICATION_ICONS = {
   relationship_termination: Unlink,
 };
 
+const NOTIFICATION_POLL_MS = 3000;
+
 const formatNotificationTime = (value) => {
   if (!value) return "";
   const parsed = new Date(value);
@@ -50,6 +52,7 @@ const normalizeNotification = (notification) => ({
 export function Navbar({
   role = "client",
   userName = "JD",
+  userAvatar = "",
   onMessage,
   onNotification,
   notifications: externalNotifs,
@@ -75,22 +78,33 @@ export function Navbar({
     if (!localStorage.getItem("jwt")) return;
 
     let isMounted = true;
-    setNotificationsLoading(true);
-    setNotificationsError("");
+    let isFetching = false;
 
-    queryNotifications()
-      .then((items) => {
+    const loadNotifications = async ({ initial = false } = {}) => {
+      if (isFetching || !localStorage.getItem("jwt")) return;
+      isFetching = true;
+      if (initial) {
+        setNotificationsLoading(true);
+      }
+      setNotificationsError("");
+
+      try {
+        const items = await queryNotifications();
         if (isMounted) setNotifs(items.map(normalizeNotification));
-      })
-      .catch(() => {
+      } catch {
         if (isMounted) setNotificationsError("Unable to load notifications.");
-      })
-      .finally(() => {
-        if (isMounted) setNotificationsLoading(false);
-      });
+      } finally {
+        isFetching = false;
+        if (isMounted && initial) setNotificationsLoading(false);
+      }
+    };
+
+    loadNotifications({ initial: true });
+    const intervalId = window.setInterval(loadNotifications, NOTIFICATION_POLL_MS);
 
     return () => {
       isMounted = false;
+      window.clearInterval(intervalId);
     };
   }, [externalNotifs]);
 
@@ -325,11 +339,19 @@ export function Navbar({
 
           <button
             onClick={handleProfileClick}
-            className="flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold text-white transition-transform hover:scale-105"
+            className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full text-sm font-bold text-white transition-transform hover:scale-105"
             style={{ backgroundColor: theme.accent, boxShadow: `0 0 20px ${theme.accent}50` }}
             title="Open Profile"
           >
-            {userName}
+            {userAvatar ? (
+              <img
+                src={userAvatar}
+                alt="Open Profile"
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              userName
+            )}
           </button>
         </div>
       </div>

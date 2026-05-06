@@ -22,7 +22,7 @@ import {
 } from "../api/workouts";
 import { getCoachAccessState } from "../utils/roleAccess";
 
-/* ─── constants ──────────────────────────────────────────────────────── */
+/*  constants  */
 
 const DEFAULT_EQUIPMENT_OPTIONS = ["Barbell", "Dumbbell", "Cable", "Machine", "Bodyweight", "Bands", "Kettlebell", "Other"];
 
@@ -34,7 +34,7 @@ const EMPTY_EXERCISE = {
 const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const WEEKDAY_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-/* ─── page ───────────────────────────────────────────────────────────── */
+/*  page  */
 
 export default function WorkoutsPage() {
   const navigate = useNavigate();
@@ -84,7 +84,7 @@ export default function WorkoutsPage() {
         : account?.client_id;
   const canManageWorkouts = role === "coach" || role === "admin";
 
-  /* ── auth + data load ──────────────────────────────────────────────── */
+  /*  auth + data load  */
 
   useEffect(() => {
     (async () => {
@@ -167,7 +167,7 @@ export default function WorkoutsPage() {
     })();
   }, [account, role]);
 
-  /* ── filtered lists ────────────────────────────────────────────────── */
+  /*  filtered lists  */
 
   const activeList = tab === "presets" ? presets : myWorkouts;
   const filtered = useMemo(() => {
@@ -179,7 +179,7 @@ export default function WorkoutsPage() {
     });
   }, [activeList, search, filterGroup]);
 
-  /* ── handlers ──────────────────────────────────────────────────────── */
+  /*  handlers  */
 
   const handleDuplicate = async (preset) => {
     const result = await duplicatePreset(role, roleId, preset.id);
@@ -264,7 +264,7 @@ export default function WorkoutsPage() {
     }, 1500);
   };
 
-  /* ── render ────────────────────────────────────────────────────────── */
+  /*  render  */
 
   const tabs = [
     { key: "my",      label: "My Workouts" },
@@ -363,7 +363,7 @@ export default function WorkoutsPage() {
             ))}
           </div>
         ) : tab === "weekly" ? (
-          /* ── Weekly planner ───────────────────────────────────── */
+          /*  Weekly planner  */
           <WeeklyPlanner
             weeklyPlan={weeklyPlan}
             allWorkouts={[...myWorkouts, ...presets]}
@@ -378,7 +378,7 @@ export default function WorkoutsPage() {
             saving={weeklySaving}
           />
         ) : tab === "assigned" ? (
-          /* ── Assigned workouts tab (coach only) ────────────────── */
+          /*  Assigned workouts tab (coach only)  */
           <div className="space-y-4">
             {assignedWorkouts.length === 0 ? (
               <div className="text-center py-16">
@@ -404,7 +404,7 @@ export default function WorkoutsPage() {
             )}
           </div>
         ) : (
-          /* ── Workout grid ──────────────────────────────────────── */
+          /*  Workout grid  */
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filtered.length === 0 ? (
               <div className="col-span-full text-center py-16">
@@ -433,7 +433,7 @@ export default function WorkoutsPage() {
         )}
       </div>
 
-      {/* ─── View Workout Overlay ───────────────────────────────────── */}
+      {/*  View Workout Overlay  */}
       <Overlay open={!!viewWorkout} onClose={() => setViewWorkout(null)} title={viewWorkout?.name ?? "Workout"} wide>
         {viewWorkout && (
           <WorkoutView
@@ -450,7 +450,7 @@ export default function WorkoutsPage() {
         )}
       </Overlay>
 
-      {/* ─── Create / Edit Workout Overlay ──────────────────────────── */}
+      {/*  Create / Edit Workout Overlay  */}
       <Overlay
         open={!!editWorkout}
         onClose={() => setEditWorkout(null)}
@@ -468,7 +468,7 @@ export default function WorkoutsPage() {
         )}
       </Overlay>
 
-      {/* ─── Assign Overlay (coach) ─────────────────────────────────── */}
+      {/*  Assign Overlay (coach)  */}
       <Overlay open={!!assignOverlay} onClose={() => setAssignOverlay(null)} title={`Assign: ${assignOverlay?.name ?? ""}`}>
         {assignOverlay && (
           <div className="space-y-4">
@@ -1182,7 +1182,7 @@ function WeeklyPlanner({
               </div>
 
               {workout ? (
-                /* ── Workout assigned ────── */
+                /*  Workout assigned  */
                 <div className="flex-1 flex flex-col">
                   <p className="text-white font-semibold text-sm mb-1 leading-tight">{workout.name}</p>
                   {workout.workout_type && (
@@ -1218,7 +1218,7 @@ function WeeklyPlanner({
                   </button>
                 </div>
               ) : (
-                /* ── Rest / empty day ────── */
+                /*  Rest / empty day  */
                 <div className="flex-1 flex flex-col items-center justify-center">
                   <p className="text-gray-600 text-xs mb-3">Rest Day</p>
                   <button
@@ -1235,7 +1235,7 @@ function WeeklyPlanner({
         })}
       </div>
 
-      {/* ── Workout picker modal ──────────────────────────────────────── */}
+      {/*  Workout picker modal  */}
       {pickerDay && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setPickerDay(null)}>
           <div

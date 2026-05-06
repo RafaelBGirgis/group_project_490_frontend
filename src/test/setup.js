@@ -7,7 +7,7 @@
 
 import "@testing-library/jest-dom";
 
-/* ─── localStorage mock ──────────────────────────────────────────────── */
+/*  localStorage mock  */
 
 const store = {};
 const localStorageMock = {
@@ -18,21 +18,21 @@ const localStorageMock = {
 };
 Object.defineProperty(window, "localStorage", { value: localStorageMock });
 
-/* ─── fetch mock (default: reject so tests must mock explicitly) ─────── */
+/*  fetch mock (default: reject so tests must mock explicitly)  */
 
 global.fetch = vi.fn(() =>
   Promise.reject(new Error("fetch not mocked — use vi.fn() in your test"))
 );
 
-/* ─── window.location mock ───────────────────────────────────────────── */
+/*  window.location mock  */
 
 delete window.location;
 window.location = { href: "", assign: vi.fn(), replace: vi.fn() };
 
-/* ─── SVG import mock (Vite imports SVGs as modules) ─────────────────── */
+/*  SVG import mock (Vite imports SVGs as modules)  */
 /* Handled via vite.config.js deps.inline or individual mocks in tests */
 
-/* ─── cleanup between tests ──────────────────────────────────────────── */
+/*  cleanup between tests  */
 
 afterEach(() => {
   localStorageMock.clear();

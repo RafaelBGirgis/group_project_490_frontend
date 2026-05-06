@@ -20,7 +20,7 @@ import {
   MUSCLE_GROUPS,
 } from "../api/workouts";
 
-/* ─── helpers ────────────────────────────────────────────────────────── */
+/*  helpers  */
 
 function mockFetchOk(data) {
   global.fetch = vi.fn(() =>

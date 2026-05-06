@@ -31,6 +31,20 @@ export async function fetchClientProfile() {
   return apiPost("/roles/client/me", {});
 }
 
+export async function fetchUnifiedProfile() {
+  return apiGet("/roles/shared/account/me");
+}
+
+export async function fetchInvoices() {
+  const result = await apiGet("/roles/client/invoices");
+  return result?.invoices ?? [];
+}
+
+export async function fetchBillingCycles() {
+  const result = await apiGet("/roles/client/current_billing_cycles");
+  return result?.cycles ?? [];
+}
+
 export async function createClientInitialSurvey(payload) {
   return apiPost("/roles/client/initial_survey", payload);
 }
@@ -668,7 +682,7 @@ export function extractUploadedAssetUrl(response) {
   return null;
 }
 
-/* ─── coach reviews & reports ──────────────────────────────────────── */
+/* coach reviews & reports */
 
 export async function submitCoachReview(coachId, rating, reviewText) {
   return apiPost(`/roles/client/coach_review/${coachId}`, null)
@@ -700,37 +714,47 @@ export async function submitCoachReport(coachId, reportSummary) {
 //   }
 // }
 
-/* ─── initial survey (onboarding) ──────────────────────────────────── */
+/* initial survey (onboarding) */
 
 export async function submitInitialSurvey(surveyData) {
   return apiPost("/roles/client/initial_survey", surveyData);
 }
 
-/* ─── update client info ───────────────────────────────────────────── */
+/* update client info */
 
 export async function updateClientInfo(payload) {
   return apiPatch("/roles/client/information", payload);
 }
 
-/* ─── upload progress picture ──────────────────────────────────────── */
+/* progress pictures */
 
+/**
+ * Upload a progress picture. The backend upserts one record per day so
+ * re-uploading on the same day replaces the previous picture.
+ * Returns { id, url, date }.
+ */
 export async function uploadProgressPicture(file) {
-  const token = localStorage.getItem("jwt");
-  const API_BASE = import.meta.env.PROD ? "https://api.till-failure.us" : "";
   const formData = new FormData();
   formData.append("file", file);
-  const headers = {};
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(`${API_BASE}/roles/client/upload_progress_picture`, {
+  const response = await apiFetch("/roles/client/upload_progress_picture", {
     method: "POST",
-    headers,
     body: formData,
+    headers: {},
   });
-  if (!res.ok) throw new Error("Upload failed");
-  return res.json();
+  return response;
 }
 
-/* ─── client workout plans ─────────────────────────────────────────── */
+/** Fetch progress pictures for the current client, newest first. */
+export async function fetchProgressPictures({ skip = 0, limit = 100 } = {}) {
+  try {
+    const result = await apiGet(withQuery("/roles/client/progress_pictures", { skip, limit }));
+    return Array.isArray(result) ? result : [];
+  } catch {
+    return [];
+  }
+}
+
+/*  client workout plans  */
 
 // export async function fetchClientWorkoutPlans(skip = 0, limit = 20) {
 //   try {

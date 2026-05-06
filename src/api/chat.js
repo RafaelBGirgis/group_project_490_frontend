@@ -142,7 +142,7 @@ function readJson(key) {
   }
 }
 
-/* ─── relationship management ────────────────────────────────────── */
+/* relationship management */
 
 export async function deleteCoachRequest(requestId) {
   try {
@@ -163,7 +163,7 @@ export async function terminateRelationship(relationshipId) {
   }
 }
 
-/* ─── shared account updates ─────────────────────────────────────── */
+/* shared account updates */
 
 export async function updateAccount(payload) {
   try {

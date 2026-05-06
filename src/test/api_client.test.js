@@ -26,7 +26,7 @@ import {
   uploadProgressPicture,
 } from "../api/client";
 
-/* ─── helpers ────────────────────────────────────────────────────────── */
+/*  helpers  */
 
 function mockFetchOk(data) {
   global.fetch = vi.fn(() =>

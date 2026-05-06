@@ -10,7 +10,7 @@ import { apiGet, apiPost, withQuery } from "./api";
 
 const BASE = "/roles/client/fitness/daily-survey";
 
-/* ─── mood / wellbeing ───────────────────────────────────────────────── */
+/*  mood / wellbeing  */
 
 export function fetchDailyMoodSurvey() {
   return apiGet(`${BASE}/today`);
@@ -29,7 +29,7 @@ export function submitDailyMoodSurvey(payload) {
   return apiPost(`${BASE}/submit`, payload);
 }
 
-/* ─── body metrics ───────────────────────────────────────────────────── */
+/*  body metrics  */
 
 export function fetchDailyBodyMetricsSurvey() {
   return apiGet(`${BASE}/body-metrics/today`);
@@ -47,7 +47,7 @@ export function submitDailyBodyMetricsSurvey(payload) {
   return apiPost(`${BASE}/body-metrics/submit`, payload);
 }
 
-/* ─── steps ──────────────────────────────────────────────────────────── */
+/*  steps  */
 
 export function fetchDailyStepsSurvey() {
   return apiGet(`${BASE}/steps/today`);
@@ -64,7 +64,7 @@ export function submitDailyStepsSurvey(payload) {
   return apiPost(`${BASE}/steps/submit`, payload);
 }
 
-/* ─── combined helpers ───────────────────────────────────────────────── */
+/*  combined helpers  */
 
 /**
  * Fetch the status of all three surveys in parallel. Returns
@@ -80,7 +80,7 @@ export async function fetchAllDailySurveys() {
   return { mood, body_metrics, steps };
 }
 
-/* ─── telemetry history (past survey submissions) ────────────────────── */
+/*  telemetry history (past survey submissions)  */
 
 const TELEMETRY = "/roles/client/telemetry/query";
 

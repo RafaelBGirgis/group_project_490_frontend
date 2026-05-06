@@ -6,7 +6,7 @@ const DEFAULT_TIME_OPTIONS = [
   "12PM", "1PM", "2PM", "3PM", "4PM", "5PM", "6PM", "7PM", "8PM", "9PM",
 ];
 
-/* ─── coach profile ───────────────────────────────────────────────── */
+/*  coach profile  */
 
 export async function fetchCoachProfile() {
   return apiPost("/roles/coach/me", {});
@@ -18,6 +18,11 @@ export async function createCoachRequest(payload) {
 
 export async function updateCoachInformation(payload) {
   return apiPatch("/roles/coach/information", payload);
+}
+
+export async function fetchCoachEarnings(since) {
+  const params = since ? `?since=${since}` : "";
+  return apiGet(`/roles/coach/earnings${params}`);
 }
 
 export async function createCoachWorkout(payload) {

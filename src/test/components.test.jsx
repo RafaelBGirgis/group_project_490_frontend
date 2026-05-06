@@ -22,7 +22,7 @@ vi.mock("../api/notifications", () => ({
   readAllNotifications: vi.fn(),
 }));
 
-/* ─── helpers ────────────────────────────────────────────────────────── */
+/*  helpers  */
 
 function renderWithRouter(ui) {
   return render(<MemoryRouter>{ui}</MemoryRouter>);

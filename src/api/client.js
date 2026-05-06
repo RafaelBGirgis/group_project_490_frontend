@@ -1,4 +1,5 @@
 import { apiDelete, apiFetch, apiGet, apiPatch, apiPost, withQuery } from "./api";
+import { clearAuth } from "./auth";
 
 const WEEKDAY_NAMES = [
   "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
@@ -20,8 +21,10 @@ export async function fetchMe() {
     return await apiGet("/me");
   } catch (error) {
     if (error?.status === 401) {
-      localStorage.removeItem("jwt");
-      window.location.href = "/login";
+      clearAuth();
+      if (window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
     }
     throw error;
   }

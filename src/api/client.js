@@ -139,6 +139,9 @@ export async function fetchClientWorkoutPlans({ skip = 0, limit = 100 } = {}) {
 }
 
 export async function fetchWorkoutPlan(_clientId, weekdayIdx) {
+  const cached = adaptCachedWeeklyPlanForDay(_clientId, weekdayIdx);
+  if (cached) return cached;
+
   try {
     const plans = await fetchClientWorkoutPlans();
     const adapted = adaptWorkoutPlansForDay(plans, weekdayIdx);
@@ -212,10 +215,7 @@ export async function saveAvailability(clientId, slots) {
 
 /**
  * Fetch the meals the client has logged via the daily survey (newest first).
- * Returns raw CompletedMealActivity rows from the backend — each carries
- * ids and timestamps but the backend currently exposes no route to resolve
- * those ids back to meal name / calories, so the consumer must accept a
- * minimal shape.
+ * Returns completed meal activity rows from the backend with meal_name.
  */
 export async function fetchMealsToday(_clientId, { skip = 0, limit = 100 } = {}) {
   try {
@@ -228,10 +228,30 @@ export async function fetchMealsToday(_clientId, { skip = 0, limit = 100 } = {})
       client_prescribed_meal_id: row.client_prescribed_meal_id ?? null,
       on_demand_meal_id: row.on_demand_meal_id ?? null,
       logged_at: row.last_updated || null,
+      meal_name: row.meal_name ?? null,
     }));
   } catch {
     return [];
   }
+}
+
+export async function fetchAvailableOnDemandMeals(_clientId) {
+  const paths = [
+    "/roles/client/fitness/meal/options",
+    "/roles/client/fitness/daily-survey/meal/options",
+  ];
+
+  for (const path of paths) {
+    try {
+      const result = await apiGet(path);
+      if (!Array.isArray(result)) continue;
+      return result.map((meal) => ({ ...meal, id: Number(meal.id) }));
+    } catch (error) {
+      console.warn(`Unable to load available meals from ${path}:`, error);
+    }
+  }
+
+  return [];
 }
 
 /**
@@ -558,6 +578,28 @@ function adaptWorkoutPlansForDay(plans, weekdayIdx) {
       `Workout Plan #${matchingPlan.workout_plan_id ?? matchingPlan.id ?? weekdayIdx + 1}`,
     activities,
   };
+}
+
+function adaptCachedWeeklyPlanForDay(clientId, weekdayIdx) {
+  const dayName = WEEKDAY_NAMES[weekdayIdx];
+  if (!dayName) return null;
+
+  const raw = localStorage.getItem(`client_weekly_plan:${clientId ?? "me"}`);
+  if (!raw) return null;
+
+  try {
+    const weeklyPlan = JSON.parse(raw);
+    const workout = weeklyPlan?.[dayName];
+    if (!workout || typeof workout !== "object") return null;
+
+    const exercises = Array.isArray(workout.exercises) ? workout.exercises : [];
+    return {
+      strata_name: workout.name ?? workout.strata_name ?? "Rest Day",
+      activities: exercises.map((exercise, index) => normalizeWorkoutActivity(exercise, index)),
+    };
+  } catch {
+    return null;
+  }
 }
 
 function normalizeWorkoutActivity(activity, index) {

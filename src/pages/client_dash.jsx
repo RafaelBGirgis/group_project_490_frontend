@@ -143,8 +143,8 @@ export default function ClientDash() {
 
   const refreshCoachRequestState = useCallback(async () => {
     const requestList = await fetchMyCoachRequests().catch(() => []);
-    const nextPending = requestList.find((item) => item?.status === "pending") || null;
-    const nextApproved = requestList.find((item) => item?.status === "approved") || null;
+    const nextPending = requestList.find((item) => item?.is_accepted === null) || null;
+    const nextApproved = requestList.find((item) => item?.is_accepted === true) || null;
     setPendingCoachRequest(nextPending);
     setApprovedCoachRequest(nextApproved);
     return { nextPending, nextApproved };
@@ -525,29 +525,6 @@ export default function ClientDash() {
                 className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-300"
               >
                 Cancel Request
-              </button>
-            </div>
-          </DashboardCard>
-        ) : null}
-
-        {!pendingCoachRequest && approvedCoachRequest && !coach ? (
-          <DashboardCard role={role} title="Coach Request Status">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="text-white font-semibold">
-                  {approvedCoachRequest.coach_name || "Coach request approved"}
-                </p>
-                <p className="mt-1 text-sm text-green-300">Approved</p>
-                <p className="mt-1 text-xs text-gray-500">
-                  Your coach request was approved and chat is ready.
-                </p>
-              </div>
-              <button
-                onClick={handleOpenApprovedCoachChat}
-                disabled={openingCoachChat}
-                className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:bg-blue-900/40"
-              >
-                {openingCoachChat ? "Opening..." : "Chat with Coach"}
               </button>
             </div>
           </DashboardCard>

@@ -42,10 +42,6 @@ export default function SignupPage() {
     const restoreSession = async () => {
       try {
         const account = await fetchMe();
-        const normalizedEmail = String(account?.email || "").trim().toLowerCase();
-        if (normalizedEmail) {
-          localStorage.setItem("active_user_email", normalizedEmail);
-        }
         if (!cancelled) {
           window.location.href = await resolvePostSignupPath(account);
         }

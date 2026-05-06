@@ -13,6 +13,7 @@ import {
   SkeletonGreeting,
   SkeletonAvailability,
 } from "../components";
+import ProfileAvatar from "../components/profile_avatar";
 import { fetchMe } from "../api/client";
 import {
   fetchCoachProfile,
@@ -26,7 +27,6 @@ import {
   fetchClientRequests,
   lookupClient,
   acceptClientRequest,
-  cacheAcceptedClientForCoach,
   denyClientRequest,
   createClientReview,
   fetchClientReports,
@@ -166,10 +166,6 @@ export default function CoachDashboard() {
         const alreadyActiveClient = clients.some(
           (client) => Number(client.id) === Number(request.client_id) && client.status === "active"
         );
-        localStorage.setItem(
-          `client_relationship:${request.client_id}:${coachId}`,
-          String(accepted.relationship_id)
-        );
         const detail = await loadClientRequestDetails(request.client_id).catch(() => null);
         await createConversation(accepted.relationship_id, {
           id: request.client_id,
@@ -193,7 +189,6 @@ export default function CoachDashboard() {
           details: detail,
         };
 
-        cacheAcceptedClientForCoach(coachId, acceptedClient);
         setClients((prev) => {
           const next = [
             acceptedClient,
@@ -373,31 +368,44 @@ export default function CoachDashboard() {
 
         <div className="grid grid-cols-1 xl:grid-cols-4 gap-4 items-stretch">
           {/* My Clients */}
-          <DashboardCard
-            role={role}
-            title={`My Clients (${clients.length})`}
-            action={{ label: "View all", onClick: () => setOverlay("clients") }}
-          >
-            <div className="space-y-2">
-              {clients.slice(0, 4).map((c) => (
-                <ListRow
-                  key={c.id}
-                  label={c.name}
-                  sub={c.goal}
-                  right={
-                    <StatusBadge
-                      label={c.status}
-                      variant={c.status === "active" ? "success" : "neutral"}
-                      dot
-                    />
-                  }
-                />
-              ))}
-              {clients.length > 4 && (
-                <p className="text-gray-500 text-xs text-center pt-1">+{clients.length - 4} more</p>
-              )}
-            </div>
-          </DashboardCard>
+          {(() => {
+            const activeClients = clients.filter((c) => c.status === "active");
+            return (
+              <DashboardCard
+                role={role}
+                title={`My Clients (${activeClients.length})`}
+                action={{ label: "View all", onClick: () => setOverlay("clients") }}
+              >
+                <div className="space-y-2">
+                  {activeClients.slice(0, 4).map((c) => (
+                    <div
+                      key={c.id}
+                      className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors"
+                    >
+                      <ProfileAvatar
+                        src={c.details?.base_account?.pfp_url}
+                        alt={c.name}
+                        name={c.name}
+                        size="md"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white font-medium text-sm truncate">{c.name}</p>
+                        <p className="text-gray-400 text-xs">
+                          {c.goal} · {c.details?.base_account?.age || "—"} · {c.details?.base_account?.gender || "—"}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                  {activeClients.length > 4 && (
+                    <p className="text-gray-500 text-xs text-center pt-1">+{activeClients.length - 4} more</p>
+                  )}
+                  {activeClients.length === 0 && (
+                    <p className="text-gray-500 text-xs text-center py-4">No active clients yet</p>
+                  )}
+                </div>
+              </DashboardCard>
+            );
+          })()}
 
           {/* Upcoming Sessions */}
           <DashboardCard
@@ -475,12 +483,23 @@ export default function CoachDashboard() {
                 <p className="text-gray-500 text-sm text-center py-6">No pending requests</p>
               ) : (
                 clientRequests.slice(0, 4).map((request) => (
-                  <ListRow
+                  <div
                     key={request.request_id}
-                    label={`Client #${request.client_id}`}
-                    sub={`Request ${request.request_id}`}
-                    right={<StatusBadge label="Pending" variant="warning" dot />}
-                  />
+                    className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors"
+                  >
+                    <ProfileAvatar
+                      src={request.pfp_url}
+                      alt={request.name}
+                      name={request.name}
+                      size="md"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-white font-medium text-sm truncate">{request.name}</p>
+                      <p className="text-gray-400 text-xs">
+                        {request.goal} · {request.age || "—"} · {request.gender || "—"}
+                      </p>
+                    </div>
+                  </div>
                 ))
               )}
             </div>
@@ -545,7 +564,7 @@ export default function CoachDashboard() {
 
       <Overlay open={overlay === "clients"} onClose={closeOverlay} title="My Clients" wide>
         <ClientsDetail
-          clients={clients}
+          clients={clients.filter((c) => c.status === "active")}
           onMessage={handleOpenClientChat}
         />
       </Overlay>
@@ -591,32 +610,34 @@ export default function CoachDashboard() {
               return (
                 <div key={request.request_id} className="rounded-2xl border border-white/8 bg-[#0B1120] p-4 space-y-3">
                   <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-white font-semibold">
-                        {detail?.base_account?.name || `Client #${request.client_id}`}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        Request #{request.request_id} · Goal {detail?.fitness_goals?.[0]?.goal_enum || "not loaded"}
-                      </p>
+                    <div className="flex items-start gap-4 flex-1">
+                      <ProfileAvatar
+                        src={request.pfp_url}
+                        alt={request.name}
+                        name={request.name}
+                        size="lg"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white font-semibold">
+                          {request.name || `Client #${request.client_id}`}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          Goal: {request.goal} · Age: {request.age || "—"} · Gender: {request.gender || "—"}
+                        </p>
+                      </div>
                     </div>
                     <div className="flex gap-2">
                       <button
-                        onClick={() => loadClientRequestDetails(request.client_id)}
-                        className="rounded-lg border border-white/10 px-3 py-2 text-xs text-gray-300 hover:bg-white/5"
-                      >
-                        Load Details
-                      </button>
-                      <button
                         onClick={() => handleAcceptRequest(request)}
                         disabled={requestActionId === request.request_id}
-                        className="rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2 text-xs font-semibold text-green-300 disabled:opacity-60"
+                        className="rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2 text-xs font-semibold text-green-300 disabled:opacity-60 whitespace-nowrap"
                       >
                         {requestActionId === request.request_id ? "Accepting..." : "Accept"}
                       </button>
                       <button
                         onClick={() => handleDenyRequest(request.request_id)}
                         disabled={requestActionId === request.request_id}
-                        className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300 disabled:opacity-60"
+                        className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300 disabled:opacity-60 whitespace-nowrap"
                       >
                         {requestActionId === request.request_id ? "Denying..." : "Deny"}
                       </button>
@@ -626,11 +647,9 @@ export default function CoachDashboard() {
                   {detail ? (
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="rounded-xl bg-[#101827] p-3">
-                        <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Client Info</p>
+                        <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Additional Info</p>
                         <div className="space-y-1 text-xs text-gray-300">
                           <p>Email: {detail.base_account?.email || "—"}</p>
-                          <p>Age: {detail.base_account?.age ?? "—"}</p>
-                          <p>Gender: {detail.base_account?.gender || "—"}</p>
                           <p>Bio: {detail.base_account?.bio || "—"}</p>
                         </div>
                       </div>

@@ -54,37 +54,61 @@ export async function deleteCoachAccount() {
 }
 
 export async function fetchMyClients(_coachId) {
-  const acceptedClients = readAcceptedCoachClients(_coachId);
   try {
-    const items = await fetchClientRequests();
-    const clients = await Promise.all(items.map(async (item) => {
-      try {
-        const detail = await lookupClient(item.client_id);
-        return {
-          id: item.client_id,
-          request_id: item.request_id,
-          name: detail?.base_account?.name || `Client #${item.client_id}`,
-          goal: detail?.fitness_goals?.[0]?.goal_enum || "Pending request",
-          status: "pending",
-          joined: "",
-          relationship_id: item.relationship_id ?? null,
-          details: detail,
-        };
-      } catch {
-        return {
-          id: item.client_id,
-          request_id: item.request_id,
-          name: `Client #${item.client_id}`,
-          goal: "Pending request",
-          status: "pending",
-          joined: "",
-          relationship_id: item.relationship_id ?? null,
-        };
-      }
+    // Fetch accepted clients from API and enrich with details
+    const acceptedClientsResponse = await apiGet("/roles/coach/clients");
+    const acceptedClients = await Promise.all(
+      (Array.isArray(acceptedClientsResponse) ? acceptedClientsResponse : []).map(async (item) => {
+        try {
+          const detail = await lookupClient(item.client_id);
+          return {
+            id: item.client_id,
+            request_id: item.request_id,
+            name: detail?.base_account?.name || `Client #${item.client_id}`,
+            goal: detail?.fitness_goals?.[0]?.goal_enum || "Active client",
+            status: "active",
+            joined: new Date().toLocaleDateString(),
+            relationship_id: item.relationship_id,
+            details: detail,
+          };
+        } catch {
+          return {
+            id: item.client_id,
+            request_id: item.request_id,
+            name: `Client #${item.client_id}`,
+            goal: "Active client",
+            status: "active",
+            joined: new Date().toLocaleDateString(),
+            relationship_id: item.relationship_id,
+          };
+        }
+      })
+    );
+
+    // Fetch pending requests (API now returns full client details)
+    const pendingRequests = await fetchClientRequests();
+    const pendingClients = pendingRequests.map((request) => ({
+      id: request.client_id,
+      request_id: request.request_id,
+      name: request.name || `Client #${request.client_id}`,
+      goal: request.goal || "Pending request",
+      status: "pending",
+      joined: "",
+      relationship_id: null,
+      // Include basic details object for consistency
+      details: {
+        base_account: {
+          name: request.name,
+          age: request.age,
+          gender: request.gender,
+          pfp_url: request.pfp_url,
+        },
+      },
     }));
-    return mergeClientsById(clients, acceptedClients);
+
+    return mergeClientsById(pendingClients, acceptedClients);
   } catch {
-    return acceptedClients;
+    return [];
   }
 }
 
@@ -196,46 +220,11 @@ export async function fetchCoachReviews(coachId) {
 }
 
 export async function fetchCoachWorkoutPlans(coachId) {
-  const cacheKey = `coach_workouts:${coachId ?? "me"}`;
-  const cached = readJson(cacheKey);
-  if (Array.isArray(cached) && cached.length > 0) {
-    return cached.map((workout) => ({
-      id: workout.id,
-      strata_name: workout.name,
-      client_count: 0,
-      last_updated: "recently",
-    }));
-  }
-
+  // TODO: Implement API endpoint to fetch coach workout plans
+  // For now, returning empty array as we migrate away from localStorage caching
   return [];
 }
 
-export function cacheAcceptedClientForCoach(coachId, client) {
-  if (!coachId || !client?.id) return;
-  const key = getAcceptedClientsKey(coachId);
-  const cached = readJson(key);
-  const list = Array.isArray(cached) ? cached : [];
-  const next = [
-    {
-      ...client,
-      status: "active",
-      joined: client.joined || new Date().toLocaleDateString(),
-    },
-    ...list.filter((item) => Number(item.id) !== Number(client.id)),
-  ];
-  localStorage.setItem(key, JSON.stringify(next));
-}
-
-export function removeAcceptedClientForCoach(coachId, clientId) {
-  if (!coachId || !clientId) return;
-  const key = getAcceptedClientsKey(coachId);
-  const cached = readJson(key);
-  if (!Array.isArray(cached)) return;
-  localStorage.setItem(
-    key,
-    JSON.stringify(cached.filter((item) => Number(item.id) !== Number(clientId)))
-  );
-}
 
 export function buildCoachRequestPayload(form, availability) {
   return {
@@ -364,32 +353,6 @@ function normalizeDate(value) {
   return `${new Date().getFullYear()}-01-01`;
 }
 
-function readJson(key) {
-  const raw = localStorage.getItem(key);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-function getAcceptedClientsKey(coachId) {
-  return `coach_accepted_clients:${coachId ?? "me"}`;
-}
-
-function readAcceptedCoachClients(coachId) {
-  const parsed = readJson(getAcceptedClientsKey(coachId));
-  if (!Array.isArray(parsed)) return [];
-
-  return parsed.filter((client) => {
-    if (!client?.id) return false;
-    const relationshipKey = `client_relationship:${client.id}:${coachId}`;
-    const activeRelationship = localStorage.getItem(relationshipKey);
-    if (!client.relationship_id) return true;
-    return String(activeRelationship || "") === String(client.relationship_id);
-  });
-}
 
 function mergeClientsById(primaryClients, fallbackClients) {
   const merged = [];

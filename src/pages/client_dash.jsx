@@ -43,7 +43,6 @@ import {
   fetchDailyStepsSurvey,
   fetchStepHistory,
 } from "../api/survey";
-import { removeAcceptedClientForCoach } from "../api/coach";
 import { createConversation } from "../api/chat";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
@@ -273,9 +272,6 @@ export default function ClientDash() {
 
     try {
       await terminateRelationship(relationshipId);
-      if (coach?.coach_id) {
-        removeAcceptedClientForCoach(coach.coach_id, clientId);
-      }
       setCoach(null);
       setRelationshipId(null);
       await refreshCoachRequestState();

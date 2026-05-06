@@ -78,7 +78,6 @@ export async function getCurrentAccount() {
 
 export function logout() {
   localStorage.removeItem("jwt");
-  localStorage.removeItem("active_user_email");
   localStorage.removeItem("active_client_id");
   window.location.href = "/login";
 }

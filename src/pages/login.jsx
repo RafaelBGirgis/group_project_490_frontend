@@ -17,11 +17,6 @@ async function resolvePostLoginPath(account) {
 }
 
 async function handlePostLogin(email) {
-  const normalizedEmail = String(email || "").trim().toLowerCase();
-  if (normalizedEmail) {
-    localStorage.setItem("active_user_email", normalizedEmail);
-  }
-
   try {
     const account = await fetchMe();
     return await resolvePostLoginPath(account);
@@ -57,7 +52,7 @@ function LoginPage() {
 
     const restoreSession = async () => {
       try {
-        const redirectPath = await handlePostLogin(localStorage.getItem("active_user_email") || "");
+        const redirectPath = await handlePostLogin("");
         if (!cancelled) {
           window.location.href = redirectPath;
         }

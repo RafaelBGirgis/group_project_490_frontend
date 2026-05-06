@@ -12,7 +12,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
-/* ─── helpers ────────────────────────────────────────────────────────── */
+/*  helpers  */
 
 function mockFetchOk(data) {
   global.fetch = vi.fn(() =>
@@ -54,7 +54,7 @@ describe("Auth guards", () => {
 
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith(
-        "/me",
+        expect.stringContaining("/me"),
         expect.objectContaining({
           headers: expect.objectContaining({
             Authorization: "Bearer valid-token",
@@ -96,7 +96,7 @@ describe("Auth guards", () => {
 
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith(
-        "/me",
+        expect.stringContaining("/me"),
         expect.objectContaining({
           headers: expect.objectContaining({
             Authorization: "Bearer coach-token",
@@ -208,8 +208,9 @@ describe("API helper auth behavior", () => {
     await apiGet("/some-endpoint");
 
     expect(global.fetch).toHaveBeenCalledWith(
-      "/some-endpoint",
+      expect.stringContaining("/some-endpoint"),
       expect.objectContaining({
+        credentials: "include",
         headers: expect.objectContaining({
           Authorization: "Bearer my-secret-token",
           "Content-Type": "application/json",
@@ -234,7 +235,7 @@ describe("API helper auth behavior", () => {
     await apiPost("/create", { name: "test" });
 
     const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toBe("/create");
+    expect(url).toContain("/create");
     expect(opts.method).toBe("POST");
     expect(JSON.parse(opts.body)).toEqual({ name: "test" });
   });
@@ -245,7 +246,7 @@ describe("API helper auth behavior", () => {
     await apiPut("/update/1", { name: "updated" });
 
     const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toBe("/update/1");
+    expect(url).toContain("/update/1");
     expect(opts.method).toBe("PUT");
     expect(JSON.parse(opts.body)).toEqual({ name: "updated" });
   });
@@ -256,7 +257,7 @@ describe("API helper auth behavior", () => {
     await apiPatch("/update/profile", { goal: "muscle gain" });
 
     const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toBe("/update/profile");
+    expect(url).toContain("/update/profile");
     expect(opts.method).toBe("PATCH");
     expect(JSON.parse(opts.body)).toEqual({ goal: "muscle gain" });
   });

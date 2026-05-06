@@ -29,9 +29,10 @@ export default function ChatPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
+  const preselectedAccount = searchParams.get("account");
   const preselectedClient = searchParams.get("client");
 
-  /* ── auth + account ──────────────────────────────────────────────── */
+  /*  auth + account  */
   const [account, setAccount] = useState(null);
   const [loading, setLoading] = useState(true);
   const [resolvedRole, setResolvedRole] = useState("client");
@@ -47,18 +48,18 @@ export default function ChatPage() {
       .finally(() => setLoading(false));
   }, [navigate]);
 
-  /* ── determine role from account ─────────────────────────────────── */
+  /*  determine role from account  */
   const role = resolvedRole;
   const theme = ROLE_THEMES[role] || ROLE_THEMES.client;
   const roleTheme = CHAT_THEME[role];
 
   useEffect(() => {
     if (loading || !account) return;
-    const targetRoute = role === "coach" ? "/coach-chat" : "/client-chat";
+    const targetRoute = role === "coach" ? "/coach/messages" : "/client/messages";
     navigate(`${targetRoute}${location.search}`, { replace: true });
   }, [loading, account, role, location.search, navigate]);
 
-  /* ── conversations ───────────────────────────────────────────────── */
+  /*  conversations  */
   const [conversations, setConversations] = useState([]);
   const [activeChat, setActiveChat] = useState(null);
   const [loadingConvos, setLoadingConvos] = useState(true);
@@ -73,7 +74,11 @@ export default function ChatPage() {
         setConversations(scopedConversations);
         setActiveChat(null);
         // Auto-select conversation if preselected or first one
-        if (preselectedClient) {
+        if (preselectedAccount) {
+          const match = scopedConversations.find((c) => String(c.partner_account_id) === preselectedAccount);
+          if (match) setActiveChat(match);
+          else if (scopedConversations.length > 0) setActiveChat(scopedConversations[0]);
+        } else if (preselectedClient) {
           const match = scopedConversations.find((c) => String(c.partner_id) === preselectedClient);
           if (match) setActiveChat(match);
           else if (scopedConversations.length > 0) setActiveChat(scopedConversations[0]);
@@ -83,28 +88,48 @@ export default function ChatPage() {
       })
       .catch(() => {})
       .finally(() => setLoadingConvos(false));
-  }, [account, preselectedClient, roleTheme.partnerRole]);
+  }, [account, preselectedAccount, preselectedClient, roleTheme.partnerRole]);
 
-  /* ── messages ────────────────────────────────────────────────────── */
+  /*  messages  */
   const [messages, setMessages] = useState([]);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
     if (!activeChat) return;
+    let cancelled = false;
+
+    setMessages([]);
     setLoadingMsgs(true);
-    fetchMessages(activeChat.id)
-      .then(setMessages)
-      .catch(() => {})
-      .finally(() => setLoadingMsgs(false));
-  }, [activeChat]);
+
+    const loadMessages = async ({ initial = false } = {}) => {
+      try {
+        const nextMessages = await fetchMessages(activeChat.id);
+        if (cancelled) return;
+
+        setMessages(nextMessages);
+      } catch {
+        // keep the current message list on transient errors
+      } finally {
+        if (!cancelled && initial) setLoadingMsgs(false);
+      }
+    };
+
+    loadMessages({ initial: true });
+    const intervalId = window.setInterval(loadMessages, 4000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [activeChat?.id]);
 
   // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  /* ── send ────────────────────────────────────────────────────────── */
+  /*  send  */
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
 
@@ -114,35 +139,28 @@ export default function ChatPage() {
     setDraft("");
     setSending(true);
 
-    // Optimistic add
-    const tempMsg = {
-      id: Date.now(),
-      from_account_id: account.id,
-      content: text,
-      created_at: new Date().toISOString(),
-      is_read: true,
-    };
-    setMessages((prev) => [...prev, tempMsg]);
-
-    // Update conversation preview
-    setConversations((prev) =>
-      prev.map((c) =>
-        c.id === activeChat.id
-          ? { ...c, last_message: text, last_message_at: "Just now", unread_count: 0 }
-          : c
-      )
-    );
-
     try {
-      await sendMessage(activeChat.id, text);
+      const actualMsg = await sendMessage(activeChat.id, text);
+      
+      // Instantly update UI as a result of calling the API
+      setMessages((prev) => [...prev, actualMsg]);
+      
+      // Update conversation preview
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === activeChat.id
+            ? { ...c, last_message: text, last_message_at: "Just now", unread_count: 0 }
+            : c
+        )
+      );
     } catch {
-      // Message already shown optimistically
+      // transient error, maybe put text back into draft
     } finally {
       setSending(false);
     }
   };
 
-  /* ── initials helper ─────────────────────────────────────────────── */
+  /*  initials helper  */
   const getInitials = (name) =>
     name ? name.split(" ").map((n) => n[0]).join("").toUpperCase() : "?";
 
@@ -153,7 +171,7 @@ export default function ChatPage() {
     return ROLE_THEMES[senderRole] || ROLE_THEMES.client;
   };
 
-  /* ── format time ─────────────────────────────────────────────────── */
+  /*  format time  */
   const formatTime = (iso) => {
     try {
       const d = new Date(iso);
@@ -163,21 +181,7 @@ export default function ChatPage() {
     }
   };
 
-  const getMessageRole = (msg) => {
-    if (!activeChat) return role;
-
-    if (msg.from_account_id === account?.id || msg.from_account_id === 0) {
-      return role;
-    }
-
-    if (activeChat.partner_role === "coach" || activeChat.partner_role === "client") {
-      return activeChat.partner_role;
-    }
-
-    return role === "coach" ? "client" : "coach";
-  };
-
-  /* ── loading state ───────────────────────────────────────────────── */
+  /*  loading state  */
   if (loading) {
     return (
       <div className="min-h-screen" style={{ backgroundColor: "#080D19" }}>
@@ -208,7 +212,7 @@ export default function ChatPage() {
       <div className="max-w-7xl mx-auto px-6 py-6">
         <div className="flex gap-4 h-[calc(100vh-120px)]">
 
-          {/* ─── Conversation List (Left Sidebar) ─────────────────── */}
+          {/*  Conversation List (Left Sidebar)  */}
           <div className="w-80 shrink-0 flex flex-col rounded-2xl border border-white/6 bg-[#0F1729]">
             {/* Header */}
             <div className="px-4 py-4 border-b border-white/5">
@@ -273,7 +277,7 @@ export default function ChatPage() {
             </div>
           </div>
 
-          {/* ─── Chat Area (Right) ────────────────────────────────── */}
+          {/*  Chat Area (Right)  */}
           <div className="flex-1 flex flex-col rounded-2xl border border-white/6 bg-[#0F1729]">
             {!activeChat ? (
               <div className="flex-1 flex items-center justify-center">
@@ -316,11 +320,6 @@ export default function ChatPage() {
                   ) : (
                     messages.map((msg) => {
                       const isMe = msg.from_account_id === account.id || msg.from_account_id === 0;
-                      const senderRole = getMessageRole(msg);
-                      const bubbleTone =
-                        senderRole === "coach"
-                          ? "bg-[rgba(234,88,12,0.35)] text-white"
-                          : "bg-[rgba(37,99,235,0.35)] text-white";
 
                       return (
                         <div

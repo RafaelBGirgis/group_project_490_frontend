@@ -5,9 +5,17 @@ export async function fetchCoachRequests({ skip = 0, limit = 100 } = {}) {
   return Array.isArray(result) ? result.map(normalizeCoachRequest) : [];
 }
 
+export async function fetchTotalTransactions() {
+  const result = await apiGet("/roles/admin/total_transactions");
+  return normalizeTransactions(result);
+}
+
 export async function fetchAdminStats() {
   try {
-    const requests = await fetchCoachRequests();
+    const [requests, transactions] = await Promise.all([
+      fetchCoachRequests(),
+      fetchTotalTransactions().catch(() => ({ total_transactions: 0 })),
+    ]);
     return {
       total_accounts: requests.length,
       total_clients: 0,
@@ -16,7 +24,7 @@ export async function fetchAdminStats() {
       active_today: 0,
       active_this_week: 0,
       active_this_month: 0,
-      total_revenue: 0,
+      total_revenue: transactions.total_transactions ?? 0,
       revenue_this_month: 0,
       active_subscriptions: 0,
       revenue_change: 0,
@@ -139,5 +147,21 @@ function normalizeCoachRequest(item) {
     requested_role: "Coach",
     is_approved: null,
     created_at: item.base_account?.created_at || null,
+  };
+}
+
+function normalizeTransactions(result) {
+  if (typeof result === "number") {
+    return { total_transactions: result };
+  }
+
+  return {
+    total_transactions:
+      Number(
+        result?.total_transactions ??
+        result?.total_amount ??
+        result?.amount ??
+        0
+      ) || 0,
   };
 }

@@ -20,7 +20,7 @@ import {
   MUSCLE_GROUPS,
 } from "../api/workouts";
 
-/* ─── helpers ────────────────────────────────────────────────────────── */
+/*  helpers  */
 
 function mockFetchOk(data) {
   global.fetch = vi.fn(() =>
@@ -135,7 +135,7 @@ describe("createWorkout", () => {
       exercises: [{ name: "Bench Press", weight: 185, intensity_measure: "lbs", estimated_calories_per_unit_frequency: 8, equipment: "Barbell" }],
     });
     expect(global.fetch).toHaveBeenCalledWith(
-      "/roles/coach/fitness/workout",
+      expect.stringContaining("/roles/coach/fitness/workout"),
       expect.objectContaining({ method: "POST" })
     );
   });

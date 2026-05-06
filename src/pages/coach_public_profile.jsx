@@ -9,15 +9,12 @@ import {
   fetchCoachReports,
   fetchCoachReviews,
   fetchMe,
+  fetchMyCoach,
+  fetchMyCoachRequests,
   requestCoach,
   terminateRelationship,
 } from "../api/client";
 import { fetchCoachAvailability, fetchCoachProfile } from "../api/coach";
-import {
-  readClientCoachRequests,
-  removeClientCoachRequest,
-  saveClientCoachRequest,
-} from "../utils/coachRequests";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
 
@@ -208,9 +205,10 @@ export default function CoachPublicProfilePage() {
   const [account, setAccount] = useState(null);
   const [coach, setCoach] = useState(null);
   const [reviews, setReviews] = useState([]);
-  const [reports, setReports] = useState([]);
+  const [, setReports] = useState([]);
   const [availability, setAvailability] = useState([]);
   const [pendingRequests, setPendingRequests] = useState({});
+  const [activeCoachRelationshipId, setActiveCoachRelationshipId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
   const [hasClientRole, setHasClientRole] = useState(false);
@@ -235,9 +233,15 @@ export default function CoachPublicProfilePage() {
         const coachAccess = await getCoachAccessState(me);
         setCanSwitchToCoach(coachAccess.canAccessCoach);
 
-        if (me?.email) {
-          setPendingRequests(readClientCoachRequests(me.email));
+        const myCoach = await fetchMyCoach().catch(() => null);
+        if (Number(myCoach?.coach_id) === coachId && myCoach?.relationship_id != null) {
+          setActiveCoachRelationshipId(Number(myCoach.relationship_id));
+        } else {
+          setActiveCoachRelationshipId(null);
         }
+
+        const myRequests = await fetchMyCoachRequests().catch(() => []);
+        setPendingRequests(Object.fromEntries(myRequests.map((item) => [item.coach_id, item])));
 
         if (previewMode && Number(me?.coach_id) === coachId) {
           const coachProfile = await fetchCoachProfile().catch(() => null);
@@ -280,8 +284,7 @@ export default function CoachPublicProfilePage() {
   }, [account?.name]);
 
   const requestEntry = pendingRequests[coachId];
-  const relationshipId = requestEntry?.relationship_id
-    || (account?.client_id ? localStorage.getItem(`client_relationship:${account.client_id}:${coachId}`) : null);
+  const relationshipId = activeCoachRelationshipId || requestEntry?.relationship_id || null;
   const requestStatus = requestEntry?.status || null;
   const hasRelationshipHistory = Boolean(
     relationshipId
@@ -301,17 +304,9 @@ export default function CoachPublicProfilePage() {
     setActionError("");
     setActionMessage("");
     try {
-      const response = await requestCoach(account.client_id, coachId);
-      const requestData = {
-        request_id: response?.request_id,
-        coach_id: coachId,
-        coach_name: coach?.name || `Coach #${coachId}`,
-        coach_email: coach?.email || "",
-        status: "pending",
-        relationship_id: null,
-      };
-      saveClientCoachRequest(account.email, coachId, requestData);
-      setPendingRequests((prev) => ({ ...prev, [coachId]: requestData }));
+      await requestCoach(account.client_id, coachId);
+      const myRequests = await fetchMyCoachRequests();
+      setPendingRequests(Object.fromEntries(myRequests.map((item) => [item.coach_id, item])));
       setActionMessage("Coach request sent.");
     } catch (error) {
       setActionError(error.message || "Unable to request this coach.");
@@ -327,12 +322,8 @@ export default function CoachPublicProfilePage() {
     setActionMessage("");
     try {
       await deleteCoachRequest(requestEntry.request_id);
-      removeClientCoachRequest(account?.email, coachId);
-      setPendingRequests((prev) => {
-        const next = { ...prev };
-        delete next[coachId];
-        return next;
-      });
+      const myRequests = await fetchMyCoachRequests();
+      setPendingRequests(Object.fromEntries(myRequests.map((item) => [item.coach_id, item])));
       setActionMessage("Coach request cancelled.");
     } catch (error) {
       setActionError(error.message || "Unable to cancel this coach request.");
@@ -390,13 +381,9 @@ export default function CoachPublicProfilePage() {
     setActionError("");
     try {
       await terminateRelationship(Number(relationshipId));
-      localStorage.removeItem(`client_relationship:${account?.client_id}:${coachId}`);
-      removeClientCoachRequest(account?.email, coachId);
-      setPendingRequests((prev) => {
-        const next = { ...prev };
-        delete next[coachId];
-        return next;
-      });
+      setActiveCoachRelationshipId(null);
+      const myRequests = await fetchMyCoachRequests().catch(() => []);
+      setPendingRequests(Object.fromEntries(myRequests.map((item) => [item.coach_id, item])));
       setActionMessage("Coach relationship ended.");
     } catch (error) {
       setActionError(error.message || "Unable to end this relationship.");
@@ -437,8 +424,6 @@ export default function CoachPublicProfilePage() {
     );
   }
 
-  const ratingAvg = Number(coach?.rating_avg ?? 0);
-  const reviewCount = Number(coach?.review_count ?? reviews.length ?? 0);
   const initials = coach?.name ? coach.name.split(" ").map((item) => item[0]).join("").toUpperCase() : "?";
   const paymentPlan = formatPaymentPlan(coach);
 
@@ -508,7 +493,7 @@ export default function CoachPublicProfilePage() {
                   </div>
                 </div>
 
-                <div className="mt-6 grid gap-4 md:grid-cols-3">
+                <div className="mt-6 grid gap-4 md:grid-cols-2">
                   <div className="rounded-xl bg-[#0B1220] p-4">
                     <p className="text-[10px] uppercase tracking-widest text-gray-500">Age</p>
                     <p className="mt-2 text-sm font-semibold text-white">{coach.age ?? "—"}</p>
@@ -516,10 +501,6 @@ export default function CoachPublicProfilePage() {
                   <div className="rounded-xl bg-[#0B1220] p-4">
                     <p className="text-[10px] uppercase tracking-widest text-gray-500">Gender</p>
                     <p className="mt-2 text-sm font-semibold text-white">{coach.gender || "—"}</p>
-                  </div>
-                  <div className="rounded-xl bg-[#0B1220] p-4">
-                    <p className="text-[10px] uppercase tracking-widest text-gray-500">Experience Entries</p>
-                    <p className="mt-2 text-sm font-semibold text-white">{coach.experiences?.length ?? 0}</p>
                   </div>
                 </div>
 
@@ -553,28 +534,26 @@ export default function CoachPublicProfilePage() {
                   ) : null}
                 </div>
 
-                <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  {isPending ? (
+                <div className="mt-4 space-y-3">
+                  {isPending && !activeCoachRelationshipId ? (
                     <button
                       type="button"
                       onClick={handleCancelRequest}
                       disabled={requesting}
-                      className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-medium text-amber-300 disabled:opacity-60"
+                      className="w-full rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-medium text-amber-300 disabled:opacity-60"
                     >
                       {requesting ? "Cancelling..." : "Cancel Request"}
                     </button>
-                  ) : !isApproved ? (
+                  ) : !isApproved && !activeCoachRelationshipId ? (
                     <button
                       type="button"
                       onClick={handleRequestCoach}
                       disabled={requesting}
-                      className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white disabled:bg-blue-900/40"
+                      className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white disabled:bg-blue-900/40 hover:bg-blue-700 transition-colors"
                     >
                       {requesting ? "Sending..." : "Request Coach"}
                     </button>
-                  ) : (
-                    <div className="hidden md:block" />
-                  )}
+                  ) : null}
 
                   {canReview ? (
                     <button
@@ -583,33 +562,35 @@ export default function CoachPublicProfilePage() {
                         setActionError("");
                         setReviewModalOpen(true);
                       }}
-                      className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm font-medium text-yellow-300"
+                      className="w-full rounded-xl bg-yellow-600 px-4 py-3 text-sm font-semibold text-white hover:bg-yellow-700 transition-colors"
                     >
                       Leave a Review
                     </button>
                   ) : null}
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActionError("");
-                      setReportModalOpen(true);
-                    }}
-                    className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-300"
-                  >
-                    Report Coach
-                  </button>
-
-                  {relationshipId ? (
+                  <div className="grid gap-3 md:grid-cols-2">
                     <button
                       type="button"
-                      onClick={handleTerminateRelationship}
-                      disabled={terminating}
-                      className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-medium text-slate-300 disabled:opacity-50"
+                      onClick={() => {
+                        setActionError("");
+                        setReportModalOpen(true);
+                      }}
+                      className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-300 hover:bg-red-500/20 transition-colors"
                     >
-                      {terminating ? "Ending..." : "End Relationship"}
+                      Report Coach
                     </button>
-                  ) : null}
+
+                    {relationshipId ? (
+                      <button
+                        type="button"
+                        onClick={handleTerminateRelationship}
+                        disabled={terminating}
+                        className="rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+                      >
+                        {terminating ? "Ending..." : "Fire Coach"}
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
               </section>
             )}

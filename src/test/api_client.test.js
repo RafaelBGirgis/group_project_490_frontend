@@ -157,6 +157,43 @@ describe("fetchWorkoutPlan", () => {
       expect(typeof a.logged).toBe("boolean");
     });
   });
+
+  it("uses the weekly plan saved from Browse & Build Workouts", async () => {
+    mockFetchFail();
+    localStorage.setItem(
+      "client_weekly_plan:1",
+      JSON.stringify({
+        monday: {
+          name: "Push Day",
+          exercises: [
+            {
+              id: "bench-1",
+              name: "Bench Press",
+              sets: 4,
+              reps: 8,
+              weight: 135,
+              intensity_measure: "lbs",
+            },
+          ],
+        },
+      })
+    );
+
+    const plan = await fetchWorkoutPlan(1, 0);
+
+    expect(plan.strata_name).toBe("Push Day");
+    expect(plan.activities).toEqual([
+      expect.objectContaining({
+        id: "bench-1",
+        name: "Bench Press",
+        suggested_sets: 4,
+        suggested_reps: 8,
+        intensity_value: 135,
+        intensity_measure: "lbs",
+        logged: false,
+      }),
+    ]);
+  });
 });
 
 describe("logWorkoutActivity", () => {

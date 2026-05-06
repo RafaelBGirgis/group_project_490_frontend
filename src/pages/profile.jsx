@@ -619,12 +619,11 @@ function ProfilePage({ role = "client" }) {
   };
 
   const handleDeactivateAccount = async () => {
-    if (window.confirm("Are you sure you want to deactivate your account? This action cannot be undone.")) {
+    if (window.confirm("Are you sure you want to deactivate your account? You can reactivate it later.")) {
       try {
         await deactivateAccount();
-        alert("Account deactivated successfully.");
-        localStorage.removeItem("jwt");
-        navigate("/login");
+        alert("Account deactivated successfully. You will see the reactivation screen now.");
+        window.location.href = "/deactivated";
       } catch {
         alert("Failed to deactivate account. Please try again.");
       }

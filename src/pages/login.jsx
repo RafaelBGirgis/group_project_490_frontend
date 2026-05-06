@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import clientLogo from "../assets/Client Logo.svg";
-import { initiateGoogleOAuth, isAuthenticated, login as loginRequest, storeToken } from "../api/auth";
+import { initiateGoogleOAuth, isAuthenticated, login as loginRequest, storeToken, fetchAuthRoles } from "../api/auth";
 import { fetchBackendHealth, fetchMe } from "../api/client";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
@@ -14,6 +14,24 @@ async function resolvePostLoginPath(account) {
   if (coachAccess.canAccessCoach) return "/coach";
   if (roleState.hasClientRole) return "/client";
   return "/onboarding";
+}
+
+async function handlePostLogin(email) {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  if (normalizedEmail) {
+    localStorage.setItem("active_user_email", normalizedEmail);
+  }
+
+  try {
+    const account = await fetchMe();
+    return await resolvePostLoginPath(account);
+  } catch (err) {
+    const roles = await fetchAuthRoles();
+    if (Array.isArray(roles) && roles.includes("deactivated")) {
+      return "/deactivated";
+    }
+    throw err;
+  }
 }
 
 const API_BASE_URL = import.meta.env.PROD ? "https://api.till-failure.us" : "";
@@ -39,13 +57,9 @@ function LoginPage() {
 
     const restoreSession = async () => {
       try {
-        const account = await fetchMe();
-        const normalizedEmail = String(account?.email || "").trim().toLowerCase();
-        if (normalizedEmail) {
-          localStorage.setItem("active_user_email", normalizedEmail);
-        }
+        const redirectPath = await handlePostLogin(localStorage.getItem("active_user_email") || "");
         if (!cancelled) {
-          window.location.href = await resolvePostLoginPath(account);
+          window.location.href = redirectPath;
         }
       } catch {
         // Ignore failed silent restore attempts and keep the login form visible.
@@ -60,18 +74,14 @@ function LoginPage() {
   }, []);
 
   const handleSubmit = async (e) => {
-    e.preventDefault(); // prevent page reload
+    e.preventDefault();
     setError("");
 
     try {
       const data = await loginRequest(email, password);
       storeToken(data.access_token);
-      const account = await fetchMe();
-      const normalizedEmail = String(account?.email || email).trim().toLowerCase();
-      if (normalizedEmail) {
-        localStorage.setItem("active_user_email", normalizedEmail);
-      }
-      window.location.href = await resolvePostLoginPath(account);
+      const redirectPath = await handlePostLogin(email);
+      window.location.href = redirectPath;
     } catch (err) {
       console.error(err);
       setError(err.message);

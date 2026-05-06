@@ -80,11 +80,15 @@ export async function uploadProfilePicture(file) {
 // }
 
 export async function deactivateAccount() {
-  return { success: true, message: "Account deactivation endpoint is not available in the backend yet." };
+  return apiPost("/roles/shared/account/deactivate", {});
+}
+
+export async function activateAccount() {
+  return apiPost("/roles/shared/account/activate", {});
 }
 
 export async function deleteAccount() {
-  return { success: true, message: "Account deletion endpoint is not available in the backend yet." };
+  return apiDelete("/roles/shared/account/delete");
 }
 
 export async function fetchTelemetryToday(_clientId) {

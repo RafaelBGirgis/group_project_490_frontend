@@ -190,7 +190,7 @@ export function Navbar({
     unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications";
 
   return (
-    <nav className="relative z-10 border-b border-white/5 bg-[#0B1120]">
+    <nav className="relative z-50 border-b border-white/5 bg-[#0B1120]">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3">
         <div className="flex items-center gap-3">
           <img
@@ -257,7 +257,7 @@ export function Navbar({
             </button>
 
             {showNotifs && (
-              <div className="absolute right-0 top-12 z-50 w-80 overflow-hidden rounded-2xl border border-white/10 bg-[#0D1424] shadow-[0_0_60px_rgba(0,0,0,0.5)]">
+              <div className="absolute right-0 top-12 z-[100] w-80 overflow-hidden rounded-2xl border border-white/10 bg-[#0D1424] shadow-[0_0_60px_rgba(0,0,0,0.5)]">
                 <div className="flex items-center justify-between border-b border-white/5 px-4 py-3">
                   <p className="text-sm font-bold text-white">Notifications</p>
                   <button

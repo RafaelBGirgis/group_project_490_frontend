@@ -1,96 +1,80 @@
 import { apiDelete, apiGet, apiPatch, apiPost, withQuery } from "./api";
 import { getToken } from "./auth";
 
-function getConversationCacheKey(accountId, role = "client") {
-  return `chat:conversations:${role}:${accountId ?? "current"}`;
+export async function fetchConversationWithAccount(accountId, fallback = {}) {
+  if (!accountId) return null;
+
+  try {
+    const result = await apiGet(`/roles/shared/chat/chat_with_account/${accountId}`);
+    return normalizeConversation(result, fallback);
+  } catch (error) {
+    if (error?.status === 404) {
+      return null;
+    }
+    throw error;
+  }
 }
 
-function getRelationshipChatKey(relationshipId) {
-  return `chat:relationship:${relationshipId}`;
-}
+export async function fetchConversations(_accountId, _role = "client", options = {}) {
+  const partnerAccounts = Array.isArray(options.partnerAccounts)
+    ? options.partnerAccounts.filter((item) => item?.account_id)
+    : [];
 
-function mergeConversationLists(lists = []) {
-  const merged = [];
-  const seen = new Set();
-  lists.flat().forEach((conversation) => {
-    if (!conversation || seen.has(conversation.id)) return;
-    seen.add(conversation.id);
-    merged.push(conversation);
-  });
-  return merged;
-}
-
-export async function fetchConversations(accountId, role = "client", options = {}) {
-  const legacyIds = Array.isArray(options.legacyAccountIds) ? options.legacyAccountIds.filter(Boolean) : [];
-  const keys = [getConversationCacheKey(accountId, role), ...legacyIds.map((id) => getConversationCacheKey(id, role))];
-  const conversationLists = keys.map((key) => {
-    const parsed = readJson(key);
-    return Array.isArray(parsed) ? parsed : [];
-  });
-  const merged = mergeConversationLists(conversationLists);
-
-  if (merged.length > 0) {
-    localStorage.setItem(getConversationCacheKey(accountId, role), JSON.stringify(merged));
-    legacyIds.forEach((id) => {
-      if (id !== accountId) {
-        localStorage.removeItem(getConversationCacheKey(id, role));
-      }
-    });
+  if (partnerAccounts.length === 0) {
+    return [];
   }
 
-  return merged;
+  const conversations = await Promise.all(
+    partnerAccounts.map((partner) =>
+      fetchConversationWithAccount(partner.account_id, partner).catch(() => null)
+    )
+  );
+
+  return conversations
+    .filter(Boolean)
+    .sort((a, b) => {
+      const aTime = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
+      const bTime = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
+      return bTime - aTime;
+    });
 }
 
-export async function createConversation(relationshipId, partner, options = {}) {
-  const relationshipChatKey = getRelationshipChatKey(relationshipId);
-  const existingChatId = localStorage.getItem(relationshipChatKey);
-  let chatId = existingChatId ? Number(existingChatId) : null;
+export async function createConversation(relationshipId, partner, _options = {}) {
+  const partnerAccountId =
+    partner?.account_id ??
+    partner?.accountId ??
+    partner?.id;
 
-  if (!chatId) {
-    const response = await apiPost("/roles/shared/chat/new_chat", {
-      relationship_id: relationshipId,
-    });
-    chatId = Number(response?.chat_id);
-    if (chatId) {
-      localStorage.setItem(relationshipChatKey, String(chatId));
+  if (partnerAccountId) {
+    const existingConversation = await fetchConversationWithAccount(partnerAccountId, partner);
+    if (existingConversation) {
+      return existingConversation;
     }
   }
 
-  const conversation = {
-    id: chatId,
-    partner_id: partner?.id,
+  if (!relationshipId) {
+    throw new Error("Missing relationship id for new chat.");
+  }
+
+  const response = await apiPost("/roles/shared/chat/new_chat", {
+    relationship_id: relationshipId,
+  });
+
+  return {
+    id: Number(response?.chat_id),
+    partner_id: partner?.id ?? null,
+    partner_account_id: partnerAccountId ?? null,
     partner_name: partner?.name || "New conversation",
     partner_role: partner?.role || "coach",
     last_message: "",
     last_message_at: null,
     unread_count: 0,
   };
-
-  const cacheKey = getConversationCacheKey(options.accountId, options.role || partner?.role || "client");
-  const cached = readJson(cacheKey) || [];
-  const next = [conversation, ...cached.filter((item) => item.id !== conversation.id)];
-  localStorage.setItem(cacheKey, JSON.stringify(next));
-  return conversation;
 }
 
-export function cacheConversationForAccount(conversation, { accountId, role = "client" } = {}) {
-  if (!conversation || !accountId) return;
-  const cacheKey = getConversationCacheKey(accountId, role);
-  const cached = readJson(cacheKey) || [];
-  const next = [conversation, ...cached.filter((item) => item.id !== conversation.id)];
-  localStorage.setItem(cacheKey, JSON.stringify(next));
-}
+export function cacheConversationForAccount() {}
 
-export function updateConversationPreview(chatId, updater, { accountId, role = "client" } = {}) {
-  if (!chatId || !accountId || typeof updater !== "function") return;
-  const cacheKey = getConversationCacheKey(accountId, role);
-  const cached = readJson(cacheKey);
-  if (!Array.isArray(cached)) return;
-  const next = cached.map((conversation) =>
-    conversation.id === chatId ? { ...conversation, ...updater(conversation) } : conversation
-  );
-  localStorage.setItem(cacheKey, JSON.stringify(next));
-}
+export function updateConversationPreview() {}
 
 export async function fetchMessages(chatId, { skip = 0, limit = 100 } = {}) {
   const result = await apiGet(withQuery(`/roles/shared/chat/get_messages/${chatId}`, { skip, limit }));
@@ -141,6 +125,56 @@ function readJson(key) {
   } catch {
     return null;
   }
+}
+
+function normalizeConversation(result, fallback = {}) {
+  if (!result || typeof result !== "object") return null;
+
+  const chatId = result.chat_id ?? result.id ?? result.chat?.id;
+  if (!chatId) return null;
+
+  const lastMessage =
+    result.last_message?.message_text ||
+    result.last_message?.content ||
+    result.last_message_text ||
+    result.preview ||
+    "";
+  const lastMessageAt =
+    result.last_message?.last_updated ||
+    result.last_message?.created_at ||
+    result.last_message_at ||
+    result.updated_at ||
+    null;
+
+  return {
+    id: Number(chatId),
+    partner_id:
+      fallback.id ??
+      fallback.partner_id ??
+      result.partner_id ??
+      result.account_id ??
+      null,
+    partner_account_id:
+      fallback.account_id ??
+      fallback.accountId ??
+      result.account_id ??
+      null,
+    partner_name:
+      fallback.name ||
+      fallback.partner_name ||
+      result.partner_name ||
+      result.account_name ||
+      result.name ||
+      "Conversation",
+    partner_role:
+      fallback.role ||
+      fallback.partner_role ||
+      result.partner_role ||
+      "client",
+    last_message: lastMessage,
+    last_message_at: lastMessageAt,
+    unread_count: Number(result.unread_count ?? 0),
+  };
 }
 
 /* relationship management */

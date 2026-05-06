@@ -3,18 +3,21 @@ import { useState, useEffect, useRef } from "react";
 import { Navbar, SkeletonMessage } from "../components";
 import { fetchMe } from "../api/client";
 import {
+  createConversation,
+  fetchConversationWithAccount,
   fetchConversations,
   fetchMessages,
   formatChatTimestamp,
   sendMessage,
-  updateConversationPreview,
 } from "../api/chat";
 import { ROLE_THEMES } from "../components/theme";
 import { getCoachAccessState } from "../utils/roleAccess";
+import { fetchClientRequests, fetchMyClients, lookupClient } from "../api/coach";
 
 export default function CoachChatPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const preselectedAccount = searchParams.get("account");
   const preselectedClient = searchParams.get("client");
 
   const [account, setAccount] = useState(null);
@@ -56,16 +59,74 @@ export default function CoachChatPage() {
     if (!account) return;
     setLoadingConvos(true);
     setChatError("");
-    fetchConversations(account.id, "coach", {
-      legacyAccountIds: [account.coach_id],
-    })
-      .then((convos) => {
-        setConversations(convos);
-        if (preselectedClient) {
-          const match = findPreferredConversation(convos, preselectedClient);
-          setActiveChat(match);
-        } else if (convos.length > 0) {
-          setActiveChat((current) => current && convos.some((item) => item.id === current.id) ? current : convos[0]);
+    const loadConversations = async () => {
+      const clients = await fetchMyClients(account.coach_id).catch(() => []);
+      const partnerAccounts = await Promise.all(
+        clients.map(async (client) => {
+          const detail = client?.details || await lookupClient(client.id).catch(() => null);
+          const accountId = detail?.base_account?.id;
+          if (!accountId) return null;
+          return {
+            account_id: accountId,
+            id: client.id,
+            relationship_id:
+              client.relationship_id ??
+              detail?.relationship_id ??
+              detail?.client_coach_relationship?.id ??
+              null,
+            name: detail?.base_account?.name || client.name || `Client #${client.id}`,
+            role: "client",
+          };
+        })
+      );
+      return fetchConversations(account.id, "coach", {
+        partnerAccounts: partnerAccounts.filter(Boolean),
+      });
+    };
+
+    loadConversations()
+      .then(async (convos) => {
+        const clients = await fetchMyClients(account.coach_id).catch(() => []);
+        let nextConversations = convos;
+        let nextActiveChat = null;
+
+        if (preselectedAccount) {
+          nextActiveChat = convos.find((c) => String(c.partner_account_id) === preselectedAccount) || null;
+        } else if (preselectedClient) {
+          nextActiveChat = findPreferredConversation(convos, preselectedClient);
+        }
+
+        if (!nextActiveChat && preselectedClient) {
+          const selectedClient = clients.find((client) => String(client.id) === String(preselectedClient));
+          const detail = selectedClient?.details || await lookupClient(preselectedClient).catch(() => null);
+          const relationshipId =
+            selectedClient?.relationship_id ??
+            detail?.relationship_id ??
+            detail?.client_coach_relationship?.id ??
+            null;
+          const ensuredConversation = await createConversation(relationshipId, {
+            id: Number(preselectedClient),
+            account_id: detail?.base_account?.id ?? null,
+            name: detail?.base_account?.name || selectedClient?.name || `Client #${preselectedClient}`,
+            role: "client",
+          }).catch(() => null);
+
+          if (ensuredConversation) {
+            nextConversations = [
+              ensuredConversation,
+              ...convos.filter((item) => item.id !== ensuredConversation.id),
+            ];
+            nextActiveChat = ensuredConversation;
+          }
+        }
+
+        setConversations(nextConversations);
+        if (nextActiveChat) {
+          setActiveChat(nextActiveChat);
+        } else if (nextConversations.length > 0) {
+          setActiveChat((current) =>
+            current && nextConversations.some((item) => item.id === current.id) ? current : nextConversations[0]
+          );
         } else {
           setActiveChat(null);
         }
@@ -76,7 +137,7 @@ export default function CoachChatPage() {
         setChatError(error.message || "Unable to load conversations.");
       })
       .finally(() => setLoadingConvos(false));
-  }, [account, preselectedClient]);
+  }, [account, preselectedAccount, preselectedClient]);
 
   const [messages, setMessages] = useState([]);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
@@ -141,15 +202,6 @@ export default function CoachChatPage() {
     try {
       const sentMessage = await sendMessage(activeChat.id, text);
       setMessages((prev) => prev.map((message) => (message.id === tempMsg.id ? sentMessage : message)));
-      updateConversationPreview(
-        activeChat.id,
-        () => ({
-          last_message: text,
-          last_message_at: sentMessage.created_at,
-          unread_count: 0,
-        }),
-        { accountId: account.id, role: "coach" }
-      );
       setConversations((prev) =>
         prev.map((conversation) =>
           conversation.id === activeChat.id

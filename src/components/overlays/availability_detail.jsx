@@ -14,7 +14,7 @@
  *   role      – "client" | "coach" (for accent colors)
  */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 
 const FULL_WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -80,18 +80,29 @@ export default function AvailabilityDetail({
   role = "client",
 }) {
   const isCoach = role === "coach";
+  const normalizeRows = useCallback(
+    (rows) =>
+      (rows ?? []).map((row) => ({
+        ...row,
+        slots: Array.from({ length: 7 }, (_, i) =>
+          normalizeStatus(Array.isArray(row.slots) ? row.slots[i] : null)
+        ),
+      })),
+    []
+  );
   const [slots, setSlots] = useState(() =>
-    (initialSlots ?? []).map((row) => ({
-      ...row,
-      slots: Array.from({ length: 7 }, (_, i) =>
-        normalizeStatus(Array.isArray(row.slots) ? row.slots[i] : null)
-      ),
-    }))
+    normalizeRows(initialSlots)
   );
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
   const [showAddRow, setShowAddRow] = useState(false);
+
+  useEffect(() => {
+    setSlots(normalizeRows(initialSlots));
+    setSaved(false);
+    setHasChanges(false);
+  }, [initialSlots, normalizeRows]);
 
   /*  toggle a cell  */
   const toggleCell = useCallback((timeIdx, dayIdx) => {

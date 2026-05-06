@@ -31,7 +31,7 @@ import {
   createClientReview,
   fetchClientReports,
 } from "../api/coach";
-import { cacheConversationForAccount, createConversation } from "../api/chat";
+import { createConversation } from "../api/chat";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { updateClientCoachRequestByRequestId } from "../utils/coachRequests";
 import { resolveRoleState } from "../utils/sessionAuth";
@@ -58,8 +58,6 @@ export default function CoachDashboard() {
   /*  auth guard  */
   const [authed, setAuthed] = useState(false);
   useEffect(() => {
-    const token = localStorage.getItem("jwt");
-    if (!token) { navigate("/login"); return; }
     setAuthed(true);
   }, [navigate]);
 
@@ -85,6 +83,7 @@ export default function CoachDashboard() {
   const [clientReports, setClientReports] = useState({});
   const [availabilityError, setAvailabilityError] = useState("");
   const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(false);
+  const [chatActionId, setChatActionId] = useState(null);
 
   /*  load account  */
   useEffect(() => {
@@ -128,8 +127,14 @@ export default function CoachDashboard() {
       setWorkoutPlans(plans);
 
       try {
-        const requests = await fetchClientRequests();
-      setClientRequests(requests);
+      const requests = await fetchClientRequests();
+      const detailedRequests = await Promise.all(
+        requests.map(async (request) => {
+          const detail = await lookupClient(request.client_id).catch(() => null);
+          return { ...request, detail };
+        })
+      );
+      setClientRequests(detailedRequests);
     } catch {
       setClientRequests([]);
     }
@@ -166,28 +171,12 @@ export default function CoachDashboard() {
           String(accepted.relationship_id)
         );
         const detail = await loadClientRequestDetails(request.client_id).catch(() => null);
-        const conversation = await createConversation(accepted.relationship_id, {
+        await createConversation(accepted.relationship_id, {
           id: request.client_id,
+          account_id: detail?.base_account?.id || null,
           name: detail?.base_account?.name || `Client #${request.client_id}`,
           role: "client",
-        }, {
-          accountId: account?.id || coachId,
-          role: "coach",
         }).catch(() => null);
-        if (conversation) {
-          cacheConversationForAccount(
-            {
-              id: conversation.id,
-              partner_id: coachId,
-              partner_name: account?.name || "Coach",
-              partner_role: "coach",
-              last_message: conversation.last_message || "",
-              last_message_at: conversation.last_message_at || "",
-              unread_count: conversation.unread_count || 0,
-            },
-            { accountId: detail?.base_account?.id || request.client_id, role: "client" }
-          );
-        }
         updateClientCoachRequestByRequestId(request.request_id, {
           status: "approved",
           relationship_id: accepted.relationship_id,
@@ -253,6 +242,43 @@ export default function CoachDashboard() {
       setClientReportDrafts((prev) => ({ ...prev, [clientId]: "" }));
     } finally {
       setRequestActionId(null);
+    }
+  };
+
+  const handleOpenClientChat = async (client) => {
+    const clientId = client?.id ?? client;
+    if (!clientId) return;
+
+    setChatActionId(clientId);
+    try {
+      const detail = client?.details || await loadClientRequestDetails(clientId).catch(() => null);
+      const relationshipId =
+        client?.relationship_id ??
+        detail?.relationship_id ??
+        detail?.client_coach_relationship?.id ??
+        null;
+      const accountId =
+        detail?.base_account?.id ??
+        client?.details?.base_account?.id ??
+        null;
+
+      const conversation = await createConversation(relationshipId, {
+        id: clientId,
+        account_id: accountId,
+        name: detail?.base_account?.name || client?.name || `Client #${clientId}`,
+        role: "client",
+      });
+
+      closeOverlay();
+      navigate(
+        conversation?.partner_account_id
+          ? `/coach-chat?account=${conversation.partner_account_id}`
+          : `/coach-chat?client=${clientId}`
+      );
+    } catch {
+      navigate(`/coach-chat?client=${clientId}`);
+    } finally {
+      setChatActionId(null);
     }
   };
 
@@ -520,7 +546,7 @@ export default function CoachDashboard() {
       <Overlay open={overlay === "clients"} onClose={closeOverlay} title="My Clients" wide>
         <ClientsDetail
           clients={clients}
-          onMessage={(id) => { closeOverlay(); navigate(`/coach-chat?client=${id}`); }}
+          onMessage={handleOpenClientChat}
         />
       </Overlay>
 

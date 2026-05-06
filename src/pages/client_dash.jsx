@@ -33,6 +33,7 @@ import {
   fetchAvailability,
   saveAvailability,
   fetchMealsToday,
+  fetchAvailableOnDemandMeals,
   logMeal,
   terminateRelationship,
 } from "../api/client";
@@ -128,6 +129,7 @@ export default function ClientDash() {
   const [nextSession, setNextSession]   = useState(null);
   const [availabilitySlots, setAvailabilitySlots] = useState([]);
   const [prescribedMeals, setPrescribedMeals] = useState([]);
+  const [availableMeals, setAvailableMeals] = useState([]);
   const [loading, setLoading]           = useState(true);
   const [relationshipId, setRelationshipId] = useState(null);
   const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
@@ -175,13 +177,14 @@ export default function ClientDash() {
 
     (async () => {
       try {
-        const [telemetry, coachInfo, session, availability, meals] =
+        const [telemetry, coachInfo, session, availability, meals, mealOptions] =
           await Promise.all([
             fetchTelemetryToday(clientId),
             fetchCoachInfo(clientId),
             fetchNextSession(clientId),
             fetchAvailability(clientId),
             fetchMealsToday(clientId),
+            fetchAvailableOnDemandMeals(clientId),
           ]);
 
         setStepCount(telemetry.step_count);
@@ -193,6 +196,7 @@ export default function ClientDash() {
         setNextSession(session);
         setAvailabilitySlots(availability);
         setPrescribedMeals(meals);
+        setAvailableMeals(mealOptions);
         if (coachInfo?.coach_id) {
           const storedRelationshipId = localStorage.getItem(`client_relationship:${clientId}:${coachInfo.coach_id}`);
           setRelationshipId(storedRelationshipId ? Number(storedRelationshipId) : null);
@@ -748,13 +752,7 @@ export default function ClientDash() {
               {prescribedMeals.slice(0, 5).map((meal) => (
                 <ListRow
                   key={meal.id}
-                  label={
-                    meal.client_prescribed_meal_id != null
-                      ? `Prescribed #${meal.client_prescribed_meal_id}`
-                      : meal.on_demand_meal_id != null
-                        ? `On-demand #${meal.on_demand_meal_id}`
-                        : `Entry #${meal.id}`
-                  }
+                  label={meal.meal_name || "Logged Meal"}
                   right={
                     <span className="text-[11px] text-gray-400">
                       {meal.logged_at
@@ -818,7 +816,11 @@ export default function ClientDash() {
         onClose={closeOverlay}
         title="Meal Log"
       >
-        <MealDetail meals={prescribedMeals} onLogMeal={handleLogMeal} />
+        <MealDetail
+          meals={prescribedMeals}
+          availableMeals={availableMeals}
+          onLogMeal={handleLogMeal}
+        />
       </Overlay>
 
       {/* Daily Survey */}

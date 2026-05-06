@@ -64,22 +64,33 @@ export async function refreshToken(email, password) {
   });
 }
 
+export function clearAuth() {
+  localStorage.removeItem("jwt");
+  localStorage.removeItem("active_client_id");
+  SESSION_COOKIE_NAMES.forEach((name) => {
+    document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+  });
+}
+
 export async function getCurrentAccount() {
   try {
     return await apiFetch("/me");
   } catch (error) {
     if (error?.status === 401) {
-      localStorage.removeItem("jwt");
-      window.location.href = "/login";
+      clearAuth();
+      if (window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
     }
     throw error;
   }
 }
 
 export function logout() {
-  localStorage.removeItem("jwt");
-  localStorage.removeItem("active_client_id");
-  window.location.href = "/login";
+  clearAuth();
+  if (window.location.pathname !== "/login") {
+    window.location.href = "/login";
+  }
 }
 
 export function storeToken(token) {

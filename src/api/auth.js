@@ -128,8 +128,15 @@ export function syncTokenFromCookie() {
   return getToken();
 }
 
-export function initiateGoogleOAuth() {
-  window.location.href = `${import.meta.env.VITE_API_BASE_URL || ""}/auth/google`;
+export async function initiateGoogleOAuth() {
+  try {
+    const data = await apiGet("/auth/google/url");
+    if (data && data.url) {
+      window.location.href = data.url;
+    }
+  } catch (err) {
+    console.error("Failed to initiate Google OAuth:", err);
+  }
 }
 
 export async function handleGoogleOAuthCallback(code, state) {

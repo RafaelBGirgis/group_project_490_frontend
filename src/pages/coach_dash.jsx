@@ -249,11 +249,6 @@ export default function CoachDashboard() {
     setChatActionId(clientId);
     try {
       const detail = client?.details || await loadClientRequestDetails(clientId).catch(() => null);
-      const relationshipId =
-        client?.relationship_id ??
-        detail?.relationship_id ??
-        detail?.client_coach_relationship?.id ??
-        null;
       const accountId =
         detail?.base_account?.id ??
         client?.details?.base_account?.id ??
@@ -288,10 +283,6 @@ export default function CoachDashboard() {
   const lastName = nameParts.slice(1).join(" ") || "";
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good Morning" : hour < 17 ? "Good Afternoon" : "Good Evening";
-  const todaySessions = sessions.filter((s) => {
-    const dayNames = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
-    return s.weekday === dayNames[new Date().getDay()];
-  });
 
   /*  loading skeleton  */
   if (loading) {
@@ -333,7 +324,7 @@ export default function CoachDashboard() {
         {/*  OVERVIEW  */}
         <SectionHeader label="OVERVIEW" role={role} />
 
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-3 gap-4">
           <DashboardCard role={role} className="min-h-50">
             <p className="text-xs text-gray-500 uppercase tracking-widest mb-1">{greeting}</p>
             <h2 className="text-4xl font-bold text-white leading-tight">
@@ -353,12 +344,6 @@ export default function CoachDashboard() {
           />
           <StatCard
             role={role}
-            label="SESSIONS THIS WEEK"
-            value={stats?.sessions_this_week ?? "—"}
-            sub={`${todaySessions.length} today`}
-          />
-          <StatCard
-            role={role}
             label="AVG RATING"
             value={stats?.avg_rating ? `★ ${stats.avg_rating}` : "—"}
             sub={stats?.review_count ? `${stats.review_count} reviews` : "no reviews"}
@@ -368,7 +353,7 @@ export default function CoachDashboard() {
         {/*  CLIENTS & SESSIONS  */}
         <SectionHeader label="CLIENTS & SESSIONS" role={role} />
 
-        <div className="grid grid-cols-1 xl:grid-cols-4 gap-4 items-stretch">
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 items-stretch">
           {/* My Clients */}
           {(() => {
             const activeClients = clients.filter((c) => c.status === "active");
@@ -426,28 +411,7 @@ export default function CoachDashboard() {
             );
           })()}
 
-          {/* Upcoming Sessions */}
-          <DashboardCard
-            role={role}
-            title="Upcoming Sessions"
-            action={{ label: "View all", onClick: () => setOverlay("sessions") }}
-          >
-            <div className="space-y-2">
-              {sessions.slice(0, 4).map((s) => (
-                <ListRow
-                  key={s.id}
-                  label={s.client_name}
-                  sub={`${s.weekday} · ${s.start_time}`}
-                  right={
-                    <span className="text-orange-400/80 text-xs font-medium">{s.type}</span>
-                  }
-                />
-              ))}
-              {sessions.length > 4 && (
-                <p className="text-gray-500 text-xs text-center pt-1">+{sessions.length - 4} more</p>
-              )}
-            </div>
-          </DashboardCard>
+          
 
           {/* Availability */}
           <DashboardCard

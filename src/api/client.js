@@ -685,9 +685,14 @@ export function extractUploadedAssetUrl(response) {
 /* coach reviews & reports */
 
 export async function submitCoachReview(coachId, rating, reviewText) {
-  return apiPost(`/roles/client/coach_review/${coachId}`, null)
+  return apiPost(
+    withQuery(`/roles/client/coach_review/${coachId}`, {
+      rating,
+      review_text: reviewText,
+    }),
+    null
+  )
     .catch(() => ({ review_id: Date.now() }));
-  // NOTE: backend takes rating + review_text as query params, not JSON body
 }
 
 // export async function fetchCoachReviews(coachId) {
@@ -700,7 +705,12 @@ export async function submitCoachReview(coachId, rating, reviewText) {
 
 export async function submitCoachReport(coachId, reportSummary) {
   try {
-    return await apiPost(`/roles/client/coach_report/${coachId}`, null);
+    return await apiPost(
+      withQuery(`/roles/client/coach_report/${coachId}`, {
+        report_summary: reportSummary,
+      }),
+      null
+    );
   } catch {
     return { report_id: Date.now() };
   }

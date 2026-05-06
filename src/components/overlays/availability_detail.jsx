@@ -261,7 +261,6 @@ export default function AvailabilityDetail({
         ) : (
           slots.map(({ time, slots: daySlots }, timeIdx) => {
             const hasBooked = daySlots.some((s) => s === "booked");
-            const allEmpty = daySlots.every((s) => !s || s === null);
             return (
               <div key={time} className="grid grid-cols-[60px_repeat(7,1fr)_24px] gap-2 mb-2 group">
                 <div className="text-xs text-gray-400 flex items-center font-medium">

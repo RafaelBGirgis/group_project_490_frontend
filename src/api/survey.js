@@ -41,6 +41,7 @@ export function startDailyBodyMetricsSurvey() {
 
 /**
  * @param {{ weight: number, progress_pic_url?: string }} payload
+ * `progress_pic_url`, when provided, is stored by the backend in DailyProgressPicture.
  *  Weight must be a positive integer.
  */
 export function submitDailyBodyMetricsSurvey(payload) {
@@ -98,7 +99,7 @@ export function fetchMoodHistory(opts) {
   return fetchList(`${TELEMETRY}/moods`, opts);
 }
 
-/** Past body-metric entries (HealthMetrics rows including weight + progress_pic_url). */
+/** Past body-metric entries (HealthMetrics rows, weight only). */
 export function fetchWeightHistory(opts) {
   return fetchList(`${TELEMETRY}/weights`, opts);
 }

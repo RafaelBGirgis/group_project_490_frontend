@@ -2,8 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Navbar } from "../components/navbar";
 import { fetchMe } from "../api/client";
-import { buildCoachRequestPayload, createCoachRequest } from "../api/coach";
-import { clearCoachRequestResolution } from "../utils/coachRequests";
+import { createCoachRequest } from "../api/coach";
 
 const SPECIALIZATION_OPTIONS = [
   "Strength Training",
@@ -21,12 +20,10 @@ const SPECIALIZATION_OPTIONS = [
 function CoachRequestFormPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const API_BASE_URL = import.meta.env.PROD ? "https://api.till-failure.us" : "";
   const mode = searchParams.get("mode") || "create";
   const isViewMode = mode === "view";
   const isEditMode = mode === "edit";
   const [loading, setLoading] = useState(true);
-  const [account, setAccount] = useState(null);
   const [error, setError] = useState("");
   const [submitMessage, setSubmitMessage] = useState("");
   const [requestStorageKey, setRequestStorageKey] = useState("");
@@ -65,16 +62,9 @@ function CoachRequestFormPage() {
   }, [form.name]);
 
   useEffect(() => {
-    const token = localStorage.getItem("jwt");
-    if (!token) {
-      navigate("/login");
-      return;
-    }
-
     const loadNameFromSession = async () => {
       try {
         const data = await fetchMe();
-        setAccount(data);
         const key = `coachRequest:${data.id || data.email || "current"}`;
         setRequestStorageKey(key);
 
@@ -171,7 +161,7 @@ function CoachRequestFormPage() {
     };
 
     try {
-      await requestCoachCreation(backendPayload);
+      await createCoachRequest(backendPayload);
       // Also save locally as a backup
       const key = requestStorageKey || "coachRequestDraft";
       localStorage.setItem(key, JSON.stringify({

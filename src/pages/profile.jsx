@@ -6,7 +6,6 @@ import {
   deactivateAccount,
   deleteAccount,
   extractUploadedAssetUrl,
-  fetchClientProfile,
   fetchMe,
   fetchUnifiedProfile,
   updateAccount,
@@ -111,55 +110,6 @@ const buildAccountUpdatePayload = ({ name, age, email, bio, pfp_url, gender }) =
   return payload;
 };
 
-const normalizeCoachProfileSeed = (requestData) => {
-  if (!requestData || typeof requestData !== "object") {
-    return null;
-  }
-
-  const certifications = Array.isArray(requestData.certifications)
-    ? requestData.certifications.map((item, index) => ({
-        id: item?.id || `cert-${index}-${Date.now()}`,
-        title: item?.title || item?.certification_name || "",
-        issuer: item?.issuer || item?.certification_organization || "",
-        year: item?.year || item?.certification_date || "",
-        description: item?.description || item?.certification_score || "",
-      }))
-    : [];
-
-  const experiences = Array.isArray(requestData.experiences)
-    ? requestData.experiences.map((item, index) => ({
-        id: item?.id || `exp-${index}-${Date.now()}`,
-        title: item?.title || item?.experience_title || item?.experience_name || "",
-        issuer: item?.issuer || item?.organization || item?.experience_name || "",
-        year: item?.year || item?.experience_start || "",
-        description: item?.description || item?.experience_description || "",
-      }))
-    : [];
-
-  const specializations = Array.isArray(requestData.specializations)
-    ? requestData.specializations.filter(Boolean)
-    : [];
-
-  if (!certifications.length && !experiences.length && !specializations.length) {
-    return null;
-  }
-
-  return {
-    certifications,
-    experiences,
-    specializations,
-    pricingInterval: requestData?.paymentInterval || requestData?.payment_interval || "",
-    amount:
-      requestData?.amount != null
-        ? String(requestData.amount)
-        : requestData?.priceCents != null
-          ? String(Number(requestData.priceCents) / 100)
-          : requestData?.price_cents != null
-            ? String(Number(requestData.price_cents) / 100)
-            : "",
-  };
-};
-
 const buildCachedProfileState = ({
   role,
   profile,
@@ -194,7 +144,6 @@ function ProfilePage({ role = "client" }) {
 
   const accent = isCoach ? "#F59E0B" : "#3B82F6";
   const accentSoft = isCoach ? "rgba(245, 158, 11, 0.12)" : "rgba(59, 130, 246, 0.12)";
-  const accentBorder = isCoach ? "rgba(245, 158, 11, 0.30)" : "rgba(59, 130, 246, 0.30)";
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [saveMessage, setSaveMessage] = useState("");
@@ -663,7 +612,7 @@ function ProfilePage({ role = "client" }) {
         alert("Account deletion requested successfully.");
         localStorage.removeItem("jwt");
         navigate("/login");
-      } catch (error) {
+      } catch {
         alert("Failed to request account deletion. Please try again.");
       }
     }
@@ -676,7 +625,7 @@ function ProfilePage({ role = "client" }) {
         alert("Account deactivated successfully.");
         localStorage.removeItem("jwt");
         navigate("/login");
-      } catch (error) {
+      } catch {
         alert("Failed to deactivate account. Please try again.");
       }
     }
@@ -689,7 +638,7 @@ function ProfilePage({ role = "client" }) {
         alert("Coach account deactivated successfully.");
         localStorage.removeItem("jwt");
         navigate("/login");
-      } catch (error) {
+      } catch {
         alert("Failed to deactivate coach account. Please try again.");
       }
     }
@@ -702,7 +651,7 @@ function ProfilePage({ role = "client" }) {
         alert("Coach account deletion requested successfully.");
         localStorage.removeItem("jwt");
         navigate("/login");
-      } catch (error) {
+      } catch {
         alert("Failed to request coach account deletion. Please try again.");
       }
     }

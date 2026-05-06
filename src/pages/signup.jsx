@@ -1,9 +1,21 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import clientLogo from "../assets/Client Logo.svg";
-import { initiateGoogleOAuth, isAuthenticated, signup as signupRequest, storeToken } from "../api/auth";
+import { isAuthenticated, signup as signupRequest, storeToken } from "../api/auth";
 import { fetchMe } from "../api/client";
+import { getCoachAccessState } from "../utils/roleAccess";
+import { resolveRoleState } from "../utils/sessionAuth";
 import { saveSignupPrefill } from "../utils/profileDrafts";
+
+async function resolvePostSignupPath(account) {
+  const roleState = await resolveRoleState();
+  const coachAccess = await getCoachAccessState(account, roleState);
+
+  if (roleState.hasAdminRole) return "/admin";
+  if (coachAccess.canAccessCoach) return "/coach";
+  if (roleState.hasClientRole) return "/client";
+  return "/onboarding";
+}
 
 const API_BASE_URL = import.meta.env.PROD ? "https://api.till-failure.us" : "";
 
@@ -35,7 +47,7 @@ export default function SignupPage() {
           localStorage.setItem("active_user_email", normalizedEmail);
         }
         if (!cancelled) {
-          window.location.href = account?.client_id ? "/client" : "/onboarding";
+          window.location.href = await resolvePostSignupPath(account);
         }
       } catch {
         // Keep the signup screen available if silent auth restoration fails.
@@ -48,15 +60,6 @@ export default function SignupPage() {
       cancelled = true;
     };
   }, []);
-  const getErrorMessage = async (response, fallback) => {
-    try {
-      const errorData = await response.json();
-      return errorData?.detail || fallback;
-    } catch {
-      return fallback;
-    }
-  };
-
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({
@@ -99,7 +102,8 @@ export default function SignupPage() {
         bio: formData.bio.trim(),
         pfpUrl: formData.pfpUrl.trim(),
       });
-      window.location.href = "/onboarding";
+      const account = await fetchMe();
+      window.location.href = await resolvePostSignupPath(account);
     } catch (err) {
       console.error(err);
       setError(err.message);

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Navbar,
@@ -11,7 +11,7 @@ import {
   SkeletonStatCard,
   SkeletonDashCard,
 } from "../components";
-import { fetchMe } from "../api/client";
+import { getToken } from "../api/auth";
 import {
   fetchAdminStats,
   fetchAllUsers,
@@ -281,16 +281,19 @@ export default function AdminDash() {
       // Fetch account info — use a direct fetch to avoid the global 401
       // redirect in apiFetch (admin may not have a backend-valid JWT yet)
       try {
-        const token = localStorage.getItem("jwt");
+        const token = getToken();
         const API_BASE = import.meta.env.PROD ? "https://api.till-failure.us" : "";
         const res = await fetch(`${API_BASE}/me`, {
+          credentials: "include",
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
         if (res.ok) {
           const me = await res.json();
           if (me?.name) setInitials(me.name.split(" ").map((n) => n[0]).join("").toUpperCase());
         }
-      } catch {}
+      } catch {
+        // Initials are decorative; keep loading the dashboard if this request fails.
+      }
 
       const [s, u, ex, an, requests] = await Promise.all([
         fetchAdminStats(),
@@ -414,7 +417,14 @@ export default function AdminDash() {
 
   return (
     <div className="min-h-screen bg-[#080D19]">
-      <Navbar role={role} userName={initials} />
+      <Navbar
+        role={role}
+        userName={initials}
+        switchOptions={[
+          { label: "Client", to: "/client" },
+          { label: "Coach", to: "/coach" },
+        ]}
+      />
 
       <div className="max-w-7xl mx-auto px-6 py-6 space-y-8">
 

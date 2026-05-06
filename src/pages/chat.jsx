@@ -37,9 +37,6 @@ export default function ChatPage() {
   const [resolvedRole, setResolvedRole] = useState("client");
 
   useEffect(() => {
-    const token = localStorage.getItem("jwt");
-    if (!token) { navigate("/login"); return; }
-
     fetchMe()
       .then(async (me) => {
         setAccount(me);
@@ -164,20 +161,6 @@ export default function ChatPage() {
     } catch {
       return "";
     }
-  };
-
-  const getMessageRole = (msg) => {
-    if (!activeChat) return role;
-
-    if (msg.from_account_id === account?.id || msg.from_account_id === 0) {
-      return role;
-    }
-
-    if (activeChat.partner_role === "coach" || activeChat.partner_role === "client") {
-      return activeChat.partner_role;
-    }
-
-    return role === "coach" ? "client" : "coach";
   };
 
   /*  loading state  */
@@ -319,11 +302,6 @@ export default function ChatPage() {
                   ) : (
                     messages.map((msg) => {
                       const isMe = msg.from_account_id === account.id || msg.from_account_id === 0;
-                      const senderRole = getMessageRole(msg);
-                      const bubbleTone =
-                        senderRole === "coach"
-                          ? "bg-[rgba(234,88,12,0.35)] text-white"
-                          : "bg-[rgba(37,99,235,0.35)] text-white";
 
                       return (
                         <div

@@ -1,4 +1,4 @@
-import { apiGet, apiPatch, apiPost } from "./api";
+import { apiGet, apiPatch, apiPost, withQuery } from "./api";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const DEFAULT_TIME_OPTIONS = [
@@ -225,6 +225,106 @@ export async function fetchCoachWorkoutPlans(coachId) {
   return [];
 }
 
+// ─── Coach-view client telemetry & schedule ──────────────────────────────────
+
+const COACH_CLIENT_TELEMETRY = "/roles/coach/client_telemetry";
+
+async function fetchCoachClientList(clientId, type, { limit = 10, skip = 0 } = {}) {
+  try {
+    const result = await apiGet(withQuery(`${COACH_CLIENT_TELEMETRY}/${clientId}/${type}`, { limit, skip }));
+    return Array.isArray(result) ? result : [];
+  } catch {
+    return [];
+  }
+}
+
+export function fetchClientWeightHistory(clientId, opts) {
+  return fetchCoachClientList(clientId, "weights", opts);
+}
+
+export function fetchClientMoodHistory(clientId, opts) {
+  return fetchCoachClientList(clientId, "moods", opts);
+}
+
+export function fetchClientStepHistory(clientId, opts) {
+  return fetchCoachClientList(clientId, "steps", opts);
+}
+
+export function fetchClientWorkoutHistoryByCoach(clientId, opts) {
+  return fetchCoachClientList(clientId, "workouts", opts);
+}
+
+export async function fetchClientProgressPicturesByCoach(clientId, { limit = 10, skip = 0 } = {}) {
+  try {
+    const result = await apiGet(withQuery(`/roles/coach/client_progress_pictures/${clientId}`, { limit, skip }));
+    return Array.isArray(result) ? result : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchClientMealHistoryByCoach(clientId, { limit = 10, skip = 0 } = {}) {
+  try {
+    const result = await apiGet(withQuery(`/roles/coach/client_meals/${clientId}`, { limit, skip }));
+    return Array.isArray(result) ? result : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchClientWorkoutPlanByCoach(clientId, weekdayIdx) {
+  try {
+    const result = await apiGet(
+      withQuery(`/roles/coach/client_plans/${clientId}`, { skip: 0, limit: 100 })
+    );
+    const plans = Array.isArray(result) ? result : [];
+    if (plans.length > 0) {
+      const matchingPlan = plans[weekdayIdx] ?? plans[0];
+      if (matchingPlan) {
+        const activitiesSource =
+          matchingPlan.activities ??
+          matchingPlan.workout_activities ??
+          matchingPlan.workout_plan_activities ??
+          [];
+        const activities = Array.isArray(activitiesSource)
+          ? activitiesSource.map((a, i) => ({
+              id: a.id ?? i + 1,
+              name: a.name ?? a.activity_name ?? a.workout_activity?.name ?? `Activity ${i + 1}`,
+              suggested_sets: Number(a.planned_sets ?? a.suggested_sets ?? a.sets ?? 0),
+              suggested_reps: Number(a.planned_reps ?? a.suggested_reps ?? a.reps ?? 0),
+              intensity_value: Number(a.intensity_value ?? a.weight ?? 0),
+              intensity_measure: a.intensity_measure ?? "lbs",
+              logged: Boolean(a.logged),
+            }))
+          : [];
+        return {
+          strata_name:
+            matchingPlan.strata_name ??
+            matchingPlan.name ??
+            `Plan #${matchingPlan.id ?? weekdayIdx + 1}`,
+          activities,
+        };
+      }
+    }
+  } catch {
+    // Fall through to rest-day default
+  }
+  return { strata_name: "Rest Day", activities: [] };
+}
+
+export async function fetchClientAvailabilityByCoach(clientId) {
+  try {
+    const result = await apiGet(`/roles/coach/client_availability/${clientId}`);
+    const availabilities = Array.isArray(result)
+      ? result
+      : result?.availabilities ?? result?.client_availabilities ?? [];
+    return convertBackendAvailabilitiesToGrid(availabilities);
+  } catch {
+    return [];
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function buildCoachRequestPayload(form, availability) {
   return {

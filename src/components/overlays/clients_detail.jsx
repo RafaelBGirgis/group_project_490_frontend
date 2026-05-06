@@ -8,7 +8,7 @@ import ProfileAvatar from "../profile_avatar";
  *   onMessage – (clientId) => void
  */
 
-export default function ClientsDetail({ clients, onMessage }) {
+export default function ClientsDetail({ clients, onMessage, onViewProfile }) {
   const active = clients.filter((c) => c.status === "active");
   const paused = clients.filter((c) => c.status !== "active");
 
@@ -49,12 +49,20 @@ export default function ClientsDetail({ clients, onMessage }) {
                 </p>
               </div>
             </div>
-            <button
-              onClick={() => onMessage?.(c)}
-              className="text-xs text-orange-400 border border-orange-500/30 rounded-full px-3 py-1 hover:bg-orange-500/10 transition-colors"
-            >
-              Message
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => onViewProfile?.(c)}
+                className="text-xs text-gray-300 border border-white/20 rounded-full px-3 py-1 hover:bg-white/5 transition-colors"
+              >
+                Profile
+              </button>
+              <button
+                onClick={() => onMessage?.(c)}
+                className="text-xs text-orange-400 border border-orange-500/30 rounded-full px-3 py-1 hover:bg-orange-500/10 transition-colors"
+              >
+                Message
+              </button>
+            </div>
           </div>
         ))}
       </div>

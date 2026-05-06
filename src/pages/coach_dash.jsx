@@ -39,6 +39,7 @@ import ClientsDetail from "../components/overlays/clients_detail";
 import SessionsDetail from "../components/overlays/sessions_detail";
 import ReviewsDetail from "../components/overlays/reviews_detail";
 import AvailabilityDetail from "../components/overlays/availability_detail";
+import ClientProfile from "../components/overlays/client_profile";
 
 const role = "coach";
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -84,6 +85,7 @@ export default function CoachDashboard() {
   const [availabilityError, setAvailabilityError] = useState("");
   const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(false);
   const [chatActionId, setChatActionId] = useState(null);
+  const [selectedClient, setSelectedClient] = useState(null);
 
   /*  load account  */
   useEffect(() => {
@@ -380,7 +382,8 @@ export default function CoachDashboard() {
                   {activeClients.slice(0, 4).map((c) => (
                     <div
                       key={c.id}
-                      className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors"
+                      className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
+                      onClick={() => { setSelectedClient(c); setOverlay("client_profile"); }}
                     >
                       <ProfileAvatar
                         src={c.details?.base_account?.pfp_url}
@@ -485,7 +488,22 @@ export default function CoachDashboard() {
                 clientRequests.slice(0, 4).map((request) => (
                   <div
                     key={request.request_id}
-                    className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors"
+                    className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
+                    onClick={() => {
+                      setSelectedClient({
+                        id: request.client_id,
+                        name: request.name || `Client #${request.client_id}`,
+                        details: request.detail || clientRequestDetails[request.client_id] || {
+                          base_account: {
+                            name: request.name,
+                            age: request.age,
+                            gender: request.gender,
+                            pfp_url: request.pfp_url,
+                          },
+                        },
+                      });
+                      setOverlay("client_profile");
+                    }}
                   >
                     <ProfileAvatar
                       src={request.pfp_url}
@@ -566,6 +584,7 @@ export default function CoachDashboard() {
         <ClientsDetail
           clients={clients.filter((c) => c.status === "active")}
           onMessage={handleOpenClientChat}
+          onViewProfile={(c) => { setSelectedClient(c); setOverlay("client_profile"); }}
         />
       </Overlay>
 
@@ -599,6 +618,20 @@ export default function CoachDashboard() {
         />
       </Overlay>
 
+      <Overlay
+        open={overlay === "client_profile"}
+        onClose={() => { closeOverlay(); setSelectedClient(null); }}
+        title={selectedClient?.name || "Client Profile"}
+        wide
+      >
+        {selectedClient ? (
+          <ClientProfile
+            clientId={selectedClient.id ?? selectedClient.client_id}
+            detail={selectedClient.details || selectedClient.detail}
+          />
+        ) : null}
+      </Overlay>
+
       <Overlay open={overlay === "requests"} onClose={closeOverlay} title="Client Requests" wide>
         <div className="space-y-4">
           {clientRequests.length === 0 ? (
@@ -624,6 +657,26 @@ export default function CoachDashboard() {
                         <p className="text-xs text-gray-500">
                           Goal: {request.goal} · Age: {request.age || "—"} · Gender: {request.gender || "—"}
                         </p>
+                        <button
+                          onClick={() => {
+                            setSelectedClient({
+                              id: request.client_id,
+                              name: request.name || `Client #${request.client_id}`,
+                              details: request.detail || clientRequestDetails[request.client_id] || {
+                                base_account: {
+                                  name: request.name,
+                                  age: request.age,
+                                  gender: request.gender,
+                                  pfp_url: request.pfp_url,
+                                },
+                              },
+                            });
+                            setOverlay("client_profile");
+                          }}
+                          className="mt-1.5 text-xs text-orange-400/70 hover:text-orange-300 transition-colors"
+                        >
+                          View Profile →
+                        </button>
                       </div>
                     </div>
                     <div className="flex gap-2">

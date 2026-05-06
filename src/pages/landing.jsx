@@ -13,7 +13,7 @@ const O4 = "#FDBA74"; // orange pale
 const M  = "#818CF8"; // midpoint — blue-leaning blend
 const W  = "#F59E0B"; // warm amber accent
 
-/* ── hooks ────────────────────────────────────────────────────────────── */
+/*  hooks  */
 function useReveal(th = 0.15) {
   const ref = useRef(null);
   const [v, set] = useState(false);
@@ -38,7 +38,7 @@ function CountUp({ to, suffix = "", dur = 1100 }) {
   return <span ref={ref}>{v.toLocaleString()}{suffix}</span>;
 }
 
-/* ── icons (SVG) ──────────────────────────────────────────────────────── */
+/*  icons (SVG)  */
 const I = {
   dumbbell: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">

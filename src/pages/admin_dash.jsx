@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Navbar,
@@ -11,7 +11,6 @@ import {
   SkeletonStatCard,
   SkeletonDashCard,
 } from "../components";
-import { fetchMe } from "../api/client";
 import { getToken } from "../api/auth";
 import {
   fetchAdminStats,
@@ -237,10 +236,15 @@ function DonutChart({ segments, size = 120, strokeWidth = 14 }) {
 export default function AdminDash() {
   const navigate = useNavigate();
 
-  /* ── auth guard ──────────────────────────────────────────────────── */
-  const [authed] = useState(true);
+  /*  auth guard  */
+  const [authed, setAuthed] = useState(false);
+  useEffect(() => {
+    const token = localStorage.getItem("jwt");
+    if (!token) { navigate("/login"); return; }
+    setAuthed(true);
+  }, [navigate]);
 
-  /* ── state ───────────────────────────────────────────────────────── */
+  /*  state  */
   const [initials, setInitials] = useState("?");
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
@@ -250,27 +254,27 @@ export default function AdminDash() {
   const [roleRequests, setRoleRequests] = useState([]);
   const [reports, setReports] = useState([]);
 
-  /* ── overlay state ───────────────────────────────────────────────── */
+  /*  overlay state  */
   const [overlay, setOverlay] = useState(null);
   const closeOverlay = () => setOverlay(null);
 
-  /* ── user management state ───────────────────────────────────────── */
+  /*  user management state  */
   const [userSearch, setUserSearch] = useState("");
   const [userRoleFilter, setUserRoleFilter] = useState("all");
   const [userStatusFilter, setUserStatusFilter] = useState("all");
   const [userPage, setUserPage] = useState(1);
 
-  /* ── exercise bank state ─────────────────────────────────────────── */
+  /*  exercise bank state  */
   const [exSearch, setExSearch] = useState("");
   const [exGroupFilter, setExGroupFilter] = useState("All");
   const [exPage, setExPage] = useState(1);
   const [editingExercise, setEditingExercise] = useState(null);
   const [newExercise, setNewExercise] = useState(null);
 
-  /* ── analytics state ─────────────────────────────────────────────── */
+  /*  analytics state  */
   const [analyticsPeriod, setAnalyticsPeriod] = useState("daily");
 
-  /* ── data loading ────────────────────────────────────────────────── */
+  /*  data loading  */
   useEffect(() => {
     if (!authed) return;
     (async () => {
@@ -287,7 +291,9 @@ export default function AdminDash() {
           const me = await res.json();
           if (me?.name) setInitials(me.name.split(" ").map((n) => n[0]).join("").toUpperCase());
         }
-      } catch {}
+      } catch {
+        // Initials are decorative; keep loading the dashboard if this request fails.
+      }
 
       const [s, u, ex, an, requests] = await Promise.all([
         fetchAdminStats(),
@@ -310,7 +316,7 @@ export default function AdminDash() {
     })();
   }, [authed]);
 
-  /* ── handlers ────────────────────────────────────────────────────── */
+  /*  handlers  */
   const handleApprove = async (id) => {
     await resolveCoachRequest(id, true);
     saveCoachRequestResolution(id, "approved");
@@ -352,7 +358,7 @@ export default function AdminDash() {
     setExercises((prev) => prev.filter((e) => e.id !== exerciseId));
   };
 
-  /* ── computed ────────────────────────────────────────────────────── */
+  /*  computed  */
   const pendingRequests = roleRequests.filter((r) => r.is_approved === null);
 
   const filteredUsers = useMemo(() => {
@@ -385,7 +391,7 @@ export default function AdminDash() {
   const activeAnalytics = analytics?.[analyticsPeriod] ?? [];
   const summary = analytics?.summary ?? {};
 
-  /* ── loading skeleton ────────────────────────────────────────────── */
+  /*  loading skeleton  */
   if (loading) {
     return (
       <div className="min-h-screen bg-[#080D19]">

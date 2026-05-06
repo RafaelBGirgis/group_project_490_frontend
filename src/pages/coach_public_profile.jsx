@@ -208,7 +208,7 @@ export default function CoachPublicProfilePage() {
   const [account, setAccount] = useState(null);
   const [coach, setCoach] = useState(null);
   const [reviews, setReviews] = useState([]);
-  const [reports, setReports] = useState([]);
+  const [, setReports] = useState([]);
   const [availability, setAvailability] = useState([]);
   const [pendingRequests, setPendingRequests] = useState({});
   const [loading, setLoading] = useState(true);
@@ -437,8 +437,6 @@ export default function CoachPublicProfilePage() {
     );
   }
 
-  const ratingAvg = Number(coach?.rating_avg ?? 0);
-  const reviewCount = Number(coach?.review_count ?? reviews.length ?? 0);
   const initials = coach?.name ? coach.name.split(" ").map((item) => item[0]).join("").toUpperCase() : "?";
   const paymentPlan = formatPaymentPlan(coach);
 

@@ -67,14 +67,23 @@ const SlotCell = ({ status, time }) => {
 export default function ClientDash() {
   const navigate = useNavigate();
 
-  /* ── auth guard ──────────────────────────────────────────────────── */
-  const [authed] = useState(true);
+  /*  auth guard  */
+  const [authed, setAuthed] = useState(false);
 
-  /* ── overlay state ──────────────────────────────────────────────── */
+  useEffect(() => {
+    const token = localStorage.getItem("jwt");
+    if (!token) {
+      navigate("/login");
+      return;
+    }
+    setAuthed(true);
+  }, [navigate]);
+
+  /*  overlay state  */
   const [overlay, setOverlay] = useState(null); // "workout" | "coach" | "availability" | "meals" | "survey" | "steps" | null
   const closeOverlay = () => setOverlay(null);
 
-  /* ── daily survey state ─────────────────────────────────────────── */
+  /*  daily survey state  */
   const [surveyStatus, setSurveyStatus] = useState({ mood: null, body_metrics: null, steps: null });
   const [stepsRecent, setStepsRecent] = useState([]);
 
@@ -113,7 +122,7 @@ export default function ClientDash() {
     }
   }, []);
 
-  /* ── core state ──────────────────────────────────────────────────── */
+  /*  core state  */
   const [account, setAccount]           = useState(null);
   const [clientId, setClientId]         = useState(null);
   const [activeDay, setActiveDay]       = useState(TODAY_IDX);
@@ -137,7 +146,7 @@ export default function ClientDash() {
   const [requestStatusError, setRequestStatusError] = useState("");
   const [openingCoachChat, setOpeningCoachChat] = useState(false);
 
-  /* ── load account + client profile ──────────────────────────────── */
+  /*  load account + client profile  */
   useEffect(() => {
     if (!authed) return;
 
@@ -168,7 +177,7 @@ export default function ClientDash() {
     })();
   }, [authed]);
 
-  /* ── load dashboard data once we have a clientId ────────────────── */
+  /*  load dashboard data once we have a clientId  */
   useEffect(() => {
     if (!clientId) return;
     refreshSurveyStatus();
@@ -211,13 +220,13 @@ export default function ClientDash() {
     })();
   }, [approvedCoachRequest, clientId]);
 
-  /* ── load coach rating when coach is known ──────────────────────── */
+  /*  load coach rating when coach is known  */
   useEffect(() => {
     if (!coach?.coach_id) return;
     fetchCoachRating(coach.coach_id).then(setCoachRating);
   }, [coach]);
 
-  /* ── load workout plan when day changes ─────────────────────────── */
+  /*  load workout plan when day changes  */
   const loadWorkouts = useCallback(async () => {
     if (!clientId) return;
     const data = await fetchWorkoutPlan(clientId, activeDay);
@@ -227,7 +236,7 @@ export default function ClientDash() {
 
   useEffect(() => { loadWorkouts(); }, [loadWorkouts]);
 
-  /* ── log a workout activity ─────────────────────────────────────── */
+  /*  log a workout activity  */
   const handleLogActivity = async (activityId) => {
     setWorkoutActivities((prev) =>
       prev.map((a) => (a.id === activityId ? { ...a, logged: true } : a))
@@ -241,7 +250,7 @@ export default function ClientDash() {
     }
   };
 
-  /* ── log a meal ─────────────────────────────────────────────────── */
+  /*  log a meal  */
   const handleLogMeal = async (mealPayload) => {
     // Backend throws if neither id is provided or the id is invalid; surface
     // the failure so the overlay can show it. On success, refetch the list
@@ -309,19 +318,19 @@ export default function ClientDash() {
     }
   };
 
-  /* ── derived values ─────────────────────────────────────────────── */
+  /*  derived values  */
   const completedCount = workoutActivities.filter((a) => a.logged).length;
   const totalCount     = workoutActivities.length;
   const stepsPercent   = pct(stepCount ?? 0, 10000);
   const calPercent     = pct(caloriesConsumed ?? 0, caloriesGoal);
   const workoutPercent = pct(completedCount, totalCount || 1);
 
-  /* ── greeting based on time of day ──────────────────────────────── */
+  /*  greeting based on time of day  */
   const hour = new Date().getHours();
   const greeting =
     hour < 12 ? "Good Morning" : hour < 17 ? "Good Afternoon" : "Good Evening";
 
-  /* ── loading skeleton ────────────────────────────────────────────── */
+  /*  loading skeleton  */
   if (loading) {
     return (
       <div className="min-h-screen" style={{ backgroundColor: "#080D19" }}>
@@ -354,7 +363,7 @@ export default function ClientDash() {
     );
   }
 
-  /* ── split name for greeting card ───────────────────────────────── */
+  /*  split name for greeting card  */
   const nameParts = (account?.name ?? "").split(" ");
   const firstName = nameParts[0] || "—";
   const lastName  = nameParts.slice(1).join(" ") || "";
@@ -375,13 +384,13 @@ export default function ClientDash() {
       />
 
       <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
-        {/* ─── DAILY CHECK-IN BANNER ──────────────────────────────── */}
+        {/*  DAILY CHECK-IN BANNER  */}
         <DailyCheckInBanner
           status={surveyStatus}
           onOpen={() => setOverlay("survey")}
         />
 
-        {/* ─── FITNESS & NUTRITION ────────────────────────────────── */}
+        {/*  FITNESS & NUTRITION  */}
         <SectionHeader label="FITNESS & NUTRITION" role={role} />
 
         <div className="grid grid-cols-4 gap-4">
@@ -462,7 +471,7 @@ export default function ClientDash() {
           </DashboardCard>
         </div>
 
-        {/* ─── WORKOUT & COACH ────────────────────────────────────── */}
+        {/*  WORKOUT & COACH  */}
         <SectionHeader label="WORKOUT & COACH" role={role} />
 
         {requestStatusError ? (
@@ -637,7 +646,7 @@ export default function ClientDash() {
               </div>
             </DashboardCard>
           ) : (
-            /* ── No Coach — Find a Coach CTA ─────────────────────── */
+            /*  No Coach — Find a Coach CTA  */
             <DashboardCard role={role} title="My Coach">
               <div className="flex flex-col items-center justify-center py-4 text-center">
                 <div className="w-16 h-16 rounded-full bg-blue-900/20 flex items-center justify-center mb-4">
@@ -718,7 +727,7 @@ export default function ClientDash() {
           </DashboardCard>
         </div>
 
-        {/* ─── NUTRITION DETAIL ───────────────────────────────────── */}
+        {/*  NUTRITION DETAIL  */}
         <SectionHeader label="NUTRITION DETAIL" role={role} />
 
         <DashboardCard
@@ -828,10 +837,7 @@ export default function ClientDash() {
         title="Daily Check-in"
         wide
       >
-        <DailySurvey
-          onCompleted={refreshSurveyStatus}
-          picturesStorageKey={`client_progress_pictures:${String(account?.email || "current").trim().toLowerCase()}`}
-        />
+        <DailySurvey onCompleted={refreshSurveyStatus} />
       </Overlay>
 
       {/* Steps Log */}

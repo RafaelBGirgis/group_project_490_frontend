@@ -10,7 +10,7 @@ import { apiGet, apiPost, withQuery } from "./api";
 
 const BASE = "/roles/client/fitness/daily-survey";
 
-/* ─── mood / wellbeing ───────────────────────────────────────────────── */
+/*  mood / wellbeing  */
 
 export function fetchDailyMoodSurvey() {
   return apiGet(`${BASE}/today`);
@@ -29,7 +29,7 @@ export function submitDailyMoodSurvey(payload) {
   return apiPost(`${BASE}/submit`, payload);
 }
 
-/* ─── body metrics ───────────────────────────────────────────────────── */
+/*  body metrics  */
 
 export function fetchDailyBodyMetricsSurvey() {
   return apiGet(`${BASE}/body-metrics/today`);
@@ -41,13 +41,14 @@ export function startDailyBodyMetricsSurvey() {
 
 /**
  * @param {{ weight: number, progress_pic_url?: string }} payload
+ * `progress_pic_url`, when provided, is stored by the backend in DailyProgressPicture.
  *  Weight must be a positive integer.
  */
 export function submitDailyBodyMetricsSurvey(payload) {
   return apiPost(`${BASE}/body-metrics/submit`, payload);
 }
 
-/* ─── steps ──────────────────────────────────────────────────────────── */
+/*  steps  */
 
 export function fetchDailyStepsSurvey() {
   return apiGet(`${BASE}/steps/today`);
@@ -64,7 +65,7 @@ export function submitDailyStepsSurvey(payload) {
   return apiPost(`${BASE}/steps/submit`, payload);
 }
 
-/* ─── combined helpers ───────────────────────────────────────────────── */
+/*  combined helpers  */
 
 /**
  * Fetch the status of all three surveys in parallel. Returns
@@ -80,7 +81,7 @@ export async function fetchAllDailySurveys() {
   return { mood, body_metrics, steps };
 }
 
-/* ─── telemetry history (past survey submissions) ────────────────────── */
+/*  telemetry history (past survey submissions)  */
 
 const TELEMETRY = "/roles/client/telemetry/query";
 
@@ -98,7 +99,7 @@ export function fetchMoodHistory(opts) {
   return fetchList(`${TELEMETRY}/moods`, opts);
 }
 
-/** Past body-metric entries (HealthMetrics rows including weight + progress_pic_url). */
+/** Past body-metric entries (HealthMetrics rows, weight only). */
 export function fetchWeightHistory(opts) {
   return fetchList(`${TELEMETRY}/weights`, opts);
 }

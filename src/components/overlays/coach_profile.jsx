@@ -1,103 +1,126 @@
-/**
- * Coach profile detail — shown when "View Profile" is clicked.
- *
- * Props:
- *   coach       – { name, specialty, pfp_url, coach_id }
- *   rating      – { avg, review_count }
- *   nextSession – { weekday, start_time }
- *   onMessage   – () => void
- */
+import { useEffect, useMemo } from "react";
+
+const COACH_PROFILE_CACHE_VERSION = 1;
+
+const getCoachProfileCacheKey = (coachId) =>
+  `coach-profile:${coachId || "current"}:route-cache:v${COACH_PROFILE_CACHE_VERSION}`;
+
+const readCoachProfileCache = (coachId) => {
+  try {
+    const raw = localStorage.getItem(getCoachProfileCacheKey(coachId));
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeCoachProfileCache = (coachId, payload) => {
+  if (!coachId) return;
+  try {
+    localStorage.setItem(
+      getCoachProfileCacheKey(coachId),
+      JSON.stringify({ ...payload, cachedAt: new Date().toISOString() })
+    );
+  } catch {
+    // Cache writes are best-effort only.
+  }
+};
+
 export default function CoachProfile({ coach, rating, nextSession, onMessage }) {
-  if (!coach) {
+  const coachId = coach?.coach_id || coach?.id;
+  const cachedPayload = useMemo(() => readCoachProfileCache(coachId), [coachId]);
+  const displayCoach = coach || cachedPayload?.coach;
+  const displayRating = rating || cachedPayload?.rating;
+  const displayNextSession = nextSession || cachedPayload?.nextSession;
+
+  useEffect(() => {
+    if (!coachId || !coach) return;
+    writeCoachProfileCache(coachId, { coach, rating, nextSession });
+  }, [coachId, coach, rating, nextSession]);
+
+  if (!displayCoach) {
     return (
-      <p className="text-gray-500 text-sm text-center py-8">
+      <p className="py-8 text-center text-sm text-gray-500">
         No coach assigned yet.
       </p>
     );
   }
 
-  const initials = coach.name
+  const initials = displayCoach.name
     ?.split(" ")
-    .map((n) => n[0])
+    .map((namePart) => namePart[0])
     .join("") ?? "?";
 
   return (
     <>
-      {/* Coach header */}
       <div className="flex items-center gap-4">
-        <div className="w-16 h-16 rounded-full bg-blue-900/40 flex items-center justify-center text-blue-400 font-bold text-xl shrink-0">
-          {coach.pfp_url ? (
+        <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-blue-900/40 text-xl font-bold text-blue-400">
+          {displayCoach.pfp_url ? (
             <img
-              src={coach.pfp_url}
-              alt={coach.name}
-              className="w-16 h-16 rounded-full object-cover"
+              src={displayCoach.pfp_url}
+              alt={displayCoach.name}
+              className="h-16 w-16 rounded-full object-cover"
             />
           ) : (
             initials
           )}
         </div>
         <div>
-          <p className="text-white font-bold text-xl">{coach.name}</p>
-          <p className="text-gray-400 text-sm">{coach.specialty}</p>
-          {rating && (
-            <p className="text-yellow-400 text-sm mt-0.5">
-              ★ {rating.avg} · {rating.review_count} reviews
+          <p className="text-xl font-bold text-white">{displayCoach.name}</p>
+          <p className="text-sm text-gray-400">{displayCoach.specialty}</p>
+          {displayRating && (
+            <p className="mt-0.5 text-sm text-yellow-400">
+              Rating {displayRating.avg} / 5 · {displayRating.review_count} reviews
             </p>
           )}
         </div>
       </div>
 
-      {/* Info cards */}
       <div className="grid grid-cols-2 gap-3">
-        <div className="bg-[#0A1020] rounded-xl p-4">
-          <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">
-            Specialty
-          </p>
-          <p className="text-white text-sm font-medium">{coach.specialty}</p>
-        </div>
-        <div className="bg-[#0A1020] rounded-xl p-4">
-          <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">
-            Next Session
-          </p>
-          <p className="text-white text-sm font-medium">
-            {nextSession
-              ? `${nextSession.weekday} · ${nextSession.start_time}`
-              : "Not scheduled"}
-          </p>
-        </div>
-        <div className="bg-[#0A1020] rounded-xl p-4">
-          <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">
-            Rating
-          </p>
-          <p className="text-white text-sm font-medium">
-            {rating ? `${rating.avg} / 5.0` : "No ratings yet"}
-          </p>
-        </div>
-        <div className="bg-[#0A1020] rounded-xl p-4">
-          <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">
-            Reviews
-          </p>
-          <p className="text-white text-sm font-medium">
-            {rating ? `${rating.review_count} total` : "—"}
-          </p>
-        </div>
+        <InfoCard label="Specialty" value={displayCoach.specialty} />
+        <InfoCard
+          label="Next Session"
+          value={
+            displayNextSession
+              ? `${displayNextSession.weekday} · ${displayNextSession.start_time}`
+              : "Not scheduled"
+          }
+        />
+        <InfoCard
+          label="Rating"
+          value={displayRating ? `${displayRating.avg} / 5.0` : "No ratings yet"}
+        />
+        <InfoCard
+          label="Reviews"
+          value={displayRating ? `${displayRating.review_count} total` : "-"}
+        />
       </div>
 
-      {/* Actions */}
       <div className="flex gap-3 pt-2">
         <button
-          className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-3 text-sm font-medium transition-colors"
+          className="flex-1 rounded-xl bg-blue-600 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-700"
           onClick={onMessage}
         >
-          💬 Send Message
+          Send Message
         </button>
         <button
-          className="flex-1 border border-gray-700 text-gray-300 hover:bg-gray-800 rounded-xl py-3 text-sm transition-colors"
+          className="flex-1 rounded-xl border border-gray-700 py-3 text-sm text-gray-300 transition-colors hover:bg-gray-800"
           onClick={() => {}}
         >
-          ★ Leave a Review
+          Leave a Review
         </button>
       </div>
     </>
+  );
+}
+
+function InfoCard({ label, value }) {
+  return (
+    <div className="rounded-xl bg-[#0A1020] p-4">
+      <p className="mb-1 text-[10px] uppercase tracking-widest text-gray-500">
+        {label}
+      </p>
+      <p className="text-sm font-medium text-white">{value}</p>
+    </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import clientLogo from "../assets/Client Logo.svg";
-import { initiateGoogleOAuth, isAuthenticated, signup as signupRequest, storeToken } from "../api/auth";
+import { isAuthenticated, signup as signupRequest, storeToken } from "../api/auth";
 import { fetchMe } from "../api/client";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
@@ -60,15 +60,6 @@ export default function SignupPage() {
       cancelled = true;
     };
   }, []);
-  const getErrorMessage = async (response, fallback) => {
-    try {
-      const errorData = await response.json();
-      return errorData?.detail || fallback;
-    } catch {
-      return fallback;
-    }
-  };
-
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({

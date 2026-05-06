@@ -9,7 +9,7 @@ import {
   updateAccount,
   updateClientInformation,
 } from "../api/client";
-import { getOnboardingStorageKey, loadProfileDraft, saveOnboardingDraft } from "../utils/profileDrafts";
+import { loadProfileDraft, saveOnboardingDraft } from "../utils/profileDrafts";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
 
@@ -128,10 +128,6 @@ function OnboardingPage() {
     cardCvv: "",
     cardExpiry: "",
   });
-
-  const onboardingKey = useMemo(() => {
-    return getOnboardingStorageKey(form.email);
-  }, [form.email]);
 
   const isFormValid = useMemo(() => {
     return Boolean(

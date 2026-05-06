@@ -1,4 +1,4 @@
-import { apiGet, apiPost, withQuery } from "./api";
+import { apiDelete, apiGet, apiPatch, apiPost, withQuery } from "./api";
 import { getToken } from "./auth";
 
 function getConversationCacheKey(accountId, role = "client") {
@@ -143,7 +143,7 @@ function readJson(key) {
   }
 }
 
-/* ─── relationship management ────────────────────────────────────── */
+/* relationship management */
 
 export async function deleteCoachRequest(requestId) {
   try {
@@ -164,7 +164,7 @@ export async function terminateRelationship(relationshipId) {
   }
 }
 
-/* ─── shared account updates ─────────────────────────────────────── */
+/* shared account updates */
 
 export async function updateAccount(payload) {
   try {

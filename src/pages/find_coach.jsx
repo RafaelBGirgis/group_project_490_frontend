@@ -666,6 +666,12 @@ export default function FindCoachPage() {
 
                   <div className="flex gap-2 mt-4">
                     <button
+                      onClick={() => toggleExpanded(coach.coach_id)}
+                      className="flex-1 border border-white/10 text-gray-300 hover:bg-white/5 rounded-xl py-2.5 text-sm font-medium transition-colors"
+                    >
+                      {isExpanded ? "Hide Details" : "Quick Details"}
+                    </button>
+                    <button
                       onClick={() => navigate(`/coaches/${coach.coach_id}`)}
                       className="flex-1 border border-white/10 text-gray-300 hover:bg-white/5 rounded-xl py-2.5 text-sm font-medium transition-colors"
                     >

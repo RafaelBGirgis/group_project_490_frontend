@@ -602,18 +602,12 @@ export default function ClientDash() {
                   >
                     {openingCoachChat ? "Opening..." : "💬 Message"}
                   </button>
-                  <button
-                    className="flex-1 border border-gray-700 text-gray-300 hover:bg-gray-800 rounded-xl py-2 text-sm transition-colors"
-                    onClick={() => setOverlay("workout")}
-                  >
-                    📋 View Plan
-                  </button>
                   {relationshipId ? (
                     <button
-                      className="flex-1 border border-red-500/30 text-red-300 hover:bg-red-500/10 rounded-xl py-2 text-sm transition-colors"
+                      className="flex-1 bg-red-600 hover:bg-red-700 text-white rounded-xl py-2 text-sm font-medium transition-colors"
                       onClick={handleTerminateRelationship}
                     >
-                      End Relationship
+                      Fire Coach
                     </button>
                   ) : null}
                 </div>
@@ -634,20 +628,6 @@ export default function ClientDash() {
                       ? `★ ${coachRating.avg} · ${coachRating.review_count} reviews`
                       : "—"}
                   </p>
-                </div>
-              </div>
-
-              <div className="bg-[#0A1020] rounded-xl p-3">
-                <p className="text-[10px] text-gray-500 uppercase tracking-widest">
-                  Next Session
-                </p>
-                <div className="flex justify-between items-center mt-1">
-                  <p className="text-white text-sm font-medium">
-                    {nextSession
-                      ? `${nextSession.weekday} · ${nextSession.start_time}`
-                      : "—"}
-                  </p>
-                  <StatusBadge label="Upcoming" variant="warning" />
                 </div>
               </div>
             </DashboardCard>

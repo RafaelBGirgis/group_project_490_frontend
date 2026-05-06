@@ -493,7 +493,7 @@ export default function CoachPublicProfilePage() {
                   </div>
                 </div>
 
-                <div className="mt-6 grid gap-4 md:grid-cols-3">
+                <div className="mt-6 grid gap-4 md:grid-cols-2">
                   <div className="rounded-xl bg-[#0B1220] p-4">
                     <p className="text-[10px] uppercase tracking-widest text-gray-500">Age</p>
                     <p className="mt-2 text-sm font-semibold text-white">{coach.age ?? "—"}</p>
@@ -501,10 +501,6 @@ export default function CoachPublicProfilePage() {
                   <div className="rounded-xl bg-[#0B1220] p-4">
                     <p className="text-[10px] uppercase tracking-widest text-gray-500">Gender</p>
                     <p className="mt-2 text-sm font-semibold text-white">{coach.gender || "—"}</p>
-                  </div>
-                  <div className="rounded-xl bg-[#0B1220] p-4">
-                    <p className="text-[10px] uppercase tracking-widest text-gray-500">Experience Entries</p>
-                    <p className="mt-2 text-sm font-semibold text-white">{coach.experiences?.length ?? 0}</p>
                   </div>
                 </div>
 
@@ -538,28 +534,26 @@ export default function CoachPublicProfilePage() {
                   ) : null}
                 </div>
 
-                <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  {isPending ? (
+                <div className="mt-4 space-y-3">
+                  {isPending && !activeCoachRelationshipId ? (
                     <button
                       type="button"
                       onClick={handleCancelRequest}
                       disabled={requesting}
-                      className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-medium text-amber-300 disabled:opacity-60"
+                      className="w-full rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-medium text-amber-300 disabled:opacity-60"
                     >
                       {requesting ? "Cancelling..." : "Cancel Request"}
                     </button>
-                  ) : !isApproved ? (
+                  ) : !isApproved && !activeCoachRelationshipId ? (
                     <button
                       type="button"
                       onClick={handleRequestCoach}
                       disabled={requesting}
-                      className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white disabled:bg-blue-900/40"
+                      className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white disabled:bg-blue-900/40 hover:bg-blue-700 transition-colors"
                     >
                       {requesting ? "Sending..." : "Request Coach"}
                     </button>
-                  ) : (
-                    <div className="hidden md:block" />
-                  )}
+                  ) : null}
 
                   {canReview ? (
                     <button
@@ -568,33 +562,35 @@ export default function CoachPublicProfilePage() {
                         setActionError("");
                         setReviewModalOpen(true);
                       }}
-                      className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm font-medium text-yellow-300"
+                      className="w-full rounded-xl bg-yellow-600 px-4 py-3 text-sm font-semibold text-white hover:bg-yellow-700 transition-colors"
                     >
                       Leave a Review
                     </button>
                   ) : null}
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActionError("");
-                      setReportModalOpen(true);
-                    }}
-                    className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-300"
-                  >
-                    Report Coach
-                  </button>
-
-                  {relationshipId ? (
+                  <div className="grid gap-3 md:grid-cols-2">
                     <button
                       type="button"
-                      onClick={handleTerminateRelationship}
-                      disabled={terminating}
-                      className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm font-medium text-slate-300 disabled:opacity-50"
+                      onClick={() => {
+                        setActionError("");
+                        setReportModalOpen(true);
+                      }}
+                      className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-300 hover:bg-red-500/20 transition-colors"
                     >
-                      {terminating ? "Ending..." : "End Relationship"}
+                      Report Coach
                     </button>
-                  ) : null}
+
+                    {relationshipId ? (
+                      <button
+                        type="button"
+                        onClick={handleTerminateRelationship}
+                        disabled={terminating}
+                        className="rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+                      >
+                        {terminating ? "Ending..." : "Fire Coach"}
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
               </section>
             )}

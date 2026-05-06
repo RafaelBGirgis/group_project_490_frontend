@@ -33,7 +33,9 @@ import {
   fetchAvailability,
   saveAvailability,
   fetchMealsToday,
+  fetchMyCoachRequests,
   logMeal,
+  deleteCoachRequest,
   terminateRelationship,
 } from "../api/client";
 import {
@@ -42,8 +44,7 @@ import {
   fetchStepHistory,
 } from "../api/survey";
 import { removeAcceptedClientForCoach } from "../api/coach";
-import { createConversation, fetchConversations } from "../api/chat";
-import { readClientCoachRequests, removeClientCoachRequest } from "../utils/coachRequests";
+import { createConversation } from "../api/chat";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
 
@@ -71,11 +72,6 @@ export default function ClientDash() {
   const [authed, setAuthed] = useState(false);
 
   useEffect(() => {
-    const token = localStorage.getItem("jwt");
-    if (!token) {
-      navigate("/login");
-      return;
-    }
     setAuthed(true);
   }, [navigate]);
 
@@ -146,6 +142,15 @@ export default function ClientDash() {
   const [requestStatusError, setRequestStatusError] = useState("");
   const [openingCoachChat, setOpeningCoachChat] = useState(false);
 
+  const refreshCoachRequestState = useCallback(async () => {
+    const requestList = await fetchMyCoachRequests().catch(() => []);
+    const nextPending = requestList.find((item) => item?.status === "pending") || null;
+    const nextApproved = requestList.find((item) => item?.status === "approved") || null;
+    setPendingCoachRequest(nextPending);
+    setApprovedCoachRequest(nextApproved);
+    return { nextPending, nextApproved };
+  }, []);
+
   /*  load account + client profile  */
   useEffect(() => {
     if (!authed) return;
@@ -157,11 +162,8 @@ export default function ClientDash() {
         const roleState = await resolveRoleState();
         setCanSwitchToAdmin(roleState.hasAdminRole);
         const coachAccess = await getCoachAccessState(me);
-        setCanSwitchToCoach(coachAccess.canAccessCoach);
-        const storedRequests = readClientCoachRequests(me.email);
-        const requestList = Object.values(storedRequests);
-        setPendingCoachRequest(requestList.find((item) => item?.status === "pending") || null);
-        setApprovedCoachRequest(requestList.find((item) => item?.status === "approved") || null);
+        setCanSwitchToCoach(roleState.hasAdminRole || coachAccess.canAccessCoach);
+        await refreshCoachRequestState();
 
         if (me.client_id) {
           setClientId(me.client_id);
@@ -175,7 +177,7 @@ export default function ClientDash() {
         // stays visible during the redirect instead of flashing empty content
       }
     })();
-  }, [authed]);
+  }, [authed, refreshCoachRequestState]);
 
   /*  load dashboard data once we have a clientId  */
   useEffect(() => {
@@ -203,8 +205,9 @@ export default function ClientDash() {
         setAvailabilitySlots(availability);
         setPrescribedMeals(meals);
         if (coachInfo?.coach_id) {
-          const storedRelationshipId = localStorage.getItem(`client_relationship:${clientId}:${coachInfo.coach_id}`);
-          setRelationshipId(storedRelationshipId ? Number(storedRelationshipId) : null);
+          setRelationshipId(
+            coachInfo.relationship_id != null ? Number(coachInfo.relationship_id) : null
+          );
         } else if (approvedCoachRequest?.relationship_id) {
           setRelationshipId(Number(approvedCoachRequest.relationship_id));
           setCoach({
@@ -271,46 +274,69 @@ export default function ClientDash() {
     try {
       await terminateRelationship(relationshipId);
       if (coach?.coach_id) {
-        localStorage.removeItem(`client_relationship:${clientId}:${coach.coach_id}`);
-        removeClientCoachRequest(account?.email, coach.coach_id);
         removeAcceptedClientForCoach(coach.coach_id, clientId);
       }
       setCoach(null);
       setRelationshipId(null);
-      const nextRequests = Object.values(readClientCoachRequests(account?.email));
-      setPendingCoachRequest(nextRequests.find((item) => item?.status === "pending") || null);
-      setApprovedCoachRequest(nextRequests.find((item) => item?.status === "approved") || null);
+      await refreshCoachRequestState();
+    } catch {
+      // keep UI state unchanged on failure
+    }
+  };
+
+  const handleCancelCoachRequest = async () => {
+    if (!pendingCoachRequest?.request_id) return;
+    if (!window.confirm("Cancel your pending coach request?")) return;
+
+    try {
+      await deleteCoachRequest(pendingCoachRequest.request_id);
+      await refreshCoachRequestState();
     } catch {
       // keep UI state unchanged on failure
     }
   };
 
   const handleOpenApprovedCoachChat = async () => {
-    if (!approvedCoachRequest?.relationship_id || !account?.id) return;
+    if (!approvedCoachRequest?.relationship_id || !coach) return;
     setRequestStatusError("");
     setOpeningCoachChat(true);
     try {
-      const existingConversations = await fetchConversations(account.id, "client", {
-        legacyAccountIds: [clientId],
+      const coachAccountId = coach.account_id ?? coach.accountId ?? coach.id ?? null;
+      await createConversation(approvedCoachRequest.relationship_id, {
+        id: approvedCoachRequest.coach_id,
+        account_id: coachAccountId,
+        name: approvedCoachRequest.coach_name || coach.name || `Coach #${approvedCoachRequest.coach_id}`,
+        role: "coach",
       });
-      const existing = existingConversations.find(
-        (item) => Number(item.partner_id) === Number(approvedCoachRequest.coach_id)
+      navigate(
+        coachAccountId
+          ? `/client-chat?account=${coachAccountId}`
+          : `/client-chat?client=${approvedCoachRequest.coach_id}`
       );
-      if (!existing) {
-        await createConversation(
-          approvedCoachRequest.relationship_id,
-          {
-            id: approvedCoachRequest.coach_id,
-            name: approvedCoachRequest.coach_name || `Coach #${approvedCoachRequest.coach_id}`,
-            role: "coach",
-          },
-          {
-            accountId: account.id,
-            role: "client",
-          }
-        );
-      }
-      navigate(`/client-chat?client=${approvedCoachRequest.coach_id}`);
+    } catch (error) {
+      setRequestStatusError(error.message || "Unable to open coach chat.");
+    } finally {
+      setOpeningCoachChat(false);
+    }
+  };
+
+  const handleOpenCoachChat = async () => {
+    if (!coach?.coach_id || !relationshipId) return;
+    setRequestStatusError("");
+    setOpeningCoachChat(true);
+    try {
+      const coachAccountId = coach.account_id ?? coach.accountId ?? coach.id ?? null;
+      await createConversation(relationshipId, {
+        id: coach.coach_id,
+        account_id: coachAccountId,
+        name: coach.name || `Coach #${coach.coach_id}`,
+        role: "coach",
+      });
+      navigate(
+        coachAccountId
+          ? `/client-chat?account=${coachAccountId}`
+          : `/client-chat?client=${coach.coach_id}`
+      );
     } catch (error) {
       setRequestStatusError(error.message || "Unable to open coach chat.");
     } finally {
@@ -498,6 +524,12 @@ export default function ClientDash() {
               >
                 View Request
               </button>
+              <button
+                onClick={handleCancelCoachRequest}
+                className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-300"
+              >
+                Cancel Request
+              </button>
             </div>
           </DashboardCard>
         ) : null}
@@ -592,9 +624,10 @@ export default function ClientDash() {
                 <div className="flex gap-2">
                   <button
                     className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-2 text-sm font-medium transition-colors"
-                    onClick={() => navigate("/client-chat")}
+                    onClick={handleOpenCoachChat}
+                    disabled={openingCoachChat || !relationshipId}
                   >
-                    💬 Message
+                    {openingCoachChat ? "Opening..." : "💬 Message"}
                   </button>
                   <button
                     className="flex-1 border border-gray-700 text-gray-300 hover:bg-gray-800 rounded-xl py-2 text-sm transition-colors"
@@ -607,7 +640,7 @@ export default function ClientDash() {
                       className="flex-1 border border-red-500/30 text-red-300 hover:bg-red-500/10 rounded-xl py-2 text-sm transition-colors"
                       onClick={handleTerminateRelationship}
                     >
-                      End
+                      End Relationship
                     </button>
                   ) : null}
                 </div>
@@ -815,8 +848,8 @@ export default function ClientDash() {
           weekdays={WEEKDAYS}
           role="client"
           onSave={async (updatedSlots) => {
-            await saveAvailability(clientId, updatedSlots);
-            setAvailabilitySlots(updatedSlots);
+            const refreshedAvailability = await saveAvailability(clientId, updatedSlots);
+            setAvailabilitySlots(Array.isArray(refreshedAvailability) ? refreshedAvailability : updatedSlots);
           }}
         />
       </Overlay>

@@ -9,15 +9,12 @@ import {
   fetchCoachReports,
   fetchCoachReviews,
   fetchMe,
+  fetchMyCoach,
+  fetchMyCoachRequests,
   requestCoach,
   terminateRelationship,
 } from "../api/client";
 import { fetchCoachAvailability, fetchCoachProfile } from "../api/coach";
-import {
-  readClientCoachRequests,
-  removeClientCoachRequest,
-  saveClientCoachRequest,
-} from "../utils/coachRequests";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
 
@@ -211,6 +208,7 @@ export default function CoachPublicProfilePage() {
   const [, setReports] = useState([]);
   const [availability, setAvailability] = useState([]);
   const [pendingRequests, setPendingRequests] = useState({});
+  const [activeCoachRelationshipId, setActiveCoachRelationshipId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
   const [hasClientRole, setHasClientRole] = useState(false);
@@ -235,9 +233,15 @@ export default function CoachPublicProfilePage() {
         const coachAccess = await getCoachAccessState(me);
         setCanSwitchToCoach(coachAccess.canAccessCoach);
 
-        if (me?.email) {
-          setPendingRequests(readClientCoachRequests(me.email));
+        const myCoach = await fetchMyCoach().catch(() => null);
+        if (Number(myCoach?.coach_id) === coachId && myCoach?.relationship_id != null) {
+          setActiveCoachRelationshipId(Number(myCoach.relationship_id));
+        } else {
+          setActiveCoachRelationshipId(null);
         }
+
+        const myRequests = await fetchMyCoachRequests().catch(() => []);
+        setPendingRequests(Object.fromEntries(myRequests.map((item) => [item.coach_id, item])));
 
         if (previewMode && Number(me?.coach_id) === coachId) {
           const coachProfile = await fetchCoachProfile().catch(() => null);
@@ -280,8 +284,7 @@ export default function CoachPublicProfilePage() {
   }, [account?.name]);
 
   const requestEntry = pendingRequests[coachId];
-  const relationshipId = requestEntry?.relationship_id
-    || (account?.client_id ? localStorage.getItem(`client_relationship:${account.client_id}:${coachId}`) : null);
+  const relationshipId = activeCoachRelationshipId || requestEntry?.relationship_id || null;
   const requestStatus = requestEntry?.status || null;
   const hasRelationshipHistory = Boolean(
     relationshipId
@@ -301,17 +304,9 @@ export default function CoachPublicProfilePage() {
     setActionError("");
     setActionMessage("");
     try {
-      const response = await requestCoach(account.client_id, coachId);
-      const requestData = {
-        request_id: response?.request_id,
-        coach_id: coachId,
-        coach_name: coach?.name || `Coach #${coachId}`,
-        coach_email: coach?.email || "",
-        status: "pending",
-        relationship_id: null,
-      };
-      saveClientCoachRequest(account.email, coachId, requestData);
-      setPendingRequests((prev) => ({ ...prev, [coachId]: requestData }));
+      await requestCoach(account.client_id, coachId);
+      const myRequests = await fetchMyCoachRequests();
+      setPendingRequests(Object.fromEntries(myRequests.map((item) => [item.coach_id, item])));
       setActionMessage("Coach request sent.");
     } catch (error) {
       setActionError(error.message || "Unable to request this coach.");
@@ -327,12 +322,8 @@ export default function CoachPublicProfilePage() {
     setActionMessage("");
     try {
       await deleteCoachRequest(requestEntry.request_id);
-      removeClientCoachRequest(account?.email, coachId);
-      setPendingRequests((prev) => {
-        const next = { ...prev };
-        delete next[coachId];
-        return next;
-      });
+      const myRequests = await fetchMyCoachRequests();
+      setPendingRequests(Object.fromEntries(myRequests.map((item) => [item.coach_id, item])));
       setActionMessage("Coach request cancelled.");
     } catch (error) {
       setActionError(error.message || "Unable to cancel this coach request.");
@@ -390,13 +381,9 @@ export default function CoachPublicProfilePage() {
     setActionError("");
     try {
       await terminateRelationship(Number(relationshipId));
-      localStorage.removeItem(`client_relationship:${account?.client_id}:${coachId}`);
-      removeClientCoachRequest(account?.email, coachId);
-      setPendingRequests((prev) => {
-        const next = { ...prev };
-        delete next[coachId];
-        return next;
-      });
+      setActiveCoachRelationshipId(null);
+      const myRequests = await fetchMyCoachRequests().catch(() => []);
+      setPendingRequests(Object.fromEntries(myRequests.map((item) => [item.coach_id, item])));
       setActionMessage("Coach relationship ended.");
     } catch (error) {
       setActionError(error.message || "Unable to end this relationship.");

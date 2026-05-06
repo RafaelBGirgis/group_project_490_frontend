@@ -23,11 +23,11 @@ import {
   deleteExercise,
   fetchAnalytics,
   fetchCoachRequests,
+  fetchTotalTransactions,
   resolveCoachRequest,
 } from "../api/admin";
 import RoleRequestsDetail from "../components/overlays/role_requests_detail";
 import ReportsDetail from "../components/overlays/reports_detail";
-import { saveCoachRequestResolution } from "../utils/coachRequests";
 
 const role = "admin";
 const MUSCLE_GROUPS = ["Chest", "Back", "Shoulders", "Legs", "Arms", "Core", "Cardio"];
@@ -239,8 +239,6 @@ export default function AdminDash() {
   /*  auth guard  */
   const [authed, setAuthed] = useState(false);
   useEffect(() => {
-    const token = localStorage.getItem("jwt");
-    if (!token) { navigate("/login"); return; }
     setAuthed(true);
   }, [navigate]);
 
@@ -253,6 +251,7 @@ export default function AdminDash() {
   const [analytics, setAnalytics] = useState(null);
   const [roleRequests, setRoleRequests] = useState([]);
   const [reports, setReports] = useState([]);
+  const [totalTransactions, setTotalTransactions] = useState(0);
 
   /*  overlay state  */
   const [overlay, setOverlay] = useState(null);
@@ -302,11 +301,13 @@ export default function AdminDash() {
         fetchAnalytics(),
         fetchCoachRequests(),
       ]);
+      const transactions = await fetchTotalTransactions().catch(() => ({ total_transactions: 0 }));
       setStats(s);
       setUsers(u);
       setExercises(ex);
       setAnalytics(an);
       setRoleRequests(requests);
+      setTotalTransactions(transactions.total_transactions || 0);
       setReports([
         { id: 1, reporter_name: "Aisha Patel",  reported_name: "Coach X", reason: "Inappropriate content", created_at: "1 hr ago" },
         { id: 2, reporter_name: "Chris Nguyen", reported_name: "Coach Y", reason: "No show",               created_at: "3 hrs ago" },
@@ -319,13 +320,11 @@ export default function AdminDash() {
   /*  handlers  */
   const handleApprove = async (id) => {
     await resolveCoachRequest(id, true);
-    saveCoachRequestResolution(id, "approved");
     setRoleRequests((p) => p.map((r) => r.id === id ? { ...r, is_approved: true } : r));
   };
 
   const handleReject = async (id) => {
     await resolveCoachRequest(id, false);
-    saveCoachRequestResolution(id, "rejected");
     setRoleRequests((p) => p.map((r) => r.id === id ? { ...r, is_approved: false } : r));
   };
   const handleDismissReport = (id) => setReports((p) => p.filter((r) => r.id !== id));

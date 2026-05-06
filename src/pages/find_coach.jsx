@@ -4,6 +4,7 @@ import { Navbar, StatusBadge, SkeletonDashCard } from "../components";
 import {
   fetchMe,
   fetchAvailableCoaches,
+  fetchMyCoachRequests,
   requestCoach,
   deleteCoachRequest,
   fetchCoachReviews,
@@ -11,7 +12,6 @@ import {
   fetchCoachReports,
   createCoachReport,
 } from "../api/client";
-import { readClientCoachRequests, removeClientCoachRequest, saveClientCoachRequest } from "../utils/coachRequests";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
 
@@ -112,17 +112,25 @@ export default function FindCoachPage() {
   }, [navigate]);
 
   useEffect(() => {
-    if (!account?.email) return;
-    const parsed = readClientCoachRequests(account.email);
-    setPendingRequests(parsed);
-    setRequestedIds(
-      new Set(
-        Object.entries(parsed)
-          .filter(([, value]) => value?.status !== "rejected")
-          .map(([key]) => Number(key))
-      )
-    );
-  }, [account?.email]);
+    if (!account?.id) return;
+
+    fetchMyCoachRequests()
+      .then((requests) => {
+        const byCoachId = Object.fromEntries(requests.map((item) => [item.coach_id, item]));
+        setPendingRequests(byCoachId);
+        setRequestedIds(
+          new Set(
+            requests
+              .filter((item) => item?.status !== "rejected")
+              .map((item) => Number(item.coach_id))
+          )
+        );
+      })
+      .catch(() => {
+        setPendingRequests({});
+        setRequestedIds(new Set());
+      });
+  }, [account?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -203,24 +211,17 @@ export default function FindCoachPage() {
     setRequestError("");
     setRequesting(coachId);
     try {
-      const response = await requestCoach(account.client_id, coachId);
-      setRequestedIds((prev) => new Set(prev).add(coachId));
-      if (account?.email && response?.request_id) {
-        const coachRecord = coaches.find((item) => item.coach_id === coachId);
-        const requestEntry = {
-          request_id: response.request_id,
-          coach_id: coachId,
-          coach_name: coachRecord?.name || `Coach #${coachId}`,
-          coach_email: coachRecord?.email || "",
-          status: "pending",
-          relationship_id: null,
-        };
-        saveClientCoachRequest(account.email, coachId, requestEntry);
-        setPendingRequests((prev) => ({
-          ...prev,
-          [coachId]: requestEntry,
-        }));
-      }
+      await requestCoach(account.client_id, coachId);
+      const requests = await fetchMyCoachRequests();
+      const byCoachId = Object.fromEntries(requests.map((item) => [item.coach_id, item]));
+      setPendingRequests(byCoachId);
+      setRequestedIds(
+        new Set(
+          requests
+            .filter((item) => item?.status !== "rejected")
+            .map((item) => Number(item.coach_id))
+        )
+      );
     } catch (error) {
       setRequestError(error.message || "Unable to send coach request.");
     } finally {
@@ -235,17 +236,16 @@ export default function FindCoachPage() {
     setRequesting(coachId);
     try {
       await deleteCoachRequest(requestId);
-      removeClientCoachRequest(account?.email, coachId);
-      setPendingRequests((prev) => {
-        const next = { ...prev };
-        delete next[coachId];
-        return next;
-      });
-      setRequestedIds((prev) => {
-        const next = new Set(prev);
-        next.delete(coachId);
-        return next;
-      });
+      const requests = await fetchMyCoachRequests();
+      const byCoachId = Object.fromEntries(requests.map((item) => [item.coach_id, item]));
+      setPendingRequests(byCoachId);
+      setRequestedIds(
+        new Set(
+          requests
+            .filter((item) => item?.status !== "rejected")
+            .map((item) => Number(item.coach_id))
+        )
+      );
     } catch (error) {
       setRequestError(error.message || "Unable to cancel coach request.");
     } finally {
@@ -255,12 +255,8 @@ export default function FindCoachPage() {
 
   const handleReviewSubmit = async (coachId) => {
     const requestEntry = pendingRequests[coachId];
-    const storedRelationshipId = account?.client_id
-      ? localStorage.getItem(`client_relationship:${account.client_id}:${coachId}`)
-      : null;
     const hasRelationshipHistory = Boolean(
-      storedRelationshipId
-      || requestEntry?.relationship_id
+      requestEntry?.relationship_id
       || requestEntry?.status === "approved"
     );
     if (!hasRelationshipHistory) {
@@ -465,12 +461,8 @@ export default function FindCoachPage() {
               const isRequesting = requesting === coach.coach_id;
               const requestEntry = pendingRequests[coach.coach_id];
               const requestStatus = requestEntry?.status || null;
-              const storedRelationshipId = account?.client_id
-                ? localStorage.getItem(`client_relationship:${account.client_id}:${coach.coach_id}`)
-                : null;
               const canReview = Boolean(
-                storedRelationshipId
-                || requestEntry?.relationship_id
+                requestEntry?.relationship_id
                 || requestStatus === "approved"
               );
               const initials = coach.name?.split(" ").map((name) => name[0]).join("") ?? "?";

@@ -13,7 +13,6 @@ import {
   uploadProfilePicture,
 } from "../api/client";
 import TelemetryCharts from "../components/overlays/telemetry_charts";
-import { readCoachRequestResolution, clearCoachRequestResolution } from "../utils/coachRequests";
 import {
   buildCoachInformationPayload,
   deactivateCoachAccount,
@@ -115,8 +114,6 @@ const buildCachedProfileState = ({
   profile,
   unifiedData,
   coachProfileData,
-  coachRequest,
-  coachRequestStorageKey,
   specializations,
   certifications,
   experiences,
@@ -129,8 +126,6 @@ const buildCachedProfileState = ({
   },
   unifiedData,
   coachProfileData,
-  coachRequest,
-  coachRequestStorageKey,
   specializations,
   certifications,
   experiences,
@@ -150,8 +145,6 @@ function ProfilePage({ role = "client" }) {
   const [saveError, setSaveError] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
   const [coachProfileData, setCoachProfileData] = useState(null);
-  const [coachRequest, setCoachRequest] = useState(null);
-  const [coachRequestStorageKey, setCoachRequestStorageKey] = useState("");
 
   const [profile, setProfile] = useState({
     firstName: "",
@@ -272,8 +265,6 @@ function ProfilePage({ role = "client" }) {
         setProfile((prev) => ({ ...prev, ...cached.profile }));
         setUnifiedData(cached.unifiedData || null);
         setCoachProfileData(cached.coachProfileData || null);
-        setCoachRequest(cached.coachRequest || null);
-        setCoachRequestStorageKey(cached.coachRequestStorageKey || "");
         setSpecializations(Array.isArray(cached.specializations) ? cached.specializations : []);
         setCertifications(Array.isArray(cached.certifications) ? cached.certifications : []);
         setExperiences(Array.isArray(cached.experiences) ? cached.experiences : []);
@@ -297,43 +288,10 @@ function ProfilePage({ role = "client" }) {
         setUnifiedData(unified);
         let nextUnifiedData = unified;
         let nextCoachProfileData = null;
-        let nextCoachRequest = null;
-        let nextCoachRequestStorageKey = "";
         let nextSpecializations = [];
         let nextCertifications = [];
         let nextExperiences = [];
         let nextPaymentMethod = null;
-
-        // Coach request bookkeeping
-        const requestKey = `coachRequest:${data.id || data.email || "current"}`;
-        setCoachRequestStorageKey(requestKey);
-        nextCoachRequestStorageKey = requestKey;
-        const savedRequestRaw =
-          localStorage.getItem(requestKey) || localStorage.getItem("coachRequestDraft");
-        if (savedRequestRaw) {
-          try {
-            const parsedRequest = JSON.parse(savedRequestRaw);
-            const resolution = readCoachRequestResolution(parsedRequest?.coach_request_id);
-            const isResolved =
-              coachAccess.canAccessCoach || resolution?.status === "approved" || resolution?.status === "rejected";
-            if (isResolved) {
-              localStorage.removeItem(requestKey);
-              localStorage.removeItem("coachRequestDraft");
-              clearCoachRequestResolution(parsedRequest?.coach_request_id);
-              setCoachRequest(null);
-              nextCoachRequest = null;
-            } else {
-              setCoachRequest(parsedRequest);
-              nextCoachRequest = parsedRequest;
-            }
-          } catch {
-            setCoachRequest(null);
-            nextCoachRequest = null;
-          }
-        } else {
-          setCoachRequest(null);
-          nextCoachRequest = null;
-        }
 
         // Populate profile from unified API data (account-level fields)
         const acct = unified?.account || data;
@@ -446,8 +404,6 @@ function ProfilePage({ role = "client" }) {
             profile: nextProfile,
             unifiedData: nextUnifiedData,
             coachProfileData: nextCoachProfileData,
-            coachRequest: nextCoachRequest,
-            coachRequestStorageKey: nextCoachRequestStorageKey,
             specializations: nextSpecializations,
             certifications: nextCertifications,
             experiences: nextExperiences,
@@ -477,8 +433,6 @@ function ProfilePage({ role = "client" }) {
         profile: profileOverride,
         unifiedData,
         coachProfileData,
-        coachRequest,
-        coachRequestStorageKey,
         specializations,
         certifications,
         experiences,
@@ -655,13 +609,6 @@ function ProfilePage({ role = "client" }) {
         alert("Failed to request coach account deletion. Please try again.");
       }
     }
-  };
-
-  const handleCancelCoachRequest = () => {
-    const key = coachRequestStorageKey || "coachRequestDraft";
-    localStorage.removeItem(key);
-    localStorage.removeItem("coachRequestDraft");
-    setCoachRequest(null);
   };
 
   const handleLogout = () => {
@@ -907,53 +854,6 @@ function ProfilePage({ role = "client" }) {
                     </button>
                   </div>
                 </SidebarCard>
-
-                {coachRequest && (
-                  <SidebarCard title="Coach Request">
-                    <div className="rounded-xl border border-yellow-400/20 bg-yellow-500/10 p-3">
-                      <p className="text-xs font-semibold uppercase tracking-widest text-yellow-300">
-                        Submitted
-                      </p>
-                      <p className="mt-2 text-xs text-slate-300">
-                        Date: {coachRequest.requestedDate || "-"}
-                      </p>
-                      <p className="text-xs text-slate-300">
-                        Years Experience: {coachRequest.yearsExperience ?? "-"}
-                      </p>
-                      <p className="text-xs text-slate-300">
-                        Specialties:{" "}
-                        {Array.isArray(coachRequest.specializations) &&
-                        coachRequest.specializations.length > 0
-                          ? coachRequest.specializations.join(", ")
-                          : "-"}
-                      </p>
-
-                      <div className="mt-3 flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => navigate("/coach-request?mode=view")}
-                          className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs font-medium text-slate-300"
-                        >
-                          View Request
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => navigate("/coach-request?mode=edit")}
-                          className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs font-medium text-slate-300"
-                        >
-                          Edit Request
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleCancelCoachRequest}
-                          className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300"
-                        >
-                          Cancel Request
-                        </button>
-                      </div>
-                    </div>
-                  </SidebarCard>
-                )}
               </>
             )}
           </div>
@@ -1665,7 +1565,6 @@ function EditableMetadataSection({
 }
 
 export default ProfilePage;
-
 
 
 

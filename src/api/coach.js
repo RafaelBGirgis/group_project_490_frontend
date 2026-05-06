@@ -46,7 +46,7 @@ export async function createLegacyCoachWorkoutPlan(payload) {
 }
 
 export async function deactivateCoachAccount() {
-  return { success: true, message: "Coach deactivation endpoint is not available in the backend yet." };
+  return apiPost("/roles/shared/account/deactivate");
 }
 
 export async function deleteCoachAccount() {
@@ -124,7 +124,13 @@ export async function fetchCoachAvailability(coachId) {
 
   try {
     const response = await apiGet(`/roles/coach/coach_availability/${coachId}`);
-    const grid = convertBackendAvailabilitiesToGrid(response?.coach_availabilities || []);
+    const availabilities = Array.isArray(response)
+      ? response
+      : response?.coach_availabilities ||
+        response?.availabilities ||
+        response?.availability ||
+        [];
+    const grid = convertBackendAvailabilitiesToGrid(availabilities);
     return grid;
   } catch {
     return [];
@@ -135,7 +141,6 @@ export async function saveCoachAvailability(coachId, slots) {
   if (!coachId) {
     throw new Error("Missing coach id for availability update.");
   }
-  const cacheKey = `coach_profile:${coachId ?? "me"}`;
   const availability = convertFromSlotsFormat(slots);
   const backendAvailabilities = convertTrainingAvailabilityObjectToBackend(availability);
 
@@ -143,17 +148,7 @@ export async function saveCoachAvailability(coachId, slots) {
     availabilities: backendAvailabilities,
   });
 
-  const refreshed = await fetchCoachAvailability(coachId);
-  const existing = readJson(cacheKey) || {};
-  localStorage.setItem(
-    cacheKey,
-    JSON.stringify({
-      ...existing,
-      availability: convertFromSlotsFormat(refreshed),
-    })
-  );
-
-  return refreshed;
+  return fetchCoachAvailability(coachId);
 }
 
 export async function fetchCoachStats(coachId) {

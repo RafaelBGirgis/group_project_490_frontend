@@ -29,6 +29,7 @@ export default function ChatPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
+  const preselectedAccount = searchParams.get("account");
   const preselectedClient = searchParams.get("client");
 
   /*  auth + account  */
@@ -73,7 +74,11 @@ export default function ChatPage() {
         setConversations(scopedConversations);
         setActiveChat(null);
         // Auto-select conversation if preselected or first one
-        if (preselectedClient) {
+        if (preselectedAccount) {
+          const match = scopedConversations.find((c) => String(c.partner_account_id) === preselectedAccount);
+          if (match) setActiveChat(match);
+          else if (scopedConversations.length > 0) setActiveChat(scopedConversations[0]);
+        } else if (preselectedClient) {
           const match = scopedConversations.find((c) => String(c.partner_id) === preselectedClient);
           if (match) setActiveChat(match);
           else if (scopedConversations.length > 0) setActiveChat(scopedConversations[0]);
@@ -83,7 +88,7 @@ export default function ChatPage() {
       })
       .catch(() => {})
       .finally(() => setLoadingConvos(false));
-  }, [account, preselectedClient, roleTheme.partnerRole]);
+  }, [account, preselectedAccount, preselectedClient, roleTheme.partnerRole]);
 
   /*  messages  */
   const [messages, setMessages] = useState([]);

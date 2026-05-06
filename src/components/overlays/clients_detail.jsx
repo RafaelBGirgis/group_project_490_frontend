@@ -50,7 +50,7 @@ export default function ClientsDetail({ clients, onMessage }) {
                 dot
               />
               <button
-                onClick={() => onMessage?.(c.id)}
+                onClick={() => onMessage?.(c)}
                 className="text-xs text-orange-400 border border-orange-500/30 rounded-full px-3 py-1 hover:bg-orange-500/10 transition-colors"
               >
                 Message

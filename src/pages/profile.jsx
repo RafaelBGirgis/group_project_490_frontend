@@ -22,6 +22,7 @@ import {
   updateCoachInformation,
 } from "../api/coach";
 import { getCoachAccessState } from "../utils/roleAccess";
+import { clearAuth } from "../api/auth";
 
 const PRIMARY_GOALS = [
   "Weight Loss",
@@ -569,7 +570,7 @@ function ProfilePage({ role = "client" }) {
       try {
         await deleteAccount();
         alert("Account deletion requested successfully.");
-        localStorage.removeItem("jwt");
+        clearAuth();
         navigate("/login");
       } catch {
         alert("Failed to request account deletion. Please try again.");
@@ -594,7 +595,7 @@ function ProfilePage({ role = "client" }) {
       try {
         await deactivateCoachAccount();
         alert("Coach account deactivated successfully.");
-        localStorage.removeItem("jwt");
+        clearAuth();
         navigate("/login");
       } catch {
         alert("Failed to deactivate coach account. Please try again.");
@@ -616,7 +617,7 @@ function ProfilePage({ role = "client" }) {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem("jwt");
+    clearAuth();
     navigate("/login");
   };
 

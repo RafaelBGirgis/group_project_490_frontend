@@ -55,7 +55,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (loading || !account) return;
-    const targetRoute = role === "coach" ? "/coach-chat" : "/client-chat";
+    const targetRoute = role === "coach" ? "/coach/messages" : "/client/messages";
     navigate(`${targetRoute}${location.search}`, { replace: true });
   }, [loading, account, role, location.search, navigate]);
 
@@ -97,12 +97,32 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!activeChat) return;
+    let cancelled = false;
+
+    setMessages([]);
     setLoadingMsgs(true);
-    fetchMessages(activeChat.id)
-      .then(setMessages)
-      .catch(() => {})
-      .finally(() => setLoadingMsgs(false));
-  }, [activeChat]);
+
+    const loadMessages = async ({ initial = false } = {}) => {
+      try {
+        const nextMessages = await fetchMessages(activeChat.id);
+        if (cancelled) return;
+
+        setMessages(nextMessages);
+      } catch {
+        // keep the current message list on transient errors
+      } finally {
+        if (!cancelled && initial) setLoadingMsgs(false);
+      }
+    };
+
+    loadMessages({ initial: true });
+    const intervalId = window.setInterval(loadMessages, 4000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [activeChat?.id]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -119,29 +139,22 @@ export default function ChatPage() {
     setDraft("");
     setSending(true);
 
-    // Optimistic add
-    const tempMsg = {
-      id: Date.now(),
-      from_account_id: account.id,
-      content: text,
-      created_at: new Date().toISOString(),
-      is_read: true,
-    };
-    setMessages((prev) => [...prev, tempMsg]);
-
-    // Update conversation preview
-    setConversations((prev) =>
-      prev.map((c) =>
-        c.id === activeChat.id
-          ? { ...c, last_message: text, last_message_at: "Just now", unread_count: 0 }
-          : c
-      )
-    );
-
     try {
-      await sendMessage(activeChat.id, text);
+      const actualMsg = await sendMessage(activeChat.id, text);
+      
+      // Instantly update UI as a result of calling the API
+      setMessages((prev) => [...prev, actualMsg]);
+      
+      // Update conversation preview
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === activeChat.id
+            ? { ...c, last_message: text, last_message_at: "Just now", unread_count: 0 }
+            : c
+        )
+      );
     } catch {
-      // Message already shown optimistically
+      // transient error, maybe put text back into draft
     } finally {
       setSending(false);
     }

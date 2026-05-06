@@ -5,7 +5,7 @@ export async function fetchConversationWithAccount(accountId, fallback = {}) {
   if (!accountId) return null;
 
   try {
-    const result = await apiGet(`/roles/shared/chat/chat_with_account/${accountId}`);
+    const result = await apiGet(`/roles/shared/chat/by-account/${accountId}`);
     return normalizeConversation(result, fallback);
   } catch (error) {
     if (error?.status === 404) {
@@ -26,7 +26,7 @@ export async function fetchConversations(_accountId, _role = "client", options =
 
   const conversations = await Promise.all(
     partnerAccounts.map((partner) =>
-      fetchConversationWithAccount(partner.account_id, partner).catch(() => null)
+      getConversationWithAccount(partner.account_id, partner).catch(() => null)
     )
   );
 
@@ -39,37 +39,8 @@ export async function fetchConversations(_accountId, _role = "client", options =
     });
 }
 
-export async function createConversation(relationshipId, partner, _options = {}) {
-  const partnerAccountId =
-    partner?.account_id ??
-    partner?.accountId ??
-    partner?.id;
-
-  if (partnerAccountId) {
-    const existingConversation = await fetchConversationWithAccount(partnerAccountId, partner);
-    if (existingConversation) {
-      return existingConversation;
-    }
-  }
-
-  if (!relationshipId) {
-    throw new Error("Missing relationship id for new chat.");
-  }
-
-  const response = await apiPost("/roles/shared/chat/new_chat", {
-    relationship_id: relationshipId,
-  });
-
-  return {
-    id: Number(response?.chat_id),
-    partner_id: partner?.id ?? null,
-    partner_account_id: partnerAccountId ?? null,
-    partner_name: partner?.name || "New conversation",
-    partner_role: partner?.role || "coach",
-    last_message: "",
-    last_message_at: null,
-    unread_count: 0,
-  };
+export async function getConversationWithAccount(accountId, partner = {}) {
+  return fetchConversationWithAccount(accountId, partner);
 }
 
 export function cacheConversationForAccount() {}
@@ -77,7 +48,7 @@ export function cacheConversationForAccount() {}
 export function updateConversationPreview() {}
 
 export async function fetchMessages(chatId, { skip = 0, limit = 100 } = {}) {
-  const result = await apiGet(withQuery(`/roles/shared/chat/get_messages/${chatId}`, { skip, limit }));
+  const result = await apiGet(withQuery(`/roles/shared/chat/messages/${chatId}`, { skip, limit }));
   const messages = Array.isArray(result?.messages) ? result.messages : [];
   return messages.map((message) => ({
     id: message.id,
@@ -89,7 +60,7 @@ export async function fetchMessages(chatId, { skip = 0, limit = 100 } = {}) {
 }
 
 export async function sendMessage(chatId, content) {
-  const result = await apiPost(withQuery(`/roles/shared/chat/send_message/${chatId}`, {
+  const result = await apiPost(withQuery(`/roles/shared/chat/messages/${chatId}`, {
     message_text: content,
   }));
   const createdAt = new Date().toISOString();

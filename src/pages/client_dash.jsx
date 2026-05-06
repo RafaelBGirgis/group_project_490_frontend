@@ -29,7 +29,6 @@ import {
   logWorkoutActivity,
   fetchCoachInfo,
   fetchCoachRating,
-  fetchNextSession,
   fetchAvailability,
   saveAvailability,
   fetchMealsToday,
@@ -43,7 +42,7 @@ import {
   fetchDailyStepsSurvey,
   fetchStepHistory,
 } from "../api/survey";
-import { createConversation } from "../api/chat";
+import { getConversationWithAccount } from "../api/chat";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
 
@@ -129,7 +128,6 @@ export default function ClientDash() {
   const [workoutActivities, setWorkoutActivities] = useState([]);
   const [coach, setCoach]               = useState(null);
   const [coachRating, setCoachRating]   = useState(null);
-  const [nextSession, setNextSession]   = useState(null);
   const [availabilitySlots, setAvailabilitySlots] = useState([]);
   const [prescribedMeals, setPrescribedMeals] = useState([]);
   const [loading, setLoading]           = useState(true);
@@ -185,11 +183,10 @@ export default function ClientDash() {
 
     (async () => {
       try {
-        const [telemetry, coachInfo, session, availability, meals] =
+        const [telemetry, coachInfo, availability, meals] =
           await Promise.all([
             fetchTelemetryToday(clientId),
             fetchCoachInfo(clientId),
-            fetchNextSession(clientId),
             fetchAvailability(clientId),
             fetchMealsToday(clientId),
           ]);
@@ -200,7 +197,6 @@ export default function ClientDash() {
         if (telemetry.calories_goal) setCaloriesGoal(telemetry.calories_goal);
 
         setCoach(coachInfo);
-        setNextSession(session);
         setAvailabilitySlots(availability);
         setPrescribedMeals(meals);
         if (coachInfo?.coach_id) {
@@ -220,7 +216,7 @@ export default function ClientDash() {
         // throws (e.g. 401 redirect in progress) just stay on skeleton
       }
     })();
-  }, [approvedCoachRequest, clientId]);
+  }, [approvedCoachRequest, clientId, refreshSurveyStatus]);
 
   /*  load coach rating when coach is known  */
   useEffect(() => {
@@ -292,37 +288,13 @@ export default function ClientDash() {
     }
   };
 
-  const handleOpenApprovedCoachChat = async () => {
-    if (!approvedCoachRequest?.relationship_id || !coach) return;
-    setRequestStatusError("");
-    setOpeningCoachChat(true);
-    try {
-      const coachAccountId = coach.account_id ?? coach.accountId ?? coach.id ?? null;
-      await createConversation(approvedCoachRequest.relationship_id, {
-        id: approvedCoachRequest.coach_id,
-        account_id: coachAccountId,
-        name: approvedCoachRequest.coach_name || coach.name || `Coach #${approvedCoachRequest.coach_id}`,
-        role: "coach",
-      });
-      navigate(
-        coachAccountId
-          ? `/client-chat?account=${coachAccountId}`
-          : `/client-chat?client=${approvedCoachRequest.coach_id}`
-      );
-    } catch (error) {
-      setRequestStatusError(error.message || "Unable to open coach chat.");
-    } finally {
-      setOpeningCoachChat(false);
-    }
-  };
-
   const handleOpenCoachChat = async () => {
     if (!coach?.coach_id || !relationshipId) return;
     setRequestStatusError("");
     setOpeningCoachChat(true);
     try {
       const coachAccountId = coach.account_id ?? coach.accountId ?? coach.id ?? null;
-      await createConversation(relationshipId, {
+      await getConversationWithAccount(coachAccountId, {
         id: coach.coach_id,
         account_id: coachAccountId,
         name: coach.name || `Coach #${coach.coach_id}`,
@@ -330,8 +302,8 @@ export default function ClientDash() {
       });
       navigate(
         coachAccountId
-          ? `/client-chat?account=${coachAccountId}`
-          : `/client-chat?client=${coach.coach_id}`
+          ? `/client/messages?account=${coachAccountId}`
+          : `/client/messages?client=${coach.coach_id}`
       );
     } catch (error) {
       setRequestStatusError(error.message || "Unable to open coach chat.");

@@ -18,6 +18,7 @@ const NOTIFICATION_ICONS = {
   relationship_request_deletion: UserMinus,
   relationship_request_denied: CircleX,
   relationship_termination: Unlink,
+  chat_message: MessageCircle,
 };
 
 function Bell(props) {
@@ -100,6 +101,15 @@ function UserPlus(props) {
       <path d="M16 21a4 4 0 0 0-8 0" />
       <circle cx="12" cy="8" r="4" />
       <path d="M19 8v6M16 11h6" />
+    </svg>
+  );
+}
+
+function MessageCircle(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
+      <path d="M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 0 1-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8Z" />
+      <path d="M8 12h.01M12 12h.01M16 12h.01" />
     </svg>
   );
 }
@@ -338,7 +348,7 @@ export function Navbar({
 
           {/* Message Button */}
           <button
-            onClick={onMessage || (() => navigate(`/${role}-chat`))}
+            onClick={onMessage || (() => navigate(`/${role}/messages`))}
             className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] text-slate-400 transition-colors hover:bg-[rgba(255,255,255,0.06)] hover:text-white"
             aria-label="Messages"
           >

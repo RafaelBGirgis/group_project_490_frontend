@@ -31,7 +31,7 @@ import {
   createClientReview,
   fetchClientReports,
 } from "../api/coach";
-import { createConversation } from "../api/chat";
+import { getConversationWithAccount } from "../api/chat";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { updateClientCoachRequestByRequestId } from "../utils/coachRequests";
 import { resolveRoleState } from "../utils/sessionAuth";
@@ -169,7 +169,7 @@ export default function CoachDashboard() {
           (client) => Number(client.id) === Number(request.client_id) && client.status === "active"
         );
         const detail = await loadClientRequestDetails(request.client_id).catch(() => null);
-        await createConversation(accepted.relationship_id, {
+        await getConversationWithAccount(detail?.base_account?.id || null, {
           id: request.client_id,
           account_id: detail?.base_account?.id || null,
           name: detail?.base_account?.name || `Client #${request.client_id}`,
@@ -259,7 +259,7 @@ export default function CoachDashboard() {
         client?.details?.base_account?.id ??
         null;
 
-      const conversation = await createConversation(relationshipId, {
+      const conversation = await getConversationWithAccount(accountId, {
         id: clientId,
         account_id: accountId,
         name: detail?.base_account?.name || client?.name || `Client #${clientId}`,
@@ -269,11 +269,11 @@ export default function CoachDashboard() {
       closeOverlay();
       navigate(
         conversation?.partner_account_id
-          ? `/coach-chat?account=${conversation.partner_account_id}`
-          : `/coach-chat?client=${clientId}`
+          ? `/coach/messages?account=${conversation.partner_account_id}`
+          : `/coach/messages?client=${clientId}`
       );
     } catch {
-      navigate(`/coach-chat?client=${clientId}`);
+      navigate(`/coach/messages?client=${clientId}`);
     } finally {
       setChatActionId(null);
     }
@@ -382,21 +382,37 @@ export default function CoachDashboard() {
                   {activeClients.slice(0, 4).map((c) => (
                     <div
                       key={c.id}
-                      className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
-                      onClick={() => { setSelectedClient(c); setOverlay("client_profile"); }}
+                      className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors"
                     >
-                      <ProfileAvatar
-                        src={c.details?.base_account?.pfp_url}
-                        alt={c.name}
-                        name={c.name}
-                        size="md"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-white font-medium text-sm truncate">{c.name}</p>
-                        <p className="text-gray-400 text-xs">
-                          {c.goal} · {c.details?.base_account?.age || "—"} · {c.details?.base_account?.gender || "—"}
-                        </p>
+                      <div
+                        className="flex-1 min-w-0 cursor-pointer"
+                        onClick={() => { setSelectedClient(c); setOverlay("client_profile"); }}
+                      >
+                        <div className="flex items-center gap-3">
+                          <ProfileAvatar
+                            src={c.details?.base_account?.pfp_url}
+                            alt={c.name}
+                            name={c.name}
+                            size="md"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white font-medium text-sm truncate">{c.name}</p>
+                            <p className="text-gray-400 text-xs">
+                              {c.goal} · {c.details?.base_account?.age || "—"} · {c.details?.base_account?.gender || "—"}
+                            </p>
+                          </div>
+                        </div>
                       </div>
+                      <button
+                        onClick={() => handleOpenClientChat(c)}
+                        disabled={chatActionId === c.id}
+                        className="shrink-0 rounded-lg text-orange-400 hover:text-orange-300 transition-colors p-1.5 hover:bg-orange-500/10 disabled:opacity-50"
+                        title="Message client"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                          <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+                        </svg>
+                      </button>
                     </div>
                   ))}
                   {activeClients.length > 4 && (

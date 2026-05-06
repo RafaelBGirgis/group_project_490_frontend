@@ -3,8 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { Navbar, SkeletonMessage } from "../components";
 import { fetchMe } from "../api/client";
 import {
-  createConversation,
-  fetchConversationWithAccount,
+  getConversationWithAccount,
   fetchConversations,
   fetchMessages,
   formatChatTimestamp,
@@ -104,12 +103,15 @@ export default function CoachChatPage() {
             detail?.relationship_id ??
             detail?.client_coach_relationship?.id ??
             null;
-          const ensuredConversation = await createConversation(relationshipId, {
+          const ensuredConversation = await getConversationWithAccount(
+            detail?.base_account?.id ?? null,
+            {
             id: Number(preselectedClient),
             account_id: detail?.base_account?.id ?? null,
             name: detail?.base_account?.name || selectedClient?.name || `Client #${preselectedClient}`,
             role: "client",
-          }).catch(() => null);
+            }
+          ).catch(() => null);
 
           if (ensuredConversation) {
             nextConversations = [
@@ -145,16 +147,37 @@ export default function CoachChatPage() {
 
   useEffect(() => {
     if (!activeChat) return;
+    let cancelled = false;
+
+    setMessages([]);
     setLoadingMsgs(true);
-    setChatError("");
-    fetchMessages(activeChat.id)
-      .then(setMessages)
-      .catch((error) => {
-        setMessages([]);
-        setChatError(error.message || "Unable to load messages.");
-      })
-      .finally(() => setLoadingMsgs(false));
-  }, [activeChat]);
+
+    const loadMessages = async ({ initial = false } = {}) => {
+      try {
+        const nextMessages = await fetchMessages(activeChat.id);
+        if (cancelled) return;
+
+        setMessages(nextMessages);
+      } catch (error) {
+        if (!cancelled) {
+          if (initial) {
+            setMessages([]);
+            setChatError(error.message || "Unable to load messages.");
+          }
+        }
+      } finally {
+        if (!cancelled && initial) setLoadingMsgs(false);
+      }
+    };
+
+    loadMessages({ initial: true });
+    const intervalId = window.setInterval(loadMessages, 4000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [activeChat?.id]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -166,42 +189,16 @@ export default function CoachChatPage() {
   const handleSend = async () => {
     if (!draft.trim() || !activeChat || sending) return;
     const text = draft.trim();
-    const previewTimestamp = new Date().toISOString();
-    const previousPreview = {
-      last_message: activeChat.last_message,
-      last_message_at: activeChat.last_message_at,
-      unread_count: activeChat.unread_count,
-    };
 
     setDraft("");
     setSending(true);
     setChatError("");
 
-    const tempMsg = {
-      id: Date.now(),
-      from_account_id: account.id,
-      content: text,
-      created_at: previewTimestamp,
-      is_read: true,
-    };
-    setMessages((prev) => [...prev, tempMsg]);
-
-    setConversations((prev) =>
-      prev.map((c) =>
-        c.id === activeChat.id
-          ? { ...c, last_message: text, last_message_at: previewTimestamp, unread_count: 0 }
-          : c
-      )
-    );
-    setActiveChat((prev) =>
-      prev && prev.id === activeChat.id
-        ? { ...prev, last_message: text, last_message_at: previewTimestamp, unread_count: 0 }
-        : prev
-    );
-
     try {
       const sentMessage = await sendMessage(activeChat.id, text);
-      setMessages((prev) => prev.map((message) => (message.id === tempMsg.id ? sentMessage : message)));
+      
+      setMessages((prev) => [...prev, sentMessage]);
+      
       setConversations((prev) =>
         prev.map((conversation) =>
           conversation.id === activeChat.id
@@ -209,25 +206,13 @@ export default function CoachChatPage() {
             : conversation
         )
       );
+      
       setActiveChat((prev) =>
         prev && prev.id === activeChat.id
           ? { ...prev, last_message: text, last_message_at: sentMessage.created_at, unread_count: 0 }
           : prev
       );
     } catch (error) {
-      setMessages((prev) => prev.filter((message) => message.id !== tempMsg.id));
-      setConversations((prev) =>
-        prev.map((conversation) =>
-          conversation.id === activeChat.id
-            ? { ...conversation, ...previousPreview }
-            : conversation
-        )
-      );
-      setActiveChat((prev) =>
-        prev && prev.id === activeChat.id
-          ? { ...prev, ...previousPreview }
-          : prev
-      );
       setChatError(error.message || "Unable to send message.");
     } finally {
       setSending(false);

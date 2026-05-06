@@ -33,10 +33,10 @@ function App() {
           <Route path="/coach" element={<CoachDashboard />} />
           <Route path="/admin" element={<AdminDashboard />} />
           <Route path="/chat" element={<ChatPage />} />
-          <Route path="/coach-chat" element={<CoachChatPage />} />
-          <Route path="/client-chat" element={<ClientChatPage />} />
-          <Route path="/client/messages" element={<ChatPage />} />
-          <Route path="/coach/messages" element={<ChatPage />} />
+          <Route path="/client/messages" element={<ClientChatPage />} />
+          <Route path="/coach/messages" element={<CoachChatPage />} />
+          <Route path="/client-chat" element={<Navigate to="/client/messages" replace />} />
+          <Route path="/coach-chat" element={<Navigate to="/coach/messages" replace />} />
           <Route path="/find-coach" element={<FindCoachPage />} />
           <Route path="/coaches/:coachId" element={<CoachPublicProfilePage />} />
           <Route path="/workouts" element={<WorkoutsPage />} />

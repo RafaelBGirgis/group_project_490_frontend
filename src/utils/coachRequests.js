@@ -20,6 +20,62 @@ function readJson(key) {
   }
 }
 
+function normalizeStatus(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+export function isApprovedCoachRequest(request) {
+  const status = normalizeStatus(request?.status);
+  return status === "approved" || request?.is_accepted === true;
+}
+
+export function isPendingCoachRequest(request) {
+  const status = normalizeStatus(request?.status);
+  return status === "pending" || (!status && request?.is_accepted == null);
+}
+
+export function resolveActiveCoachRelationship(myCoach, requestList) {
+  const byCoachId = {};
+
+  (Array.isArray(requestList) ? requestList : []).forEach((request) => {
+    const coachId = Number(request?.coach_id);
+    if (!Number.isFinite(coachId)) {
+      return;
+    }
+
+    const previous = byCoachId[coachId];
+    const previousTime = new Date(previous?.updated_at || 0).getTime();
+    const currentTime = new Date(request?.updated_at || 0).getTime();
+
+    if (!previous || currentTime >= previousTime) {
+      byCoachId[coachId] = {
+        ...previous,
+        ...request,
+        coach_id: coachId,
+      };
+    }
+  });
+
+  if (myCoach?.coach_id != null) {
+    const coachId = Number(myCoach.coach_id);
+    byCoachId[coachId] = {
+      ...(byCoachId[coachId] || {}),
+      ...myCoach,
+      coach_id: coachId,
+      status: byCoachId[coachId]?.status || "approved",
+    };
+  }
+
+  const activeCoach = myCoach?.relationship_id != null
+    ? {
+        ...(byCoachId[Number(myCoach.coach_id)] || {}),
+        ...myCoach,
+      }
+    : null;
+
+  return { activeCoach, byCoachId };
+}
+
 export function saveCoachRequestResolution(requestId, status) {
   if (!requestId || !status) return;
   localStorage.setItem(

@@ -365,9 +365,6 @@ function CoachRequestFormPage() {
               <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
                 Availability
               </label>
-              <p className="mb-3 text-xs text-slate-500">
-                Use the same hourly availability editor shown on the dashboards.
-              </p>
               <AvailabilityDetail
                 slots={convertTrainingAvailabilityToGrid(availability)}
                 weekdays={AVAILABILITY_DAYS}

@@ -745,9 +745,6 @@ export default function ClientDash() {
                 <p className="text-[10px] uppercase tracking-widest text-gray-500">Booked</p>
               </div>
             </div>
-            <p className="mb-3 text-xs text-gray-500">
-              Saved as one-hour windows through your client availability route.
-            </p>
             <div className="grid grid-cols-8 gap-1 mb-2">
               <div />
               {WEEKDAYS.map((d) => (

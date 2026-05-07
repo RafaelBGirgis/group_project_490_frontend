@@ -226,15 +226,6 @@ export default function AvailabilityDetail({
         </div>
       </div>
 
-      {/*  Instructions  */}
-      <div className="rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3">
-        <p className="text-gray-400 text-xs leading-relaxed">
-          This editor saves one-hour availability windows by weekday for the backend routes.
-          Click any cell to toggle between <span style={{ color: accentColor }} className="font-medium">available</span> and unavailable.
-          Booked sessions are locked, and each saved slot is submitted as a `:00` hourly block.
-        </p>
-      </div>
-
       {/*  Schedule Grid  */}
       <div className="rounded-xl border border-white/5 bg-[rgba(255,255,255,0.02)] p-4">
         {/* Header row with clickable day names */}

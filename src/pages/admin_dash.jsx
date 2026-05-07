@@ -277,6 +277,8 @@ export default function AdminDash() {
   useEffect(() => {
     if (!authed) return;
     (async () => {
+      setLoading(true);
+
       // Fetch account info — use a direct fetch to avoid the global 401
       // redirect in apiFetch (admin may not have a backend-valid JWT yet)
       try {
@@ -294,26 +296,53 @@ export default function AdminDash() {
         // Initials are decorative; keep loading the dashboard if this request fails.
       }
 
-      const [s, u, ex, an, requests] = await Promise.all([
-        fetchAdminStats(),
-        fetchAllUsers(),
-        fetchExerciseBank(),
-        fetchAnalytics(),
-        fetchCoachRequests(),
-      ]);
-      const transactions = await fetchTotalTransactions().catch(() => ({ total_transactions: 0 }));
-      setStats(s);
-      setUsers(u);
-      setExercises(ex);
-      setAnalytics(an);
-      setRoleRequests(requests);
-      setTotalTransactions(transactions.total_transactions || 0);
-      setReports([
-        { id: 1, reporter_name: "Aisha Patel",  reported_name: "Coach X", reason: "Inappropriate content", created_at: "1 hr ago" },
-        { id: 2, reporter_name: "Chris Nguyen", reported_name: "Coach Y", reason: "No show",               created_at: "3 hrs ago" },
-      ]);
+      try {
+        const [s, u, an, requests] = await Promise.all([
+          fetchAdminStats().catch(() => ({
+            total_accounts: 0,
+            total_clients: 0,
+            total_coaches: 0,
+            pending_role_requests: 0,
+            active_today: 0,
+            active_this_week: 0,
+            active_this_month: 0,
+            total_revenue: 0,
+            revenue_this_month: 0,
+            active_subscriptions: 0,
+            revenue_change: 0,
+          })),
+          fetchAllUsers().catch(() => []),
+          fetchAnalytics().catch(() => ({
+            daily: [],
+            weekly: [],
+            monthly: [],
+            summary: {
+              dau: 0,
+              wau: 0,
+              mau: 0,
+              dau_change: 0,
+              wau_change: 0,
+              mau_change: 0,
+              total_signups_30d: 0,
+              avg_session_min: 0,
+              retention_7d: 0,
+            },
+          })),
+          fetchCoachRequests().catch(() => []),
+        ]);
+        const transactions = await fetchTotalTransactions().catch(() => ({ total_transactions: 0 }));
+        const exerciseResponse = await fetchExerciseBank().catch(() => []);
 
-      setLoading(false);
+        setStats(s);
+        setUsers(u);
+        setExercises(exerciseResponse);
+        setAnalytics(an);
+        setRoleRequests(requests);
+        setTotalTransactions(transactions.total_transactions || 0);
+        setReports([]);
+      } finally {
+        setLoading(false);
+      }
     })();
   }, [authed]);
 

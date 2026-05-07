@@ -105,8 +105,14 @@ export async function deleteScheduledPlanAsCoach(planId) {
 
 /* ─── Coach view of clients ─────────────────────────────────────────────── */
 
-export async function listAcceptedClients() {
-  const result = await apiGet("/roles/coach/clients");
+export async function listAcceptedClients({ text, skip = 0, limit = 24 } = {}) {
+  const result = await apiGet(
+    withQuery("/roles/coach/clients", {
+      text: text || undefined,
+      skip,
+      limit,
+    })
+  );
   return Array.isArray(result) ? result : [];
 }
 

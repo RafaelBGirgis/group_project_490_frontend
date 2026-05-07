@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Navbar } from "../components";
+import ProfileAvatar from "../components/profile_avatar";
 import {
   PlanMyWeekProvider,
   usePlanMyWeek,
@@ -114,63 +115,103 @@ function Tabs() {
   );
 }
 
+const CLIENT_PAGE_SIZE = 12;
+
 function ClientPicker() {
   const { dispatch } = usePlanMyWeek();
+  const [text, setText] = useState("");
+  const [skip, setSkip] = useState(0);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    listAcceptedClients()
-      .then((rows) => setClients(rows))
-      .catch((e) => setError(e?.message || "Failed to load clients"))
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="rounded-xl border border-white/10 bg-[#0F1729] p-6 text-sm text-gray-400">
-        Loading your clients…
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
-        {error}
-      </div>
-    );
-  }
-
-  if (!clients.length) {
-    return (
-      <div className="rounded-xl border border-white/10 bg-[#0F1729] p-6 text-sm text-gray-400">
-        You have no active clients yet.
-      </div>
-    );
-  }
+    let alive = true;
+    setLoading(true);
+    setError("");
+    // Tiny debounce so typing doesn't fire a request per keystroke
+    const handle = setTimeout(() => {
+      listAcceptedClients({ text: text.trim() || undefined, skip, limit: CLIENT_PAGE_SIZE })
+        .then((rows) => alive && setClients(rows))
+        .catch((e) => alive && setError(e?.message || "Failed to load clients"))
+        .finally(() => alive && setLoading(false));
+    }, 200);
+    return () => {
+      alive = false;
+      clearTimeout(handle);
+    };
+  }, [text, skip]);
 
   return (
     <div className="space-y-3">
-      <h2 className="text-sm uppercase tracking-widest text-gray-500">Select a client</h2>
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-        {clients.map((c) => (
+      <header className="flex items-center justify-between gap-3">
+        <h2 className="text-sm uppercase tracking-widest text-gray-500">Select a client</h2>
+        <input
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            setSkip(0);
+          }}
+          placeholder="Search by name…"
+          className="bg-[#0A1020] border border-white/10 rounded-lg px-3 py-1.5 text-sm w-64"
+        />
+      </header>
+
+      {error ? (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">{error}</div>
+      ) : null}
+
+      {loading ? (
+        <div className="rounded-xl border border-white/10 bg-[#0F1729] p-6 text-sm text-gray-400 text-center">
+          Loading your clients…
+        </div>
+      ) : clients.length === 0 ? (
+        <div className="rounded-xl border border-white/10 bg-[#0F1729] p-6 text-sm text-gray-400 text-center">
+          {text.trim() ? "No clients match that search." : "You have no active clients yet."}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          {clients.map((c) => (
+            <button
+              key={c.client_id}
+              onClick={() => dispatch({ type: "SELECT_CLIENT", clientId: c.client_id })}
+              className="text-left rounded-xl border border-white/10 bg-[#0F1729] hover:bg-[#13192A] p-4 flex items-center gap-3 transition-colors"
+            >
+              <ProfileAvatar src={c.pfp_url} alt={c.name} name={c.name} size="lg" />
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-white truncate">{c.name || `Client #${c.client_id}`}</p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {c.age || "—"} · {c.gender || "—"}
+                </p>
+                {c.goal ? <p className="text-xs text-orange-300 mt-1 capitalize">Goal: {c.goal}</p> : null}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <footer className="flex items-center justify-between text-xs text-gray-400 pt-1">
+        <span>
+          Page {Math.floor(skip / CLIENT_PAGE_SIZE) + 1}
+          {clients.length ? ` · showing ${clients.length}` : ""}
+        </span>
+        <div className="flex gap-2">
           <button
-            key={c.id ?? c.client_id}
-            onClick={() =>
-              dispatch({ type: "SELECT_CLIENT", clientId: c.id ?? c.client_id })
-            }
-            className="text-left rounded-xl border border-white/10 bg-[#0F1729] hover:bg-[#13192A] p-4"
+            disabled={skip === 0}
+            onClick={() => setSkip(Math.max(0, skip - CLIENT_PAGE_SIZE))}
+            className="px-3 py-1 rounded border border-white/10 disabled:opacity-30"
           >
-            <p className="font-semibold text-white">{c.name || `Client #${c.id ?? c.client_id}`}</p>
-            <p className="text-xs text-gray-400 mt-0.5">
-              {(c.details?.base_account?.age || c.age || "—")} · {(c.details?.base_account?.gender || c.gender || "—")}
-            </p>
-            {c.goal ? <p className="text-xs text-orange-300 mt-1">Goal: {c.goal}</p> : null}
+            ← Prev
           </button>
-        ))}
-      </div>
+          <button
+            disabled={clients.length < CLIENT_PAGE_SIZE}
+            onClick={() => setSkip(skip + CLIENT_PAGE_SIZE)}
+            className="px-3 py-1 rounded border border-white/10 disabled:opacity-30"
+          >
+            Next →
+          </button>
+        </div>
+      </footer>
     </div>
   );
 }

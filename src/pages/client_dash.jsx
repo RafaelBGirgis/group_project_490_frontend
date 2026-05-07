@@ -253,7 +253,7 @@ export default function ClientDash() {
 
     (async () => {
       try {
-        const [telemetry, coachInfo, session, availability, meals, mealOptions] =
+        const [telemetry, availability, meals, mealOptions] =
           await Promise.all([
             fetchTelemetryToday(clientId).catch(() => ({
               step_count: 0,

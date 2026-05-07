@@ -8,7 +8,6 @@ import {
   createLegacyCoachWorkoutActivity,
   createLegacyCoachWorkoutPlan,
   fetchClientWorkoutPlanByCoach,
-  fetchMyClients,
   prescribeWorkoutPlan,
 } from "./coach";
 import { assignWorkoutPlanToClient } from "./client";
@@ -93,134 +92,6 @@ export async function fetchSupportedEquipment({ skip = 0, limit = 100 } = {}) {
   }
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   PRESET WORKOUTS — built-in templates anyone can use
-   ═══════════════════════════════════════════════════════════════════════ */
-
-const PRESET_WORKOUTS = [
-  {
-    id: "preset-ppl-push",
-    name: "Push Day",
-    description: "Chest, shoulders, and triceps focused compound and isolation work.",
-    type: "preset",
-    category: "Strength",
-    difficulty: "Intermediate",
-    est_duration_min: 60,
-    muscle_groups: ["Chest", "Shoulders", "Arms"],
-    exercises: [
-      { name: "Bench Press",            sets: 4, reps: 6,  weight: 185, intensity_measure: "lbs", notes: "Warm up with bar first", rest_seconds: 60, equipment: "Barbell", estimated_calories_per_unit_frequency: 8 },
-      { name: "Incline Dumbbell Press", sets: 3, reps: 10, weight: 60,  intensity_measure: "lbs",  notes: "", rest_seconds: 60, equipment: "Dumbbell", estimated_calories_per_unit_frequency: 7 },
-      { name: "Overhead Press",         sets: 3, reps: 8,  weight: 95,  intensity_measure: "lbs", notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 6 },
-      { name: "Lateral Raises",         sets: 4, reps: 15, weight: 25,  intensity_measure: "lbs",  notes: "Control the negative", equipment: "Dumbbell", estimated_calories_per_unit_frequency: 4 },
-      { name: "Tricep Pushdown",        sets: 3, reps: 12, weight: 50,  intensity_measure: "lbs",  notes: "", equipment: "Cable", estimated_calories_per_unit_frequency: 5 },
-      { name: "Cable Flyes",            sets: 3, reps: 12, weight: 30,  intensity_measure: "lbs",  notes: "Squeeze at peak", equipment: "Cable", estimated_calories_per_unit_frequency: 5 },
-    ],
-  },
-  {
-    id: "preset-ppl-pull",
-    name: "Pull Day",
-    description: "Back and biceps — heavy rows, pulldowns, and isolation curls.",
-    type: "preset",
-    category: "Strength",
-    difficulty: "Intermediate",
-    est_duration_min: 55,
-    muscle_groups: ["Back", "Arms"],
-    exercises: [
-      { name: "Barbell Row",       sets: 4, reps: 8,  weight: 155, intensity_measure: "lbs", notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 8 },
-      { name: "Lat Pulldown",      sets: 3, reps: 10, weight: 120, intensity_measure: "lbs",  notes: "", equipment: "Cable", estimated_calories_per_unit_frequency: 6 },
-      { name: "Seated Cable Row",  sets: 3, reps: 10, weight: 100, intensity_measure: "lbs",  notes: "", equipment: "Cable", estimated_calories_per_unit_frequency: 6 },
-      { name: "Face Pulls",        sets: 3, reps: 15, weight: 30,  intensity_measure: "lbs",  notes: "", equipment: "Cable", estimated_calories_per_unit_frequency: 4 },
-      { name: "Bicep Curls",       sets: 3, reps: 12, weight: 35,  intensity_measure: "lbs",  notes: "", equipment: "Dumbbell", estimated_calories_per_unit_frequency: 4 },
-      { name: "Hammer Curls",      sets: 3, reps: 12, weight: 30,  intensity_measure: "lbs",  notes: "", equipment: "Dumbbell", estimated_calories_per_unit_frequency: 4 },
-    ],
-  },
-  {
-    id: "preset-ppl-legs",
-    name: "Leg Day",
-    description: "Full lower-body session with compounds and accessories.",
-    type: "preset",
-    category: "Strength",
-    difficulty: "Intermediate",
-    est_duration_min: 65,
-    muscle_groups: ["Legs", "Core"],
-    exercises: [
-      { name: "Barbell Squat",         sets: 4, reps: 6,  weight: 225, intensity_measure: "lbs", notes: "Hit depth", equipment: "Barbell", estimated_calories_per_unit_frequency: 10 },
-      { name: "Romanian Deadlift",     sets: 3, reps: 10, weight: 185, intensity_measure: "lbs", notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 9 },
-      { name: "Leg Press",             sets: 3, reps: 12, weight: 360, intensity_measure: "lbs",  notes: "", equipment: "Machine", estimated_calories_per_unit_frequency: 7 },
-      { name: "Leg Curl",              sets: 3, reps: 12, weight: 80,  intensity_measure: "lbs",  notes: "", equipment: "Machine", estimated_calories_per_unit_frequency: 5 },
-      { name: "Calf Raises",           sets: 4, reps: 15, weight: 90,  intensity_measure: "lbs",  notes: "", equipment: "Machine", estimated_calories_per_unit_frequency: 4 },
-      { name: "Hanging Leg Raises",    sets: 3, reps: 12, weight: 0,   intensity_measure: "bw",   notes: "", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 5 },
-    ],
-  },
-  {
-    id: "preset-upper-lower-upper",
-    name: "Upper Body Power",
-    description: "Heavy compound lifts for upper-body strength and mass.",
-    type: "preset",
-    category: "Strength",
-    difficulty: "Advanced",
-    est_duration_min: 70,
-    muscle_groups: ["Chest", "Back", "Shoulders", "Arms"],
-    exercises: [
-      { name: "Bench Press",        sets: 5, reps: 5,  weight: 205, intensity_measure: "lbs", notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 9 },
-      { name: "Barbell Row",        sets: 5, reps: 5,  weight: 175, intensity_measure: "lbs", notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 9 },
-      { name: "Overhead Press",     sets: 4, reps: 6,  weight: 115, intensity_measure: "lbs", notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 7 },
-      { name: "Pull-ups",           sets: 4, reps: 8,  weight: 0,   intensity_measure: "bw",  notes: "Add weight if possible", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 8 },
-      { name: "Dumbbell Flyes",     sets: 3, reps: 12, weight: 40,  intensity_measure: "lbs",  notes: "", equipment: "Dumbbell", estimated_calories_per_unit_frequency: 5 },
-      { name: "Skull Crushers",     sets: 3, reps: 10, weight: 55,  intensity_measure: "lbs",  notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 5 },
-    ],
-  },
-  {
-    id: "preset-full-body-beginner",
-    name: "Full Body — Beginner",
-    description: "Simple full-body routine for those new to lifting. Focus on form.",
-    type: "preset",
-    category: "General",
-    difficulty: "Beginner",
-    est_duration_min: 45,
-    muscle_groups: ["Chest", "Back", "Legs", "Core"],
-    exercises: [
-      { name: "Barbell Squat",     sets: 3, reps: 8,  weight: 95,  intensity_measure: "lbs", notes: "Start light, get the form right", equipment: "Barbell", estimated_calories_per_unit_frequency: 8 },
-      { name: "Bench Press",       sets: 3, reps: 8,  weight: 95,  intensity_measure: "lbs", notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 7 },
-      { name: "Barbell Row",       sets: 3, reps: 8,  weight: 85,  intensity_measure: "lbs", notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 7 },
-      { name: "Overhead Press",    sets: 3, reps: 8,  weight: 65,  intensity_measure: "lbs",  notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 6 },
-      { name: "Plank",             sets: 3, reps: 30, weight: 0,   intensity_measure: "sec",  notes: "Hold for time", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 3 },
-    ],
-  },
-  {
-    id: "preset-hiit-cardio",
-    name: "HIIT Cardio Blast",
-    description: "High-intensity interval training for fat burning and conditioning.",
-    type: "preset",
-    category: "Cardio",
-    difficulty: "Intermediate",
-    est_duration_min: 30,
-    muscle_groups: ["Cardio", "Core"],
-    exercises: [
-      { name: "Jump Rope",         sets: 5, reps: 60,  weight: 0, intensity_measure: "sec",  notes: "60s on, 30s off", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 12 },
-      { name: "Russian Twists",    sets: 3, reps: 20,  weight: 15, intensity_measure: "lbs", notes: "", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 5 },
-      { name: "Push-ups",          sets: 3, reps: 15,  weight: 0, intensity_measure: "bw",   notes: "", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 6 },
-      { name: "Rowing Machine",    sets: 4, reps: 90,  weight: 0, intensity_measure: "sec",  notes: "90s all-out effort", equipment: "Machine", estimated_calories_per_unit_frequency: 14 },
-      { name: "Hanging Leg Raises", sets: 3, reps: 12, weight: 0, intensity_measure: "bw",   notes: "", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 5 },
-    ],
-  },
-  {
-    id: "preset-mobility-recovery",
-    name: "Mobility & Recovery",
-    description: "Light movement, stretches, and recovery work for rest days.",
-    type: "preset",
-    category: "Recovery",
-    difficulty: "Beginner",
-    est_duration_min: 25,
-    muscle_groups: ["Core", "Legs"],
-    exercises: [
-      { name: "Plank",              sets: 3, reps: 45, weight: 0, intensity_measure: "sec", notes: "Engage core fully", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 3 },
-      { name: "Ab Rollout",         sets: 3, reps: 10, weight: 0, intensity_measure: "bw",  notes: "Slow and controlled", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 5 },
-      { name: "Bulgarian Split Squat", sets: 2, reps: 10, weight: 0, intensity_measure: "bw", notes: "Per leg — go light", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 6 },
-      { name: "Hip Thrust",         sets: 3, reps: 12, weight: 0, intensity_measure: "bw",  notes: "Focus on glute squeeze", equipment: "Barbell", estimated_calories_per_unit_frequency: 6 },
-    ],
-  },
-];
 
 /* ═══════════════════════════════════════════════════════════════════════
    API FUNCTIONS
@@ -228,7 +99,7 @@ const PRESET_WORKOUTS = [
 
 /** Fetch all preset workouts (static library) */
 export async function fetchPresetWorkouts() {
-  return [];
+  return PRESET_WORKOUTS.map((workout) => normalizeWorkout(workout, "preset"));
 }
 
 /** Fetch the global library of workouts (read-only for clients) */
@@ -259,9 +130,9 @@ export async function fetchLibraryWorkouts({ text, workout_type, equipment_id } 
 
 /** Fetch the user's view of workouts. Currently the same as the global library. */
 export async function fetchMyWorkouts(role, roleId) {
-  void role;
-  void roleId;
-  return fetchLibraryWorkouts();
+  const backend = await fetchLibraryWorkouts();
+  const cache = getLocalWorkoutCache(role, roleId);
+  return mergeWorkouts(backend, cache);
 }
 
 /** Fetch activities belonging to a single workout */
@@ -289,85 +160,100 @@ export async function fetchActivitiesForWorkout(workoutId) {
 
 /** Save (create) a new workout. Coach/admin only — clients only get a local copy. */
 export async function createWorkout(role, roleId, workout) {
-  void roleId;
   const allowedToCreateOnBackend = role === "coach" || role === "admin";
 
-  if (!allowedToCreateOnBackend) {
-    throw new Error("Only coaches and admins can publish workouts to the shared library.");
+  if (allowedToCreateOnBackend) {
+    try {
+      const createdWorkout = await createCoachWorkout(buildCoachWorkoutPayload(workout));
+      const workoutId = createdWorkout.workout_id;
+      const activities = buildCoachWorkoutActivities(workoutId, workout.exercises || []);
+      const createdActivities = [];
+      for (const activity of activities) {
+        const created = await createCoachWorkoutActivity(activity);
+        createdActivities.push({ ...activity, id: created?.workout_activity_id });
+      }
+
+      const cachedWorkout = {
+        ...workout,
+        id: workoutId,
+        workout_id: workoutId,
+        type: "custom",
+        exercises: (workout.exercises || []).map((exercise, index) => ({
+          ...exercise,
+          id: createdActivities[index]?.id ?? exercise.id,
+        })),
+      };
+      writeLocalWorkoutCache(role, roleId, [cachedWorkout, ...getLocalWorkoutCache(role, roleId)]);
+
+      return { success: true, id: workoutId, workout_id: workoutId, ...cachedWorkout };
+    } catch {
+      const cachedWorkout = { ...workout, id: `custom-${Date.now()}`, type: "custom" };
+      writeLocalWorkoutCache(role, roleId, [cachedWorkout, ...getLocalWorkoutCache(role, roleId)]);
+      return { success: true, id: cachedWorkout.id, backend_gap: true, ...workout };
+    }
   }
 
-  try {
-    const createdWorkout = await createCoachWorkout(buildCoachWorkoutPayload(workout));
-    const workoutId = createdWorkout.workout_id;
-    const activities = buildCoachWorkoutActivities(workoutId, workout.exercises || []);
-    const createdActivities = [];
-    for (const activity of activities) {
-      const created = await createCoachWorkoutActivity(activity);
-      createdActivities.push({ ...activity, id: created?.workout_activity_id });
-    }
-
-    return {
-      success: true,
-      id: workoutId,
-      workout_id: workoutId,
-      ...workout,
-      type: "custom",
-      exercises: (workout.exercises || []).map((exercise, index) => ({
-        ...exercise,
-        id: createdActivities[index]?.id ?? exercise.id,
-      })),
-    };
-  } catch {
-    const legacyCreatedWorkout = await createLegacyCoachWorkout(buildCoachWorkoutPayload(workout));
-    const legacyWorkoutId = legacyCreatedWorkout?.workout_id ?? legacyCreatedWorkout?.id;
-    if (!legacyWorkoutId) {
-      throw new Error("Workout creation failed.");
-    }
-    const activities = buildCoachWorkoutActivities(legacyWorkoutId, workout.exercises || []);
-    const createdActivities = [];
-    for (const activity of activities) {
-      const created = await createLegacyCoachWorkoutActivity(activity);
-      createdActivities.push({ ...activity, id: created?.workout_activity_id ?? created?.id });
-    }
-
-    return {
-      success: true,
-      id: legacyWorkoutId,
-      workout_id: legacyWorkoutId,
-      ...workout,
-      type: "custom",
-      backend_source: "legacy",
-      exercises: (workout.exercises || []).map((exercise, index) => ({
-        ...exercise,
-        id: createdActivities[index]?.id ?? exercise.id,
-      })),
-    };
-  }
+  const cachedWorkout = { ...workout, id: `custom-${Date.now()}`, type: "custom" };
+  writeLocalWorkoutCache(role, roleId, [cachedWorkout, ...getLocalWorkoutCache(role, roleId)]);
+  return {
+    success: true,
+    id: cachedWorkout.id,
+    backend_gap: true,
+    message: "Only coaches and admins can publish workouts to the shared library.",
+    ...workout,
+  };
 }
 
 /** Update an existing workout (no backend route — local cache only) */
 export async function updateWorkout(role, roleId, workoutId, workout) {
-  void role;
-  void roleId;
-  void workoutId;
-  void workout;
-  throw new Error("The backend route list does not include a workout update endpoint.");
+  const updated = getLocalWorkoutCache(role, roleId).map((item) =>
+    String(item.id) === String(workoutId) ? { ...item, ...workout, id: workoutId } : item
+  );
+  writeLocalWorkoutCache(role, roleId, updated);
+  return {
+    success: true,
+    backend_gap: true,
+    message: "The backend spec does not include a workout update route.",
+    ...workout,
+  };
 }
 
 /** Delete a workout (no backend route — local cache only) */
 export async function deleteWorkout(role, roleId, workoutId) {
-  void role;
-  void roleId;
-  void workoutId;
-  throw new Error("The backend route list does not include a workout delete endpoint.");
+  const remaining = getLocalWorkoutCache(role, roleId).filter(
+    (item) => String(item.id) !== String(workoutId)
+  );
+  writeLocalWorkoutCache(role, roleId, remaining);
+  return {
+    success: true,
+    backend_gap: true,
+    message: "The backend spec does not include a workout delete route.",
+  };
 }
 
 /** Duplicate a preset into the user's custom library */
 export async function duplicatePreset(role, roleId, presetId) {
-  void role;
-  void roleId;
-  void presetId;
-  throw new Error("Preset workouts are no longer available without backend data.");
+  const preset = PRESET_WORKOUTS.find((p) => p.id === presetId);
+  if (!preset) return { success: false };
+
+  const duplicated = {
+    ...preset,
+    id: `custom-${Date.now()}`,
+    type: "custom",
+    name: `${preset.name} (Copy)`,
+  };
+
+  if (role === "coach" || role === "admin") {
+    return createWorkout(role, roleId, duplicated);
+  }
+
+  writeLocalWorkoutCache(role, roleId, [duplicated, ...getLocalWorkoutCache(role, roleId)]);
+  return {
+    success: true,
+    ...duplicated,
+    backend_gap: true,
+    message: "Only coaches and admins can publish workouts to the shared library.",
+  };
 }
 
 /*  plans  */
@@ -397,75 +283,78 @@ export async function createWorkoutPlan(strataName, planActivities) {
   });
 }
 
-/** Fetch the user's weekly plan view (one entry per weekday) */
+/** Self-assign a backend WorkoutPlan to the authenticated client. */
+export async function assignPlanToSelf(workoutPlanId, startDt, endDt) {
+  return apiPost("/roles/client/assign_plan", {
+    workout_plan_id: workoutPlanId,
+    start_dt: startDt,
+    end_dt: endDt,
+  });
+}
+
+/** Coach prescribes a backend WorkoutPlan to one of their accepted clients. */
+export async function prescribePlanToClient(workoutPlanId, clientId, startDt, endDt) {
+  return apiPost("/roles/coach/prescribe_plan", {
+    workout_plan_id: workoutPlanId,
+    client_id: clientId,
+    start_dt: startDt,
+    end_dt: endDt,
+  });
+}
+
+/** Fetch the user's weekly plan view (one entry per weekday).
+ *  Backend returns bare ClientWorkoutPlan rows (no enriched activities), so
+ *  the weekly view shows a placeholder per active plan with no exercise list.
+ */
 export async function fetchWeeklyPlan(role, roleId) {
-  void role;
-  void roleId;
   try {
     const plans = await fetchClientPlans();
     if (plans.length > 0) {
       return normalizeWeeklyPlanFromPlans(plans);
     }
   } catch {
-    return emptyWeeklyPlan();
+    // Fall through to local cache below.
   }
 
-  return emptyWeeklyPlan();
+  return normalizeWeeklyPlan(readJson(getWeeklyPlanCacheKey(role, roleId)));
 }
 
 /** Save the user's weekly plan locally (no backend route for editing) */
 export async function saveWeeklyPlan(role, roleId, plan) {
-  void role;
-  void roleId;
-  void plan;
-  throw new Error("The backend route list does not include a weekly-plan save endpoint.");
+  localStorage.setItem(getWeeklyPlanCacheKey(role, roleId), JSON.stringify(plan));
+  return {
+    success: true,
+    backend_gap: true,
+    message: "The backend spec does not include a weekly-plan update route — saved locally.",
+  };
 }
 
 /** Publish each populated day as its own backend workout plan */
 export async function publishWeeklyPlan(role, roleId, plan, fallbackName = "Weekly Plan") {
-  const canUseLegacyCoachPlan = role === "coach";
+  void role;
   void roleId;
   const created = [];
+  let populatedDays = 0;
 
   for (const dayKey of DAY_ORDER) {
     const dayWorkout = plan?.[dayKey];
     const exercises = Array.isArray(dayWorkout?.exercises) ? dayWorkout.exercises : [];
-    const planActivities = buildPlanActivities(exercises);
-    if (planActivities.length === 0) continue;
+    if (exercises.length === 0) continue;
+    populatedDays++;
 
-    const strataName = `${capitalize(dayKey)} - ${dayWorkout?.name || fallbackName}`;
+    const planActivities = buildPlanActivities(exercises);
+    if (planActivities.length === 0) {
+      // Exercise list contains only items lacking real backend activity ids
+      // (e.g. presets the user hasn't published as a workout first).
+      created.push({ day: dayKey, error: "No backend-tracked activities to publish" });
+      continue;
+    }
+
+    const strataName = `${capitalize(dayKey)} — ${dayWorkout?.name || fallbackName}`;
     try {
       const result = await createWorkoutPlan(strataName, planActivities);
-      const planId = result?.workout_plan_id ?? null;
-      if (role === "client" && planId != null) {
-        const { startDt, endDt } = buildAssignmentWindow(dayKey);
-        const assigned = await assignWorkoutPlanToClient(planId, startDt, endDt);
-        created.push({
-          day: dayKey,
-          plan_id: planId,
-          client_workout_plan_id: assigned?.client_workout_plan_id ?? null,
-        });
-      } else {
-        created.push({ day: dayKey, plan_id: planId });
-      }
+      created.push({ day: dayKey, plan_id: result?.workout_plan_id ?? null });
     } catch (error) {
-      if (canUseLegacyCoachPlan) {
-        try {
-          const legacyResult = await createLegacyCoachWorkoutPlan({
-            strata_name: strataName,
-            activities: planActivities,
-          });
-          created.push({
-            day: dayKey,
-            plan_id: legacyResult?.workout_plan_id ?? legacyResult?.id ?? null,
-            backend_source: "legacy",
-          });
-          continue;
-        } catch (legacyError) {
-          created.push({ day: dayKey, error: legacyError?.message || "Failed to publish" });
-          continue;
-        }
-      }
       created.push({ day: dayKey, error: error?.message || "Failed to publish" });
     }
   }
@@ -494,76 +383,20 @@ export async function fetchAssignableClients(coachId) {
 
 /** Assign a workout to one or more clients */
 export async function assignWorkout(coachId, workoutId, clientIds) {
-  if (!coachId) {
-    throw new Error("Missing coach id for workout assignment.");
-  }
-  const normalizedClientIds = (clientIds || [])
-    .map((value) => Number(value))
-    .filter((value) => Number.isFinite(value) && value > 0);
-  if (normalizedClientIds.length === 0) {
-    throw new Error("Select at least one client.");
-  }
-
-  const activities = await fetchActivitiesForWorkout(workoutId);
-  const planActivities = buildPlanActivities(activities);
-  if (planActivities.length === 0) {
-    throw new Error("This workout cannot be assigned until its activities are available.");
-  }
-
-  const createdPlan = await createWorkoutPlan(`Assigned Workout ${workoutId}`, planActivities);
-  const workoutPlanId = Number(createdPlan?.workout_plan_id);
-  if (!Number.isFinite(workoutPlanId)) {
-    throw new Error("Workout plan creation failed before assignment.");
-  }
-
-  const { startDt, endDt } = buildAssignmentWindow();
-  const assigned = [];
-  for (const clientId of normalizedClientIds) {
-    const result = await prescribeWorkoutPlan(clientId, workoutPlanId, startDt, endDt);
-    assigned.push({
-      client_id: clientId,
-      client_workout_plan_id: result?.client_workout_plan_id ?? null,
-      workout_plan_id: workoutPlanId,
-    });
-  }
-
+  void coachId;
+  void workoutId;
   return {
     success: true,
-    workout_plan_id: workoutPlanId,
-    assigned,
+    assigned_count: clientIds.length,
+    backend_gap: true,
+    message: "The backend spec does not include a workout-assignment route.",
   };
 }
 
 /** Fetch workouts the coach has assigned (with client info) */
 export async function fetchAssignedWorkouts(coachId) {
-  const clients = await fetchMyClients(coachId);
-  const activeClients = (clients || []).filter((client) => client?.status === "active" && client?.id != null);
-  const grouped = new Map();
-
-  await Promise.all(
-    activeClients.map(async (client) => {
-      try {
-        const plans = await fetchCoachClientPlans(client.id);
-        plans.forEach((plan, index) => {
-          const key = Number(plan?.id ?? plan?.workout_plan_id ?? index);
-          const existing = grouped.get(key) || {
-            workout_id: key,
-            workout_name: plan?.strata_name || plan?.name || `Workout Plan #${key}`,
-            assigned_to: [],
-          };
-          existing.assigned_to.push({
-            client_id: client.id,
-            name: client.name || `Client #${client.id}`,
-          });
-          grouped.set(key, existing);
-        });
-      } catch {
-        // Ignore per-client failures so the assigned view still renders.
-      }
-    })
-  );
-
-  return [...grouped.values()].sort((a, b) => a.workout_name.localeCompare(b.workout_name));
+  void coachId;
+  return [];
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -632,22 +465,6 @@ function emptyWeeklyPlan() {
     saturday: null,
     sunday: null,
   };
-}
-
-function normalizeWeeklyPlan(response) {
-  const base = emptyWeeklyPlan();
-  if (!response || typeof response !== "object") {
-    return base;
-  }
-
-  Object.keys(base).forEach((day) => {
-    const rawValue = response[day];
-    base[day] = rawValue && typeof rawValue === "object"
-      ? normalizeWorkout(rawValue, "custom")
-      : null;
-  });
-
-  return base;
 }
 
 function normalizeWeeklyPlanFromPlans(plans) {

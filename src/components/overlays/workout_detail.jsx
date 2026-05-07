@@ -92,14 +92,14 @@ export default function WorkoutDetail({
               <div className="ml-4 shrink-0">
                 {a.logged ? (
                   <StatusBadge label="Logged ✓" variant="success" />
-                ) : (
+                ) : onLog ? (
                   <button
                     className="text-blue-400 text-xs border border-blue-500/50 rounded-full px-4 py-1.5 hover:bg-blue-500/10 transition-colors"
-                    onClick={() => onLog(a.id)}
+                    onClick={() => onLog(a)}
                   >
                     Log →
                   </button>
-                )}
+                ) : null}
               </div>
             </div>
           ))}

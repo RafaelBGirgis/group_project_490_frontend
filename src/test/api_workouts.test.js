@@ -69,22 +69,38 @@ describe("EXERCISE_DATABASE", () => {
    ═══════════════════════════════════════════════════════════════════════ */
 
 describe("fetchPresetWorkouts", () => {
-  it("returns an empty list when no backend preset source exists", async () => {
+  it("returns presets from mock fallback when API fails", async () => {
     mockFetchFail();
     const presets = await fetchPresetWorkouts();
-    expect(presets).toEqual([]);
+    expect(presets.length).toBeGreaterThanOrEqual(5);
+    presets.forEach((p) => {
+      expect(p.id).toBeTruthy();
+      expect(p.name).toBeTruthy();
+      expect(p.type).toBe("preset");
+      expect(p.exercises.length).toBeGreaterThan(0);
+      expect(p.difficulty).toBeTruthy();
+      expect(p.category).toBeTruthy();
+    });
   });
 
-  it("does not expose a frontend preset library anymore", async () => {
+  it("returns the frontend preset library even if a backend preset route exists", async () => {
     const result = await fetchPresetWorkouts();
     expect(Array.isArray(result)).toBe(true);
-    expect(result).toEqual([]);
+    expect(result.length).toBeGreaterThanOrEqual(5);
+    expect(result[0].type).toBe("preset");
   });
 
-  it("returns no preset exercises because presets are API-only now", async () => {
+  it("every preset exercise has required fields", async () => {
     mockFetchFail();
     const presets = await fetchPresetWorkouts();
-    expect(presets).toEqual([]);
+    presets.forEach((p) => {
+      p.exercises.forEach((ex) => {
+        expect(ex.name).toBeTruthy();
+        expect(typeof ex.sets).toBe("number");
+        expect(typeof ex.reps).toBe("number");
+        expect(ex.intensity_measure).toBeTruthy();
+      });
+    });
   });
 });
 
@@ -101,12 +117,13 @@ describe("fetchMyWorkouts", () => {
 });
 
 describe("createWorkout", () => {
-  it("throws for clients because local mock creation is removed", async () => {
+  it("returns success with id on API failure (mock fallback)", async () => {
     mockFetchFail();
     const workout = { name: "Test", exercises: [{ name: "Bench Press", sets: 3, reps: 10 }] };
-    await expect(createWorkout("client", 1, workout)).rejects.toThrow(
-      "Only coaches and admins can publish workouts to the shared library."
-    );
+    const result = await createWorkout("client", 1, workout);
+    expect(result.success).toBe(true);
+    expect(result.id).toBeTruthy();
+    expect(result.name).toBe("Test");
   });
 
   it("posts to correct endpoint", async () => {
@@ -125,20 +142,18 @@ describe("createWorkout", () => {
 });
 
 describe("updateWorkout", () => {
-  it("throws because the backend has no workout update route", async () => {
+  it("returns success on fallback", async () => {
     mockFetchFail();
-    await expect(updateWorkout("client", 1, "w-1", { name: "Updated" })).rejects.toThrow(
-      "The backend route list does not include a workout update endpoint."
-    );
+    const result = await updateWorkout("client", 1, "w-1", { name: "Updated" });
+    expect(result.success).toBe(true);
   });
 });
 
 describe("deleteWorkout", () => {
-  it("throws because the backend has no workout delete route", async () => {
+  it("returns success on fallback", async () => {
     mockFetchFail();
-    await expect(deleteWorkout("client", 1, "w-1")).rejects.toThrow(
-      "The backend route list does not include a workout delete endpoint."
-    );
+    const result = await deleteWorkout("client", 1, "w-1");
+    expect(result.success).toBe(true);
   });
 });
 
@@ -147,18 +162,20 @@ describe("deleteWorkout", () => {
    ═══════════════════════════════════════════════════════════════════════ */
 
 describe("duplicatePreset", () => {
-  it("throws because frontend preset duplication is removed", async () => {
+  it("copies a preset into custom with (Copy) suffix", async () => {
     mockFetchFail();
-    await expect(duplicatePreset("client", 1, "preset-ppl-push")).rejects.toThrow(
-      "Preset workouts are no longer available without backend data."
-    );
+    const presets = await fetchPresetWorkouts();
+    const first = presets[0];
+    const result = await duplicatePreset("client", 1, first.id);
+    expect(result.success).toBe(true);
+    expect(result.type).toBe("custom");
+    expect(result.name).toContain("(Copy)");
   });
 
-  it("throws for unknown preset ids as well", async () => {
+  it("returns failure for unknown preset id", async () => {
     mockFetchFail();
-    await expect(duplicatePreset("client", 1, "nonexistent")).rejects.toThrow(
-      "Preset workouts are no longer available without backend data."
-    );
+    const result = await duplicatePreset("client", 1, "nonexistent");
+    expect(result.success).toBe(false);
   });
 });
 
@@ -167,19 +184,11 @@ describe("duplicatePreset", () => {
    ═══════════════════════════════════════════════════════════════════════ */
 
 describe("assignWorkout", () => {
-  it("creates a workout plan and prescribes it to selected clients", async () => {
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => "application/json" }, json: () => Promise.resolve([{ id: 9, planned_sets: 3, planned_reps: 10 }]), text: () => Promise.resolve("[]") })
-      .mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => "application/json" }, json: () => Promise.resolve({ workout_plan_id: 88 }), text: () => Promise.resolve("{}") })
-      .mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => "application/json" }, json: () => Promise.resolve({ client_workout_plan_id: 101 }), text: () => Promise.resolve("{}") })
-      .mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => "application/json" }, json: () => Promise.resolve({ client_workout_plan_id: 102 }), text: () => Promise.resolve("{}") });
-
-    const result = await assignWorkout(1, 77, [4, 5]);
-
-    expect(global.fetch.mock.calls[1][0]).toContain("/roles/shared/fitness/plan");
-    expect(global.fetch.mock.calls[2][0]).toContain("/roles/coach/prescribe_plan");
+  it("returns success with assigned count on fallback", async () => {
+    mockFetchFail();
+    const result = await assignWorkout(1, "w-1", [1, 2, 3]);
     expect(result.success).toBe(true);
-    expect(result.assigned).toHaveLength(2);
+    expect(result.assigned_count).toBe(3);
   });
 });
 
@@ -196,23 +205,5 @@ describe("fetchAssignedWorkouts", () => {
     mockFetchFail();
     const assigned = await fetchAssignedWorkouts(1);
     expect(assigned).toEqual([]);
-  });
-
-  it("groups assigned plans across active clients", async () => {
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => "application/json" }, json: () => Promise.resolve([{ relationship_id: 1, client_id: 4, request_id: 11 }]), text: () => Promise.resolve("[]") })
-      .mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => "application/json" }, json: () => Promise.resolve({ base_account: { name: "Client A" }, fitness_goals: [] }), text: () => Promise.resolve("{}") })
-      .mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => "application/json" }, json: () => Promise.resolve([]), text: () => Promise.resolve("[]") })
-      .mockResolvedValueOnce({ ok: true, status: 200, headers: { get: () => "application/json" }, json: () => Promise.resolve([{ id: 91, strata_name: "Assigned Workout 77" }]), text: () => Promise.resolve("[]") });
-
-    const assigned = await fetchAssignedWorkouts(1);
-
-    expect(assigned).toEqual([
-      {
-        workout_id: 91,
-        workout_name: "Assigned Workout 77",
-        assigned_to: [{ client_id: 4, name: "Client A" }],
-      },
-    ]);
   });
 });

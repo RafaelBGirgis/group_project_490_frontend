@@ -15,15 +15,8 @@ import {
   terminateRelationship,
 } from "../api/client";
 import { fetchCoachAvailability, fetchCoachProfile } from "../api/coach";
-import {
-  isApprovedCoachRequest,
-  isPendingCoachRequest,
-  reduceCoachRequestsByCoach,
-  resolveActiveCoachRelationship,
-} from "../utils/coachRequests";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
-import { rememberTerminatedRelationshipId } from "../utils/terminatedRelationships";
 
 function SolidStar({ className }) {
   return (
@@ -88,11 +81,40 @@ function Modal({ open, title, children, onClose }) {
   );
 }
 
-function normalizeCoachProfile(account, coachProfile) {
-  const specialties = String(coachProfile?.coach_account?.specialties || "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
+function normalizeStoredCoachProfile(account, coachProfile) {
+  const storageKey = `coach_profile:${coachProfile?.coach_account?.id || account?.coach_id || account?.id || "current"}`;
+  let stored = null;
+  try {
+    stored = JSON.parse(localStorage.getItem(storageKey) || "null");
+  } catch {
+    stored = null;
+  }
+
+  const specialties = Array.isArray(stored?.specializations)
+    ? stored.specializations
+    : String(coachProfile?.coach_account?.specialties || "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+  const certifications = Array.isArray(stored?.certifications)
+    ? stored.certifications.map((item) => ({
+        name: item.title || item.certification_name || "Certification",
+        organization: item.issuer || item.certification_organization || "Organization",
+        year: item.year || item.certification_date || "",
+        description: item.description || item.certification_score || "",
+      }))
+    : [];
+
+  const experiences = Array.isArray(stored?.experiences)
+    ? stored.experiences.map((item) => ({
+        title: item.title || item.experience_title || "Experience",
+        organization: item.issuer || item.organization || item.experience_name || "",
+        year: item.year || item.experience_start || "",
+        description: item.description || item.experience_description || "",
+      }))
+    : [];
+
   return {
     coach_id: coachProfile?.coach_account?.id || account?.coach_id,
     name: account?.name || "Coach",
@@ -102,13 +124,61 @@ function normalizeCoachProfile(account, coachProfile) {
     bio: account?.bio || "",
     pfp_url: account?.pfp_url || "",
     specialties,
-    certifications: [],
-    experiences: [],
-    pricingInterval: "",
-    amount: "",
+    certifications,
+    experiences,
+    pricingInterval: stored?.pricingInterval || "",
+    amount: stored?.amount || "",
     verified: Boolean(coachProfile?.coach_account?.verified),
     rating_avg: 0,
     review_count: 0,
+  };
+}
+
+function readStoredCoachProfile(coachId) {
+  if (!coachId) return null;
+  try {
+    return JSON.parse(localStorage.getItem(`coach_profile:${coachId}`) || "null");
+  } catch {
+    return null;
+  }
+}
+
+function normalizeCoachMetadataFromStorage(stored) {
+  return {
+    specialties: Array.isArray(stored?.specializations) ? stored.specializations : null,
+    certifications: Array.isArray(stored?.certifications)
+      ? stored.certifications.map((item) => ({
+          name: item.title || item.certification_name || "Certification",
+          organization: item.issuer || item.certification_organization || "Organization",
+          year: item.year || item.certification_date || "",
+          description: item.description || item.certification_score || "",
+        }))
+      : null,
+    experiences: Array.isArray(stored?.experiences)
+      ? stored.experiences.map((item) => ({
+          title: item.title || item.experience_title || "Experience",
+          organization: item.issuer || item.organization || item.experience_name || "",
+          year: item.year || item.experience_start || "",
+          description: item.description || item.experience_description || "",
+        }))
+      : null,
+    pricingInterval: stored?.pricingInterval || "",
+    amount: stored?.amount || "",
+  };
+}
+
+function mergeCoachWithStoredProfile(coach) {
+  const stored = readStoredCoachProfile(coach?.coach_id);
+  if (!stored) return coach;
+
+  const normalizedStored = normalizeCoachMetadataFromStorage(stored);
+  return {
+    ...coach,
+    specialties: normalizedStored.specialties || coach.specialties || [],
+    certifications: normalizedStored.certifications || coach.certifications || [],
+    experiences: normalizedStored.experiences || coach.experiences || [],
+    pricingInterval: normalizedStored.pricingInterval || coach.pricingInterval || "",
+    amount: normalizedStored.amount || coach.amount || "",
   };
 }
 
@@ -153,26 +223,6 @@ export default function CoachPublicProfilePage() {
   const [submittingReview, setSubmittingReview] = useState(false);
   const [submittingReport, setSubmittingReport] = useState(false);
 
-  const refreshClientRelationshipState = async () => {
-    const [myCoach, myRequests] = await Promise.all([
-      fetchMyCoach().catch(() => null),
-      fetchMyCoachRequests().catch(() => null),
-    ]);
-    const { activeCoach, byCoachId } = resolveActiveCoachRelationship(myCoach, myRequests);
-    const nextRelationshipId =
-      Number(activeCoach?.coach_id) === coachId &&
-      activeCoach?.relationship_id != null
-        ? Number(activeCoach.relationship_id)
-        : null;
-    setActiveCoachRelationshipId(nextRelationshipId);
-    setPendingRequests(
-      Object.keys(byCoachId).length > 0
-        ? byCoachId
-        : reduceCoachRequestsByCoach(Array.isArray(myRequests) ? myRequests : [])
-    );
-    return { myCoach: activeCoach, relationshipId: nextRelationshipId };
-  };
-
   useEffect(() => {
     const loadPage = async () => {
       try {
@@ -183,17 +233,25 @@ export default function CoachPublicProfilePage() {
         const coachAccess = await getCoachAccessState(me);
         setCanSwitchToCoach(coachAccess.canAccessCoach);
 
-        await refreshClientRelationshipState();
+        const myCoach = await fetchMyCoach().catch(() => null);
+        if (Number(myCoach?.coach_id) === coachId && myCoach?.relationship_id != null) {
+          setActiveCoachRelationshipId(Number(myCoach.relationship_id));
+        } else {
+          setActiveCoachRelationshipId(null);
+        }
+
+        const myRequests = await fetchMyCoachRequests().catch(() => []);
+        setPendingRequests(Object.fromEntries(myRequests.map((item) => [item.coach_id, item])));
 
         if (previewMode && Number(me?.coach_id) === coachId) {
           const coachProfile = await fetchCoachProfile().catch(() => null);
-          setCoach(normalizeCoachProfile(me, coachProfile));
+          setCoach(normalizeStoredCoachProfile(me, coachProfile));
         } else {
           const availableCoaches = await fetchAvailableCoaches({ limit: 1000 }).catch(() => []);
           const matchedCoach = availableCoaches.find((item) => Number(item.coach_id) === coachId);
 
           if (matchedCoach) {
-            setCoach(matchedCoach);
+            setCoach(mergeCoachWithStoredProfile(matchedCoach));
           } else {
             setActionError("Unable to load this coach profile.");
           }
@@ -226,15 +284,16 @@ export default function CoachPublicProfilePage() {
   }, [account?.name]);
 
   const requestEntry = pendingRequests[coachId];
-  const relationshipId = activeCoachRelationshipId || null;
+  const relationshipId = activeCoachRelationshipId || requestEntry?.relationship_id || null;
+  const requestStatus = requestEntry?.status || null;
   const hasRelationshipHistory = Boolean(
-    activeCoachRelationshipId
+    relationshipId
     || requestEntry?.relationship_id
-    || isApprovedCoachRequest(requestEntry)
+    || requestEntry?.status === "approved"
   );
   const canReview = !previewMode && hasRelationshipHistory;
-  const isPending = isPendingCoachRequest(requestEntry);
-  const isApproved = isApprovedCoachRequest(requestEntry);
+  const isPending = requestStatus === "pending";
+  const isApproved = requestStatus === "approved";
 
   const handleRequestCoach = async () => {
     if (!hasClientRole) {
@@ -247,12 +306,7 @@ export default function CoachPublicProfilePage() {
     try {
       await requestCoach(account.client_id, coachId);
       const myRequests = await fetchMyCoachRequests();
-      setPendingRequests(
-        reduceCoachRequestsByCoach(myRequests, {
-          activeCoachId: coachId,
-          activeRelationshipId: activeCoachRelationshipId,
-        })
-      );
+      setPendingRequests(Object.fromEntries(myRequests.map((item) => [item.coach_id, item])));
       setActionMessage("Coach request sent.");
     } catch (error) {
       setActionError(error.message || "Unable to request this coach.");
@@ -269,13 +323,8 @@ export default function CoachPublicProfilePage() {
     try {
       await deleteCoachRequest(requestEntry.request_id);
       const myRequests = await fetchMyCoachRequests();
-      setPendingRequests(
-        reduceCoachRequestsByCoach(myRequests, {
-          activeCoachId: coachId,
-          activeRelationshipId: activeCoachRelationshipId,
-        })
-      );
-      setActionMessage("Coach request canceled.");
+      setPendingRequests(Object.fromEntries(myRequests.map((item) => [item.coach_id, item])));
+      setActionMessage("Coach request cancelled.");
     } catch (error) {
       setActionError(error.message || "Unable to cancel this coach request.");
     } finally {
@@ -330,12 +379,12 @@ export default function CoachPublicProfilePage() {
     }
     setTerminating(true);
     setActionError("");
-    setActionMessage("");
     try {
       await terminateRelationship(Number(relationshipId));
-      rememberTerminatedRelationshipId(Number(relationshipId));
-      await refreshClientRelationshipState();
-      setActionMessage("Coaching relationship ended.");
+      setActiveCoachRelationshipId(null);
+      const myRequests = await fetchMyCoachRequests().catch(() => []);
+      setPendingRequests(Object.fromEntries(myRequests.map((item) => [item.coach_id, item])));
+      setActionMessage("Coach relationship ended.");
     } catch (error) {
       setActionError(error.message || "Unable to end this relationship.");
     } finally {
@@ -478,9 +527,9 @@ export default function CoachPublicProfilePage() {
                       Relationship and feedback actions for this coach.
                     </p>
                   </div>
-                  {activeCoachRelationshipId ? (
+                  {isApproved ? (
                     <div className="rounded-xl border border-green-500/30 bg-green-500/10 px-3 py-2 text-xs font-medium text-green-300">
-                      Active relationship
+                      Relationship approved
                     </div>
                   ) : null}
                 </div>
@@ -495,7 +544,7 @@ export default function CoachPublicProfilePage() {
                     >
                       {requesting ? "Cancelling..." : "Cancel Request"}
                     </button>
-                  ) : !activeCoachRelationshipId ? (
+                  ) : !isApproved && !activeCoachRelationshipId ? (
                     <button
                       type="button"
                       onClick={handleRequestCoach}
@@ -538,7 +587,7 @@ export default function CoachPublicProfilePage() {
                         disabled={terminating}
                         className="rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
                       >
-                        {terminating ? "Ending..." : "End Relationship"}
+                        {terminating ? "Ending..." : "Fire Coach"}
                       </button>
                     ) : null}
                   </div>

@@ -1,138 +1,10 @@
-import { apiDelete, apiGet, apiPatch, apiPost, withQuery } from "./api";
+import { apiGet, apiPatch, apiPost, withQuery } from "./api";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const DEFAULT_TIME_OPTIONS = [
   "5AM", "6AM", "7AM", "8AM", "9AM", "10AM", "11AM",
   "12PM", "1PM", "2PM", "3PM", "4PM", "5PM", "6PM", "7PM", "8PM", "9PM",
 ];
-
-function resolveClientName(source, fallbackId) {
-  return (
-    source?.base_account?.name ||
-    source?.account?.name ||
-    source?.name ||
-    source?.client_name ||
-    source?.clientName ||
-    source?.client_account?.name ||
-    source?.client_account?.base_account?.name ||
-    source?.client?.name ||
-    source?.client?.base_account?.name ||
-    `Client #${fallbackId}`
-  );
-}
-
-function normalizeAcceptedClientItem(item) {
-  if (!item || typeof item !== "object") return null;
-
-  const clientId =
-    item.client_id ??
-    item.clientId ??
-    item.client?.id ??
-    item.client_account?.id ??
-    item.client_account?.client_id ??
-    item.base_account?.client_id ??
-    item.id;
-  const relationshipId =
-    item.relationship_id ??
-    item.relationshipId ??
-    item.relationship?.id ??
-    item.client_coach_relationship?.id ??
-    item.client_coach_relationship?.relationship_id;
-  const requestId =
-    item.request_id ??
-    item.requestId ??
-    item.client_coach_request_id ??
-    null;
-
-  if (!clientId) return null;
-
-  return {
-    ...item,
-    client_id: Number(clientId),
-    relationship_id:
-      relationshipId != null ? Number(relationshipId) : null,
-    request_id:
-      requestId != null ? Number(requestId) : null,
-  };
-}
-
-function normalizeClientRequestItem(item) {
-  if (!item || typeof item !== "object") return null;
-
-  const clientId =
-    item.client_id ??
-    item.clientId ??
-    item.client?.id ??
-    item.base_account?.client_id;
-  const requestId = item.request_id ?? item.requestId ?? item.id;
-
-  if (!clientId || !requestId) return null;
-
-  return {
-    ...item,
-    client_id: Number(clientId),
-    request_id: Number(requestId),
-    name: resolveClientName(item, clientId),
-    age:
-      item.age ??
-      item.base_account?.age ??
-      item.client?.age ??
-      null,
-    gender:
-      item.gender ||
-      item.base_account?.gender ||
-      item.client?.gender ||
-      "",
-    pfp_url:
-      item.pfp_url ||
-      item.base_account?.pfp_url ||
-      item.client?.pfp_url ||
-      "",
-    goal:
-      item.goal ||
-      item.fitness_goals?.[0]?.goal_enum ||
-      item.client?.fitness_goals?.[0]?.goal_enum ||
-      "Pending request",
-    detail:
-      item.detail ||
-      {
-        base_account: {
-          id:
-            item.base_account?.id ??
-            item.account_id ??
-            item.client?.account_id ??
-            null,
-          name: resolveClientName(item, clientId),
-          age:
-            item.age ??
-            item.base_account?.age ??
-            item.client?.age ??
-            null,
-          gender:
-            item.gender ||
-            item.base_account?.gender ||
-            item.client?.gender ||
-            "",
-          pfp_url:
-            item.pfp_url ||
-            item.base_account?.pfp_url ||
-            item.client?.pfp_url ||
-            "",
-          email:
-            item.email ||
-            item.base_account?.email ||
-            item.client?.email ||
-            "",
-          bio:
-            item.bio ||
-            item.base_account?.bio ||
-            item.client?.bio ||
-            "",
-        },
-        fitness_goals: Array.isArray(item.fitness_goals) ? item.fitness_goals : [],
-      },
-  };
-}
 
 /*  coach profile  */
 
@@ -178,7 +50,7 @@ export async function deactivateCoachAccount() {
 }
 
 export async function deleteCoachAccount() {
-  return apiDelete("/roles/shared/account/delete");
+  return { success: true, message: "Coach deletion endpoint is not available in the backend yet." };
 }
 
 export async function fetchMyClients(_coachId) {
@@ -186,39 +58,28 @@ export async function fetchMyClients(_coachId) {
     // Fetch accepted clients from API and enrich with details
     const acceptedClientsResponse = await apiGet("/roles/coach/clients");
     const acceptedClients = await Promise.all(
-      (Array.isArray(acceptedClientsResponse) ? acceptedClientsResponse : [])
-        .map(normalizeAcceptedClientItem)
-        .filter(Boolean)
-        .map(async (item) => {
+      (Array.isArray(acceptedClientsResponse) ? acceptedClientsResponse : []).map(async (item) => {
         try {
           const detail = await lookupClient(item.client_id);
           return {
             id: item.client_id,
             request_id: item.request_id,
-            name: resolveClientName(detail, item.client_id),
-            goal:
-              detail?.fitness_goals?.[0]?.goal_enum ||
-              item.goal ||
-              item.fitness_goals?.[0]?.goal_enum ||
-              "Active client",
+            name: detail?.base_account?.name || `Client #${item.client_id}`,
+            goal: detail?.fitness_goals?.[0]?.goal_enum || "Active client",
             status: "active",
             joined: new Date().toLocaleDateString(),
             relationship_id: item.relationship_id,
-            details: detail || item.detail || item.details || item,
+            details: detail,
           };
         } catch {
           return {
             id: item.client_id,
             request_id: item.request_id,
-            name: resolveClientName(item, item.client_id),
-            goal:
-              item.goal ||
-              item.fitness_goals?.[0]?.goal_enum ||
-              "Active client",
+            name: `Client #${item.client_id}`,
+            goal: "Active client",
             status: "active",
             joined: new Date().toLocaleDateString(),
             relationship_id: item.relationship_id,
-            details: item.detail || item.details || item,
           };
         }
       })
@@ -257,9 +118,7 @@ export async function fetchUpcomingSessions(_coachId) {
 
 export async function fetchClientRequests() {
   const response = await apiGet("/roles/coach/client_requests");
-  return Array.isArray(response)
-    ? response.map(normalizeClientRequestItem).filter(Boolean)
-    : [];
+  return Array.isArray(response) ? response : [];
 }
 
 export async function lookupClient(clientId) {
@@ -271,30 +130,7 @@ export async function acceptClientRequest(requestId) {
 }
 
 export async function denyClientRequest(requestId) {
-  try {
-    return await apiPost(`/roles/coach/deny_client/${requestId}`);
-  } catch (error) {
-    if (error?.status === 404 || error?.status === 405) {
-      return apiDelete(`/roles/shared/client_coach_relationship/delete_coach_request/${requestId}`);
-    }
-    throw error;
-  }
-}
-
-export async function terminateRelationship(relationshipId) {
-  return apiPost(
-    `/roles/shared/client_coach_relationship/terminate_relationship/${relationshipId}`,
-    {}
-  );
-}
-
-export async function prescribeWorkoutPlan(clientId, workoutPlanId, startDt, endDt) {
-  return apiPost("/roles/coach/prescribe_plan", {
-    client_id: Number(clientId),
-    workout_plan_id: Number(workoutPlanId),
-    start_dt: startDt,
-    end_dt: endDt,
-  });
+  return apiPost(`/roles/coach/deny_client/${requestId}`);
 }
 
 export async function createClientReview(clientId, reportSummary) {
@@ -312,17 +148,12 @@ export async function fetchCoachAvailability(coachId) {
 
   try {
     const response = await apiGet(`/roles/coach/coach_availability/${coachId}`);
-    const availabilities = extractRoleAvailabilities(response) || [];
-    if (availabilities.length > 0) {
-      return convertBackendAvailabilitiesToGrid(availabilities);
-    }
-  } catch {
-    // Fall through to profile-based fallback below.
-  }
-
-  try {
-    const profile = await fetchCoachProfile();
-    const availabilities = extractRoleAvailabilities(profile) || [];
+    const availabilities = Array.isArray(response)
+      ? response
+      : response?.coach_availabilities ||
+        response?.availabilities ||
+        response?.availability ||
+        [];
     const grid = convertBackendAvailabilitiesToGrid(availabilities);
     return grid;
   } catch {
@@ -337,13 +168,9 @@ export async function saveCoachAvailability(coachId, slots) {
   const availability = convertFromSlotsFormat(slots);
   const backendAvailabilities = convertTrainingAvailabilityObjectToBackend(availability);
 
-  const result = await updateCoachInformation({
+  await updateCoachInformation({
     availabilities: backendAvailabilities,
   });
-  const updatedAvailabilities = extractRoleAvailabilities(result);
-  if (updatedAvailabilities) {
-    return convertBackendAvailabilitiesToGrid(updatedAvailabilities);
-  }
 
   return fetchCoachAvailability(coachId);
 }
@@ -474,15 +301,15 @@ export async function fetchClientWorkoutPlanByCoach(clientId, weekdayIdx) {
           strata_name:
             matchingPlan.strata_name ??
             matchingPlan.name ??
-            "",
+            `Plan #${matchingPlan.id ?? weekdayIdx + 1}`,
           activities,
         };
       }
     }
   } catch {
-    // Fall through to empty-state plan below.
+    // Fall through to rest-day default
   }
-  return { strata_name: "", activities: [] };
+  return { strata_name: "Rest Day", activities: [] };
 }
 
 export async function fetchClientAvailabilityByCoach(clientId) {
@@ -689,21 +516,6 @@ function convertBackendAvailabilitiesToGrid(availabilities) {
     }
   });
   return convertTrainingAvailabilityToGrid(byDay);
-}
-
-function extractRoleAvailabilities(payload) {
-  const candidates = [
-    payload,
-    payload?.coach_account?.availabilities,
-    payload?.coach_account?.availability,
-    payload?.coach_availabilities,
-    payload?.availabilities,
-    payload?.availability,
-    payload?.coach_details?.availabilities,
-  ];
-
-  const directArray = candidates.find(Array.isArray);
-  return Array.isArray(directArray) ? directArray : null;
 }
 
 function longWeekdayToShort(weekday) {

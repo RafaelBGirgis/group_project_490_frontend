@@ -1,4 +1,4 @@
-import { apiDelete, apiGet, apiPost, apiPut, withQuery } from "./api";
+import { apiGet, apiPost, withQuery } from "./api";
 
 /**
  * Daily check-in survey — backend has 5 separate sub-surveys, each with its own
@@ -65,34 +65,6 @@ export function submitDailyStepsSurvey(payload) {
   return apiPost(`${BASE}/steps/submit`, payload);
 }
 
-/*  workout  */
-
-export function fetchDailyWorkoutSurvey() {
-  return apiGet(`${BASE}/workout/today`);
-}
-
-export function startDailyWorkoutSurvey() {
-  return apiPost(`${BASE}/workout/start`, {});
-}
-
-export function submitDailyWorkoutSurvey(payload) {
-  return apiPost(`${BASE}/workout/submit`, payload);
-}
-
-/*  meal  */
-
-export function fetchDailyMealSurvey() {
-  return apiGet(`${BASE}/meal/today`);
-}
-
-export function startDailyMealSurvey() {
-  return apiPost(`${BASE}/meal/start`, {});
-}
-
-export function submitDailyMealSurvey(payload) {
-  return apiPost(`${BASE}/meal/submit`, payload);
-}
-
 /*  combined helpers  */
 
 /**
@@ -101,14 +73,12 @@ export function submitDailyMealSurvey(payload) {
  * `{ is_seen, is_started, is_finished, ... }` or `null` on error.
  */
 export async function fetchAllDailySurveys() {
-  const [mood, body_metrics, steps, workout, meal] = await Promise.all([
+  const [mood, body_metrics, steps] = await Promise.all([
     fetchDailyMoodSurvey().catch(() => null),
     fetchDailyBodyMetricsSurvey().catch(() => null),
     fetchDailyStepsSurvey().catch(() => null),
-    fetchDailyWorkoutSurvey().catch(() => null),
-    fetchDailyMealSurvey().catch(() => null),
   ]);
-  return { mood, body_metrics, steps, workout, meal };
+  return { mood, body_metrics, steps };
 }
 
 /*  telemetry history (past survey submissions)  */
@@ -142,48 +112,6 @@ export function fetchStepHistory(opts) {
 /** Past completed-workout entries. */
 export function fetchWorkoutHistory(opts) {
   return fetchList(`${TELEMETRY}/workouts`, opts);
-}
-
-export function fetchMealHistory(opts) {
-  return fetchList(`${TELEMETRY}/meals`, opts);
-}
-
-export function updateStepCount(payload) {
-  return apiPut("/roles/client/telemetry/update_steps", payload);
-}
-
-export function updateWeightEntry(healthMetricsId, payload) {
-  return apiPut(`/roles/client/telemetry/update_weight/${healthMetricsId}`, payload);
-}
-
-export function deleteWeightEntry(healthMetricsId) {
-  return apiDelete(`/roles/client/telemetry/delete_weight/${healthMetricsId}`);
-}
-
-export async function submitDailyWorkoutSurveyFlexible(activityIds = []) {
-  const normalizedIds = (activityIds || [])
-    .map((id) => Number(id))
-    .filter((id) => Number.isFinite(id) && id > 0);
-
-  const payloadCandidates = [
-    { workout_plan_activity_ids: normalizedIds },
-    { completed_workout_plan_activity_ids: normalizedIds },
-    { activity_ids: normalizedIds },
-    { workout_activity_ids: normalizedIds },
-    normalizedIds.length === 1 ? { workout_plan_activity_id: normalizedIds[0] } : null,
-    normalizedIds.length === 1 ? { activity_id: normalizedIds[0] } : null,
-  ].filter(Boolean);
-
-  let lastError = null;
-  for (const payload of payloadCandidates) {
-    try {
-      return await submitDailyWorkoutSurvey(payload);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  throw lastError || new Error("Unable to submit workout survey.");
 }
 
 /**

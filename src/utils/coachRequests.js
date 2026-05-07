@@ -1,121 +1,127 @@
-import {
-  forgetTerminatedRelationshipId,
-  isRelationshipTerminatedInSession,
-} from "./terminatedRelationships";
-
-const APPROVED_REQUEST_STATUSES = new Set(["approved", "accepted", "active"]);
-const PENDING_REQUEST_STATUSES = new Set(["pending", "requested"]);
-
-export function isApprovedCoachRequest(item) {
-  if (!item) return false;
-  if (item.is_accepted === true) return true;
-  return APPROVED_REQUEST_STATUSES.has(String(item.status || "").toLowerCase());
+function getResolutionKey(requestId) {
+  return `coach_request_resolution:${requestId}`;
 }
 
-export function isPendingCoachRequest(item) {
-  if (!item) return false;
-  if (item.is_accepted === null) return true;
-  return PENDING_REQUEST_STATUSES.has(String(item.status || "").toLowerCase());
+function normalizeEmail(email) {
+  return String(email || "").trim().toLowerCase();
 }
 
-export function pickPreferredCoachRequest(
-  current,
-  candidate,
-  activeCoachId = null,
-  activeRelationshipId = null
-) {
-  if (!current) return candidate;
-  if (!candidate) return current;
-
-  const currentIsActive =
-    activeCoachId != null &&
-    activeRelationshipId != null &&
-    Number(current.coach_id) === Number(activeCoachId) &&
-    Number(current.relationship_id) === Number(activeRelationshipId);
-  const candidateIsActive =
-    activeCoachId != null &&
-    activeRelationshipId != null &&
-    Number(candidate.coach_id) === Number(activeCoachId) &&
-    Number(candidate.relationship_id) === Number(activeRelationshipId);
-
-  if (candidateIsActive && !currentIsActive) return candidate;
-  if (currentIsActive && !candidateIsActive) return current;
-
-  const currentUpdated = new Date(current.updated_at || 0).getTime();
-  const candidateUpdated = new Date(candidate.updated_at || 0).getTime();
-
-  if (candidateUpdated !== currentUpdated) {
-    return candidateUpdated > currentUpdated ? candidate : current;
-  }
-
-  if (isApprovedCoachRequest(candidate) && !isApprovedCoachRequest(current)) {
-    return candidate;
-  }
-  if (isPendingCoachRequest(candidate) && !isPendingCoachRequest(current)) {
-    return candidate;
-  }
-
-  return current;
+function getClientCoachRequestsKey(email) {
+  return `pending_coach_requests:${normalizeEmail(email)}`;
 }
 
-export function reduceCoachRequestsByCoach(
-  requests,
-  { activeCoachId = null, activeRelationshipId = null } = {}
-) {
-  return (Array.isArray(requests) ? requests : []).reduce((acc, item) => {
-    if (!item?.coach_id) return acc;
-    acc[item.coach_id] = pickPreferredCoachRequest(
-      acc[item.coach_id],
-      item,
-      activeCoachId,
-      activeRelationshipId
-    );
-    return acc;
-  }, {});
+function readJson(key) {
+  const raw = localStorage.getItem(key);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
-export function resolveActiveCoachRelationship(myCoach, requests) {
-  const activeCoachId =
-    myCoach?.coach_id != null ? Number(myCoach.coach_id) : null;
-  const activeRelationshipId =
-    myCoach?.relationship_id != null ? Number(myCoach.relationship_id) : null;
-  const byCoachId = reduceCoachRequestsByCoach(requests, {
-    activeCoachId,
-    activeRelationshipId,
-  });
-
-  if (!myCoach || activeCoachId == null || activeRelationshipId == null) {
-    return { activeCoach: null, byCoachId };
-  }
-
-  if (!Array.isArray(requests) || requests.length === 0) {
-    if (isRelationshipTerminatedInSession(activeRelationshipId)) {
-      return { activeCoach: null, byCoachId };
-    }
-    return { activeCoach: myCoach, byCoachId };
-  }
-
-  const matchingRequest = byCoachId[activeCoachId];
-  const requestSupportsRelationship = Boolean(
-    matchingRequest &&
-    isApprovedCoachRequest(matchingRequest) &&
-    (
-      matchingRequest.relationship_id == null ||
-      Number(matchingRequest.relationship_id) === activeRelationshipId
-    )
+export function saveCoachRequestResolution(requestId, status) {
+  if (!requestId || !status) return;
+  localStorage.setItem(
+    getResolutionKey(requestId),
+    JSON.stringify({
+      status,
+      resolvedAt: new Date().toISOString(),
+    })
   );
+}
 
-  if (requestSupportsRelationship) {
-    forgetTerminatedRelationshipId(activeRelationshipId);
-    return { activeCoach: myCoach, byCoachId };
+export function readCoachRequestResolution(requestId) {
+  if (!requestId) return null;
+  const raw = localStorage.getItem(getResolutionKey(requestId));
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
   }
+}
 
-  if (isRelationshipTerminatedInSession(activeRelationshipId)) {
-    return { activeCoach: null, byCoachId };
-  }
+export function clearCoachRequestResolution(requestId) {
+  if (!requestId) return;
+  localStorage.removeItem(getResolutionKey(requestId));
+}
 
-  return {
-    activeCoach: myCoach,
-    byCoachId,
+export function readClientCoachRequests(email) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) return {};
+  const parsed = readJson(getClientCoachRequestsKey(normalizedEmail));
+  if (!parsed || typeof parsed !== "object") return {};
+
+  return Object.fromEntries(
+    Object.entries(parsed).map(([coachId, value]) => {
+      if (typeof value === "number") {
+        return [
+          coachId,
+          {
+            coach_id: Number(coachId),
+            request_id: value,
+            status: "pending",
+            relationship_id: null,
+            updated_at: new Date().toISOString(),
+          },
+        ];
+      }
+      return [coachId, value];
+    })
+  );
+}
+
+export function saveClientCoachRequest(email, coachId, data) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail || !coachId || !data) return;
+
+  const existing = readClientCoachRequests(normalizedEmail);
+  const next = {
+    ...existing,
+    [coachId]: {
+      ...(existing[coachId] || {}),
+      ...data,
+      coach_id: Number(coachId),
+      updated_at: new Date().toISOString(),
+    },
   };
+
+  localStorage.setItem(getClientCoachRequestsKey(normalizedEmail), JSON.stringify(next));
+}
+
+export function removeClientCoachRequest(email, coachId) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail || !coachId) return;
+  const existing = readClientCoachRequests(normalizedEmail);
+  if (!existing[coachId]) return;
+  const next = { ...existing };
+  delete next[coachId];
+  localStorage.setItem(getClientCoachRequestsKey(normalizedEmail), JSON.stringify(next));
+}
+
+export function updateClientCoachRequestByRequestId(requestId, updates) {
+  if (!requestId || !updates || typeof updates !== "object") return;
+
+  const keys = Object.keys(localStorage).filter((key) => key.startsWith("pending_coach_requests:"));
+  keys.forEach((key) => {
+    const parsed = readJson(key);
+    if (!parsed || typeof parsed !== "object") return;
+
+    let changed = false;
+    const next = { ...parsed };
+    Object.entries(next).forEach(([coachId, value]) => {
+      if (Number(value?.request_id) !== Number(requestId)) return;
+      next[coachId] = {
+        ...value,
+        ...updates,
+        updated_at: new Date().toISOString(),
+      };
+      changed = true;
+    });
+
+    if (changed) {
+      localStorage.setItem(key, JSON.stringify(next));
+    }
+  });
 }

@@ -4,7 +4,6 @@ import { Navbar, StatusBadge, SkeletonDashCard } from "../components";
 import {
   fetchMe,
   fetchAvailableCoaches,
-  fetchMyCoach,
   fetchMyCoachRequests,
   requestCoach,
   deleteCoachRequest,
@@ -13,12 +12,6 @@ import {
   fetchCoachReports,
   createCoachReport,
 } from "../api/client";
-import {
-  isApprovedCoachRequest,
-  isPendingCoachRequest,
-  reduceCoachRequestsByCoach,
-  resolveActiveCoachRelationship,
-} from "../utils/coachRequests";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
 
@@ -91,7 +84,6 @@ export default function FindCoachPage() {
   const [requesting, setRequesting] = useState(null);
   const [requestedIds, setRequestedIds] = useState(new Set());
   const [pendingRequests, setPendingRequests] = useState({});
-  const [activeCoach, setActiveCoach] = useState(null);
   const [requestError, setRequestError] = useState("");
   const [reviewError, setReviewError] = useState("");
   const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
@@ -119,71 +111,25 @@ export default function FindCoachPage() {
       .finally(() => setLoading(false));
   }, [navigate]);
 
-  const refreshRelationshipState = async () => {
-    const [requests, myCoach] = await Promise.all([
-      fetchMyCoachRequests().catch(() => null),
-      fetchMyCoach().catch(() => null),
-    ]);
-    const { activeCoach: resolvedCoach, byCoachId } = resolveActiveCoachRelationship(myCoach, requests);
-    const activeCoachId =
-      resolvedCoach?.coach_id != null ? Number(resolvedCoach.coach_id) : null;
-    const activeRelationshipId =
-      resolvedCoach?.relationship_id != null
-        ? Number(resolvedCoach.relationship_id)
-        : null;
-
-    setActiveCoach(
-      activeCoachId != null && activeRelationshipId != null
-        ? { coach_id: activeCoachId, relationship_id: activeRelationshipId }
-        : null
-    );
-
-    const filteredRequests = (Array.isArray(requests) ? requests : []).filter((item) => {
-      if (!item) return false;
-      return true;
-    });
-
-    setPendingRequests(Object.keys(byCoachId).length > 0 ? byCoachId : reduceCoachRequestsByCoach(filteredRequests));
-    setRequestedIds(
-      new Set(
-        filteredRequests
-          .filter((item) => {
-            if (!item) return false;
-            if (item.status === "pending") return true;
-            return (
-              activeCoachId != null &&
-              activeRelationshipId != null &&
-              Number(item.coach_id) === activeCoachId &&
-              Number(item.relationship_id) === activeRelationshipId
-            );
-          })
-          .map((item) => Number(item.coach_id))
-      )
-    );
-  };
-
   useEffect(() => {
     if (!account?.id) return;
 
-    refreshRelationshipState()
+    fetchMyCoachRequests()
+      .then((requests) => {
+        const byCoachId = Object.fromEntries(requests.map((item) => [item.coach_id, item]));
+        setPendingRequests(byCoachId);
+        setRequestedIds(
+          new Set(
+            requests
+              .filter((item) => item?.status !== "rejected")
+              .map((item) => Number(item.coach_id))
+          )
+        );
+      })
       .catch(() => {
         setPendingRequests({});
         setRequestedIds(new Set());
-        setActiveCoach(null);
       });
-  }, [account?.id]);
-
-  useEffect(() => {
-    if (!account?.id) return undefined;
-
-    const refreshOnFocus = () => {
-      void refreshRelationshipState();
-    };
-
-    window.addEventListener("focus", refreshOnFocus);
-    return () => {
-      window.removeEventListener("focus", refreshOnFocus);
-    };
   }, [account?.id]);
 
   useEffect(() => {
@@ -266,7 +212,16 @@ export default function FindCoachPage() {
     setRequesting(coachId);
     try {
       await requestCoach(account.client_id, coachId);
-      await refreshRelationshipState();
+      const requests = await fetchMyCoachRequests();
+      const byCoachId = Object.fromEntries(requests.map((item) => [item.coach_id, item]));
+      setPendingRequests(byCoachId);
+      setRequestedIds(
+        new Set(
+          requests
+            .filter((item) => item?.status !== "rejected")
+            .map((item) => Number(item.coach_id))
+        )
+      );
     } catch (error) {
       setRequestError(error.message || "Unable to send coach request.");
     } finally {
@@ -281,9 +236,18 @@ export default function FindCoachPage() {
     setRequesting(coachId);
     try {
       await deleteCoachRequest(requestId);
-      await refreshRelationshipState();
+      const requests = await fetchMyCoachRequests();
+      const byCoachId = Object.fromEntries(requests.map((item) => [item.coach_id, item]));
+      setPendingRequests(byCoachId);
+      setRequestedIds(
+        new Set(
+          requests
+            .filter((item) => item?.status !== "rejected")
+            .map((item) => Number(item.coach_id))
+        )
+      );
     } catch (error) {
-      setRequestError(error.message || "Unable to cancel this coach request.");
+      setRequestError(error.message || "Unable to cancel coach request.");
     } finally {
       setRequesting(null);
     }
@@ -293,7 +257,7 @@ export default function FindCoachPage() {
     const requestEntry = pendingRequests[coachId];
     const hasRelationshipHistory = Boolean(
       requestEntry?.relationship_id
-      || isApprovedCoachRequest(requestEntry)
+      || requestEntry?.status === "approved"
     );
     if (!hasRelationshipHistory) {
       setReviewError("You can leave a review only if you have or had a relationship with this coach.");
@@ -493,18 +457,13 @@ export default function FindCoachPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {coaches.map((coach) => {
               const isExpanded = expandedId === coach.coach_id;
+              const isRequested = requestedIds.has(coach.coach_id);
               const isRequesting = requesting === coach.coach_id;
               const requestEntry = pendingRequests[coach.coach_id];
-              const isActiveCoach =
-                Number(activeCoach?.coach_id) === Number(coach.coach_id) &&
-                activeCoach?.relationship_id != null;
-              const hasPendingRequest = isPendingCoachRequest(requestEntry);
+              const requestStatus = requestEntry?.status || null;
               const canReview = Boolean(
-                isActiveCoach
-                || (Number(requestEntry?.coach_id) === Number(coach.coach_id) &&
-                  isApprovedCoachRequest(requestEntry))
-                || requestEntry?.relationship_id
-                || isApprovedCoachRequest(requestEntry)
+                requestEntry?.relationship_id
+                || requestStatus === "approved"
               );
               const initials = coach.name?.split(" ").map((name) => name[0]).join("") ?? "?";
               const reviews = coachReviews[coach.coach_id] || [];
@@ -710,20 +669,13 @@ export default function FindCoachPage() {
                     >
                       View Profile
                     </button>
-                    {isActiveCoach ? (
-                      <button
-                        disabled
-                        className="flex-1 bg-green-900/30 text-green-400 border border-green-500/30 rounded-xl py-2.5 text-sm font-medium disabled:cursor-default disabled:opacity-70"
-                      >
-                        Active Coach
-                      </button>
-                    ) : hasPendingRequest ? (
+                    {isRequested ? (
                       <button
                         onClick={() => handleCancelRequest(coach.coach_id)}
-                        disabled={isRequesting}
+                        disabled={requestStatus !== "pending" || isRequesting}
                         className="flex-1 bg-green-900/30 text-green-400 border border-green-500/30 rounded-xl py-2.5 text-sm font-medium disabled:cursor-default disabled:opacity-70"
                       >
-                        {isRequesting ? "Cancelling..." : "Cancel Request"}
+                        {isRequesting ? "Cancelling..." : requestStatus === "approved" ? "Approved" : requestStatus === "rejected" ? "Rejected" : "Cancel Request"}
                       </button>
                     ) : (
                       <button

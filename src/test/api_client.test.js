@@ -7,14 +7,10 @@
 
 import { describe, it, expect, vi } from "vitest";
 import {
-  assignWorkoutPlanToClient,
   buildInitialSurveyPayload,
   createClientInitialSurvey,
-  deleteAccount,
-  deleteCoachRequest,
   extractUploadedAssetUrl,
   fetchMe,
-  fetchUnifiedProfile,
   fetchTelemetryToday,
   fetchWorkoutPlan,
   logWorkoutActivity,
@@ -26,7 +22,6 @@ import {
   fetchMealsToday,
   logMeal,
   fetchAvailableCoaches,
-  fetchMyCoachRequests,
   requestCoach,
   uploadProgressPicture,
 } from "../api/client";
@@ -104,45 +99,6 @@ describe("createClientInitialSurvey", () => {
   });
 });
 
-describe("fetchUnifiedProfile", () => {
-  it("uses the shared full-profile route when available", async () => {
-    mockFetchOk({
-      account: { id: 1, name: "Test User" },
-      roles: ["client"],
-      client_details: { primary_goal: "weight loss" },
-      coach_details: null,
-    });
-    const result = await fetchUnifiedProfile();
-    const [url] = global.fetch.mock.calls[0];
-    expect(url).toContain("/roles/shared/account/me");
-    expect(result.account.name).toBe("Test User");
-    expect(result.roles).toEqual(["client"]);
-  });
-});
-
-describe("deleteAccount", () => {
-  it("uses the shared account deletion route", async () => {
-    mockFetchOk({ deleted: true });
-    await deleteAccount();
-    const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toContain("/roles/shared/account/delete");
-    expect(opts.method).toBe("DELETE");
-  });
-});
-
-describe("assignWorkoutPlanToClient", () => {
-  it("posts to the client assign-plan route", async () => {
-    mockFetchOk({ client_workout_plan_id: 44 });
-    await assignWorkoutPlanToClient(12, "2026-05-06T00:00:00.000Z", "2026-05-12T23:59:59.999Z");
-    const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toContain("/roles/client/assign_plan");
-    expect(opts.method).toBe("POST");
-    expect(JSON.parse(opts.body)).toMatchObject({
-      workout_plan_id: 12,
-    });
-  });
-});
-
 /* ═══════════════════════════════════════════════════════════════════════
    TELEMETRY
    ═══════════════════════════════════════════════════════════════════════ */
@@ -157,12 +113,12 @@ describe("fetchTelemetryToday", () => {
     expect(data.calories_goal).toBeDefined();
   });
 
-  it("returns the route-only fallback shape when no telemetry is available", async () => {
+  it("returns the dashboard fallback shape", async () => {
     const result = await fetchTelemetryToday(1);
     expect(result).toEqual({
-      step_count: 0,
-      calories_burned: 0,
-      calories_consumed: 0,
+      step_count: 8241,
+      calories_burned: 540,
+      calories_consumed: 1438,
       calories_goal: 2000,
     });
   });
@@ -176,15 +132,15 @@ describe("fetchWorkoutPlan", () => {
   it("returns a stable empty-state plan on API failure", async () => {
     mockFetchFail();
     const plan = await fetchWorkoutPlan(1, 0);
-    expect(plan.strata_name).toBe("");
+    expect(plan.strata_name).toBe("Rest Day");
     expect(plan.activities).toBeDefined();
     expect(plan.activities.length).toBe(0);
   });
 
-  it("returns an empty workout plan for Saturday (index 5)", async () => {
+  it("returns Rest Day for Saturday (index 5)", async () => {
     mockFetchFail();
     const plan = await fetchWorkoutPlan(1, 5);
-    expect(plan.strata_name).toBe("");
+    expect(plan.strata_name).toBe("Rest Day");
     expect(plan.activities.length).toBe(0);
   });
 
@@ -202,30 +158,48 @@ describe("fetchWorkoutPlan", () => {
     });
   });
 
-  it("does not use local weekly-plan cache data", async () => {
+  it("uses the weekly plan saved from Browse & Build Workouts", async () => {
     mockFetchFail();
     localStorage.setItem(
       "client_weekly_plan:1",
       JSON.stringify({
         monday: {
           name: "Push Day",
-          exercises: [{ id: "bench-1", name: "Bench Press" }],
+          exercises: [
+            {
+              id: "bench-1",
+              name: "Bench Press",
+              sets: 4,
+              reps: 8,
+              weight: 135,
+              intensity_measure: "lbs",
+            },
+          ],
         },
       })
     );
 
     const plan = await fetchWorkoutPlan(1, 0);
 
-    expect(plan.strata_name).toBe("");
-    expect(plan.activities).toEqual([]);
+    expect(plan.strata_name).toBe("Push Day");
+    expect(plan.activities).toEqual([
+      expect.objectContaining({
+        id: "bench-1",
+        name: "Bench Press",
+        suggested_sets: 4,
+        suggested_reps: 8,
+        intensity_value: 135,
+        intensity_measure: "lbs",
+        logged: false,
+      }),
+    ]);
   });
 });
 
 describe("logWorkoutActivity", () => {
-  it("throws when the backend does not support workout activity logging", async () => {
-    await expect(logWorkoutActivity(1, 1)).rejects.toThrow(
-      "The backend route list does not include a workout activity logging endpoint."
-    );
+  it("returns success without requiring an unsupported backend route", async () => {
+    const result = await logWorkoutActivity(1, 1);
+    expect(result.success).toBe(true);
   });
 });
 
@@ -241,40 +215,10 @@ describe("fetchCoachInfo", () => {
   });
 
   it("returns coach object when API succeeds", async () => {
-    const coach = {
-      coach_id: 5,
-      relationship_id: 12,
-      name: "Coach A",
-      specialty: "Strength",
-    };
+    const coach = { coach_id: 5, name: "Coach A", specialty: "Strength" };
     mockFetchOk(coach);
     const result = await fetchCoachInfo(1);
     expect(result).toMatchObject(coach);
-  });
-
-  it("normalizes nested my_coach payloads with relationship and account info", async () => {
-    mockFetchOk({
-      coach_account: {
-        id: 5,
-        specialties: "Strength",
-        base_account: {
-          id: 88,
-          name: "Coach A",
-        },
-      },
-      client_coach_relationship: {
-        id: 12,
-        coach_id: 5,
-      },
-    });
-    const result = await fetchCoachInfo(1);
-    expect(result).toMatchObject({
-      coach_id: 5,
-      relationship_id: 12,
-      account_id: 88,
-      name: "Coach A",
-      specialty: "Strength",
-    });
   });
 });
 
@@ -391,65 +335,6 @@ describe("requestCoach", () => {
     expect(url).toContain("/roles/client/request_coach/5");
     expect(opts.method).toBe("POST");
     expect(opts.body).toBeUndefined();
-  });
-});
-
-describe("deleteCoachRequest", () => {
-  it("uses the client rescind route for client-side request cancellation", async () => {
-    mockFetchOk({ success: true });
-    localStorage.setItem("jwt", "tok");
-    await deleteCoachRequest(17);
-    const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toContain("/roles/client/rescind_request/17");
-    expect(opts.method).toBe("DELETE");
-  });
-
-  it("falls back to the shared delete route when rescind is unavailable", async () => {
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 404,
-        headers: { get: () => "application/json" },
-        json: () => Promise.resolve({ detail: "missing" }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        headers: { get: () => "application/json" },
-        json: () => Promise.resolve({ success: true }),
-      });
-
-    await deleteCoachRequest(17);
-
-    const [url, opts] = global.fetch.mock.calls[1];
-    expect(url).toContain("/roles/shared/client_coach_relationship/delete_coach_request/17");
-    expect(opts.method).toBe("DELETE");
-  });
-});
-
-describe("fetchMyCoachRequests", () => {
-  it("normalizes approved requests from is_accepted when status is omitted", async () => {
-    mockFetchOk([
-      {
-        id: 41,
-        coach_id: 9,
-        coach_name: "Coach Approved",
-        is_accepted: true,
-        client_coach_relationship: { id: 77 },
-      },
-    ]);
-
-    const requests = await fetchMyCoachRequests();
-
-    expect(requests).toEqual([
-      expect.objectContaining({
-        request_id: 41,
-        coach_id: 9,
-        coach_name: "Coach Approved",
-        status: "approved",
-        relationship_id: 77,
-      }),
-    ]);
   });
 });
 

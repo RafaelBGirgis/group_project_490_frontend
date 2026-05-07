@@ -55,6 +55,7 @@ function getToken() {
   for (const cookieName of SESSION_COOKIE_NAMES) {
     const cookieToken = readCookie(cookieName);
     if (cookieToken) {
+      localStorage.setItem("jwt", cookieToken);
       return cookieToken;
     }
   }

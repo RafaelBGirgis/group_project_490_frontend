@@ -50,6 +50,30 @@ const resolveClientPrimaryGoal = (clientDetails) => {
   return normalizePrimaryGoal(apiGoal || tableGoal);
 };
 
+const PROFILE_CACHE_VERSION = 1;
+
+const getProfileCacheKey = (role) => `profile:${role}:route-cache:v${PROFILE_CACHE_VERSION}`;
+
+const readProfileCache = (role) => {
+  try {
+    const raw = localStorage.getItem(getProfileCacheKey(role));
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeProfileCache = (role, value) => {
+  try {
+    localStorage.setItem(
+      getProfileCacheKey(role),
+      JSON.stringify({ ...value, cachedAt: new Date().toISOString() })
+    );
+  } catch {
+    // Cache writes are best-effort only.
+  }
+};
+
 const normalizeGenderToSignupValue = (value) => {
   const normalized = String(value || "").trim().toLowerCase().replaceAll("_", "-");
   if (normalized === "male") return "Male";
@@ -86,6 +110,29 @@ const buildAccountUpdatePayload = ({ name, age, email, bio, pfp_url, gender }) =
 
   return payload;
 };
+
+const buildCachedProfileState = ({
+  role,
+  profile,
+  unifiedData,
+  coachProfileData,
+  specializations,
+  certifications,
+  experiences,
+  paymentMethod,
+}) => ({
+  role,
+  profile: {
+    ...profile,
+    profilePicture: typeof profile.profilePicture === "string" ? profile.profilePicture : null,
+  },
+  unifiedData,
+  coachProfileData,
+  specializations,
+  certifications,
+  experiences,
+  paymentMethod,
+});
 
 function ProfilePage({ role = "client" }) {
   const navigate = useNavigate();
@@ -219,6 +266,17 @@ function ProfilePage({ role = "client" }) {
     }
 
     const loadProfile = async () => {
+      const cached = readProfileCache(role);
+      if (cached?.profile) {
+        setProfile((prev) => ({ ...prev, ...cached.profile }));
+        setUnifiedData(cached.unifiedData || null);
+        setCoachProfileData(cached.coachProfileData || null);
+        setSpecializations(Array.isArray(cached.specializations) ? cached.specializations : []);
+        setCertifications(Array.isArray(cached.certifications) ? cached.certifications : []);
+        setExperiences(Array.isArray(cached.experiences) ? cached.experiences : []);
+        setPaymentMethod(cached.paymentMethod || null);
+      }
+
       try {
         // Single unified API call for all profile data
         const [meData, unified] = await Promise.all([
@@ -344,6 +402,20 @@ function ProfilePage({ role = "client" }) {
             nextCoachProfileData = null;
           }
         }
+
+        writeProfileCache(
+          role,
+          buildCachedProfileState({
+            role,
+            profile: nextProfile,
+            unifiedData: nextUnifiedData,
+            coachProfileData: nextCoachProfileData,
+            specializations: nextSpecializations,
+            certifications: nextCertifications,
+            experiences: nextExperiences,
+            paymentMethod: nextPaymentMethod,
+          })
+        );
       } catch (err) {
         setLoadError(err.message || "Failed to load profile.");
       } finally {
@@ -357,6 +429,22 @@ function ProfilePage({ role = "client" }) {
   const handleProfileChange = (field, value) => {
     if (profileInputsDisabled) return;
     setProfile((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const persistCurrentProfileCache = (profileOverride = profile) => {
+    writeProfileCache(
+      role,
+      buildCachedProfileState({
+        role,
+        profile: profileOverride,
+        unifiedData,
+        coachProfileData,
+        specializations,
+        certifications,
+        experiences,
+        paymentMethod,
+      })
+    );
   };
 
   const handleSaveClientProfile = async () => {
@@ -409,6 +497,7 @@ function ProfilePage({ role = "client" }) {
         await updateAccount(accountPayload);
       }
 
+      persistCurrentProfileCache({ ...profile, profilePicture: profilePictureUrl });
       setSaveMessage("Client profile changes saved.");
     } catch (error) {
       setSaveError(error.message || "Unable to save your client profile.");
@@ -467,6 +556,7 @@ function ProfilePage({ role = "client" }) {
         await updateAccount(accountPayload);
       }
 
+      persistCurrentProfileCache({ ...profile, profilePicture: profilePictureUrl });
       setSaveMessage("Coach profile changes saved.");
     } catch (error) {
       setSaveError(error.message || "Unable to save your coach profile.");
@@ -475,15 +565,15 @@ function ProfilePage({ role = "client" }) {
     }
   };
 
-  const handleDeleteAccount = async () => {
-    if (window.confirm("Are you sure you want to permanently delete your account? This action cannot be undone.")) {
+  const handleDeleteAccountRequest = async () => {
+    if (window.confirm("Are you sure you want to request deletion of your account? This action cannot be undone.")) {
       try {
         await deleteAccount();
-        alert("Account deleted successfully.");
+        alert("Account deletion requested successfully.");
         clearAuth();
         navigate("/login");
-      } catch (error) {
-        alert(error?.message || "Failed to delete account. Please try again.");
+      } catch {
+        alert("Failed to request account deletion. Please try again.");
       }
     }
   };
@@ -514,14 +604,14 @@ function ProfilePage({ role = "client" }) {
   };
 
   const handleDeleteCoachAccount = async () => {
-    if (window.confirm("Are you sure you want to permanently delete your coach account? This action cannot be undone.")) {
+    if (window.confirm("Are you sure you want to request deletion of your coach account? This action cannot be undone.")) {
       try {
         await deleteCoachAccount();
-        alert("Coach account deleted successfully.");
-        clearAuth();
+        alert("Coach account deletion requested successfully.");
+        localStorage.removeItem("jwt");
         navigate("/login");
-      } catch (error) {
-        alert(error?.message || "Failed to delete coach account. Please try again.");
+      } catch {
+        alert("Failed to request coach account deletion. Please try again.");
       }
     }
   };
@@ -789,7 +879,7 @@ function ProfilePage({ role = "client" }) {
                     </button>
 
                     <button
-                      onClick={handleDeleteAccount}
+                      onClick={handleDeleteAccountRequest}
                       className="w-full rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-300"
                     >
                       Delete Account
@@ -1596,3 +1686,7 @@ function EditableMetadataSection({
 }
 
 export default ProfilePage;
+
+
+
+

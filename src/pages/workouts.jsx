@@ -48,7 +48,6 @@ export default function WorkoutsPage() {
   const [loading, setLoading] = useState(true);
   const [initials, setInitials] = useState("??");
   const [publishStatus, setPublishStatus] = useState(null);
-  const [actionError, setActionError] = useState("");
 
   // Data
   const [presets, setPresets] = useState([]);
@@ -185,44 +184,34 @@ export default function WorkoutsPage() {
   /*  handlers  */
 
   const handleDuplicate = async (preset) => {
-    try {
-      const result = await duplicatePreset(role, roleId, preset.id);
-      if (result.success) {
-        setMyWorkouts((prev) => [
-          { ...preset, ...result, type: "custom", name: result.name || `${preset.name} (Copy)` },
-          ...prev,
-        ]);
-        setTab("my");
-      }
-    } catch (error) {
-      setActionError(error.message || "Unable to duplicate this workout.");
+    const result = await duplicatePreset(role, roleId, preset.id);
+    if (result.success) {
+      setMyWorkouts((prev) => [
+        { ...preset, ...result, type: "custom", name: result.name || `${preset.name} (Copy)` },
+        ...prev,
+      ]);
+      setTab("my");
     }
   };
 
   const handleDelete = async (workoutId) => {
-    try {
-      await deleteWorkout(role, roleId, workoutId);
-      setMyWorkouts((prev) => prev.filter((w) => w.id !== workoutId));
-      setViewWorkout(null);
-    } catch (error) {
-      setActionError(error.message || "Unable to delete this workout.");
-    }
+    await deleteWorkout(role, roleId, workoutId);
+    setMyWorkouts((prev) => prev.filter((w) => w.id !== workoutId));
+    setViewWorkout(null);
   };
 
   const handleSaveWorkout = async (workout) => {
-    try {
-      if (workout.id && myWorkouts.some((w) => w.id === workout.id)) {
-        await updateWorkout(role, roleId, workout.id, workout);
-        setMyWorkouts((prev) => prev.map((w) => (w.id === workout.id ? { ...w, ...workout } : w)));
-      } else {
-        const result = await createWorkout(role, roleId, workout);
-        const saved = { ...workout, ...result, id: result.id, type: "custom" };
-        setMyWorkouts((prev) => [saved, ...prev]);
-      }
-      setEditWorkout(null);
-    } catch (error) {
-      setActionError(error.message || "Unable to save this workout.");
+    if (workout.id && myWorkouts.some((w) => w.id === workout.id)) {
+      // Update existing
+      await updateWorkout(role, roleId, workout.id, workout);
+      setMyWorkouts((prev) => prev.map((w) => (w.id === workout.id ? { ...w, ...workout } : w)));
+    } else {
+      // Create new
+      const result = await createWorkout(role, roleId, workout);
+      const saved = { ...workout, id: result.id || `custom-${Date.now()}`, type: "custom", created_at: new Date().toISOString() };
+      setMyWorkouts((prev) => [saved, ...prev]);
     }
+    setEditWorkout(null);
   };
 
   const handleSetDay = (dayKey, workout) => {
@@ -237,14 +226,9 @@ export default function WorkoutsPage() {
 
   const handleSaveWeeklyPlan = async () => {
     setWeeklySaving(true);
-    try {
-      await saveWeeklyPlan(role, roleId, weeklyPlan);
-      setWeeklyDirty(false);
-    } catch (error) {
-      setActionError(error.message || "Unable to save this weekly plan.");
-    } finally {
-      setWeeklySaving(false);
-    }
+    await saveWeeklyPlan(role, roleId, weeklyPlan);
+    setWeeklyDirty(false);
+    setWeeklySaving(false);
   };
 
   const handlePublishWeeklyPlan = async () => {
@@ -273,17 +257,13 @@ export default function WorkoutsPage() {
 
   const handleAssign = async () => {
     if (!assignOverlay || selectedClients.length === 0) return;
-    try {
-      await assignWorkout(account.coach_id, assignOverlay.id, selectedClients);
-      setAssignSent(true);
-      setTimeout(() => {
-        setAssignOverlay(null);
-        setAssignSent(false);
-        setSelectedClients([]);
-      }, 1500);
-    } catch (error) {
-      setActionError(error.message || "Unable to assign this workout.");
-    }
+    await assignWorkout(account.coach_id, assignOverlay.id, selectedClients);
+    setAssignSent(true);
+    setTimeout(() => {
+      setAssignOverlay(null);
+      setAssignSent(false);
+      setSelectedClients([]);
+    }, 1500);
   };
 
   /*  render  */
@@ -325,12 +305,6 @@ export default function WorkoutsPage() {
             </button>
           )}
         </div>
-
-        {actionError ? (
-          <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-            {actionError}
-          </div>
-        ) : null}
 
         {/* Tabs */}
         <div className="flex gap-1 bg-[#0A1020] rounded-xl p-1 mb-6">

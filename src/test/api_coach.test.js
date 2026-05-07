@@ -10,10 +10,7 @@ import {
   fetchCoachAvailability,
   fetchCoachProfile,
   fetchCoachReviews,
-  fetchClientRequests,
-  fetchMyClients,
   saveCoachAvailability,
-  terminateRelationship,
   updateCoachInformation,
 } from "../api/coach";
 
@@ -78,116 +75,6 @@ describe("coach request actions", () => {
     expect(url).toContain("/roles/coach/deny_client/11");
     expect(opts.method).toBe("POST");
     expect(opts.body).toBeUndefined();
-  });
-
-  it("falls back to the shared delete route when deny is unavailable", async () => {
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 404,
-        headers: { get: () => "application/json" },
-        json: () => Promise.resolve({ detail: "missing" }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        headers: { get: () => "application/json" },
-        json: () => Promise.resolve({ success: true }),
-      });
-
-    await denyClientRequest(11);
-
-    const [fallbackUrl, fallbackOpts] = global.fetch.mock.calls[1];
-    expect(fallbackUrl).toContain("/roles/shared/client_coach_relationship/delete_coach_request/11");
-    expect(fallbackOpts.method).toBe("DELETE");
-  });
-
-  it("posts the shared terminate relationship route with an empty JSON body", async () => {
-    mockFetchOk({ success: true });
-    await terminateRelationship(11);
-    const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toContain("/roles/shared/client_coach_relationship/terminate_relationship/11");
-    expect(opts.method).toBe("POST");
-    expect(opts.body).toBe("{}");
-  });
-});
-
-describe("fetchClientRequests", () => {
-  it("normalizes request rows for dashboard/profile rendering", async () => {
-    mockFetchOk([
-      {
-        id: 3,
-        client_id: 21,
-        name: "Jamie Client",
-        age: 29,
-        gender: "female",
-        pfp_url: "https://example.com/jamie.jpg",
-        fitness_goals: [{ goal_enum: "weight loss" }],
-      },
-    ]);
-
-    const result = await fetchClientRequests();
-
-    expect(result).toEqual([
-      expect.objectContaining({
-        request_id: 3,
-        client_id: 21,
-        name: "Jamie Client",
-        age: 29,
-        gender: "female",
-        pfp_url: "https://example.com/jamie.jpg",
-        goal: "weight loss",
-      }),
-    ]);
-  });
-});
-
-describe("fetchMyClients", () => {
-  it("loads accepted clients from the documented coach clients route", async () => {
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        headers: { get: () => "application/json" },
-        json: () => Promise.resolve([
-          { relationship_id: 90, client_id: 21, request_id: 3 },
-        ]),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        headers: { get: () => "application/json" },
-        json: () => Promise.resolve({
-          base_account: { id: 5, name: "Jamie Client" },
-          fitness_goals: [{ goal_enum: "weight loss" }],
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        headers: { get: () => "application/json" },
-        json: () => Promise.resolve([]),
-      });
-
-    const result = await fetchMyClients(7);
-
-    expect(global.fetch).toHaveBeenNthCalledWith(
-      1,
-      expect.stringContaining("/roles/coach/clients"),
-      expect.objectContaining({
-        headers: expect.objectContaining({ "Content-Type": "application/json" }),
-      })
-    );
-    expect(result).toEqual([
-      expect.objectContaining({
-        id: 21,
-        request_id: 3,
-        relationship_id: 90,
-        status: "active",
-        name: "Jamie Client",
-        goal: "weight loss",
-      }),
-    ]);
   });
 });
 

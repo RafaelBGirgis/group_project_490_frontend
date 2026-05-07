@@ -1,9 +1,42 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
+
+const COACH_PROFILE_CACHE_VERSION = 1;
+
+const getCoachProfileCacheKey = (coachId) =>
+  `coach-profile:${coachId || "current"}:route-cache:v${COACH_PROFILE_CACHE_VERSION}`;
+
+const readCoachProfileCache = (coachId) => {
+  try {
+    const raw = localStorage.getItem(getCoachProfileCacheKey(coachId));
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeCoachProfileCache = (coachId, payload) => {
+  if (!coachId) return;
+  try {
+    localStorage.setItem(
+      getCoachProfileCacheKey(coachId),
+      JSON.stringify({ ...payload, cachedAt: new Date().toISOString() })
+    );
+  } catch {
+    // Cache writes are best-effort only.
+  }
+};
 
 export default function CoachProfile({ coach, rating, nextSession, onMessage }) {
-  const displayCoach = useMemo(() => coach || null, [coach]);
-  const displayRating = useMemo(() => rating || null, [rating]);
-  const displayNextSession = useMemo(() => nextSession || null, [nextSession]);
+  const coachId = coach?.coach_id || coach?.id;
+  const cachedPayload = useMemo(() => readCoachProfileCache(coachId), [coachId]);
+  const displayCoach = coach || cachedPayload?.coach;
+  const displayRating = rating || cachedPayload?.rating;
+  const displayNextSession = nextSession || cachedPayload?.nextSession;
+
+  useEffect(() => {
+    if (!coachId || !coach) return;
+    writeCoachProfileCache(coachId, { coach, rating, nextSession });
+  }, [coachId, coach, rating, nextSession]);
 
   if (!displayCoach) {
     return (

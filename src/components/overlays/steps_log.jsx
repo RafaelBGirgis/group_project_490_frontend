@@ -3,7 +3,6 @@ import {
   startDailyStepsSurvey,
   submitDailyStepsSurvey,
   fetchStepHistory,
-  updateStepCount,
 } from "../../api/survey";
 
 const ACCENT = "#3B82F6";
@@ -24,7 +23,6 @@ export default function StepsLog({ status, recent = [], onSubmitted }) {
   const [error, setError] = useState("");
   const finished = Boolean(status?.is_finished);
   const unavailable = status === null;
-  const canOverwrite = finished && recent.length > 0;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -36,12 +34,6 @@ export default function StepsLog({ status, recent = [], onSubmitted }) {
     setSubmitting(true);
     setError("");
     try {
-      if (canOverwrite) {
-        const response = await updateStepCount({ step_count: stepsNum });
-        const updatedRecent = await fetchStepHistory({ limit: 7 }).catch(() => []);
-        onSubmitted?.(response, updatedRecent);
-        return;
-      }
       if (!status?.is_started) {
         await startDailyStepsSurvey();
       }
@@ -67,30 +59,9 @@ export default function StepsLog({ status, recent = [], onSubmitted }) {
       {!unavailable && (
         <form onSubmit={handleSubmit} className="space-y-3">
           {finished ? (
-            <div className="space-y-2">
-              <p className="text-xs text-gray-400">
-                You've already logged today's steps. You can still overwrite today's count using the telemetry update route.
-              </p>
-              <label className="text-xs text-gray-300 font-medium block">Replace today's saved steps</label>
-              <input
-                type="number"
-                min={0}
-                max={100000}
-                value={steps}
-                onChange={(e) => setSteps(e.target.value)}
-                placeholder="e.g. 9200"
-                className="w-full bg-[#080D19] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none"
-              />
-              {error && <p className="text-xs text-red-400">{error}</p>}
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full py-2.5 rounded-lg text-sm font-bold text-white transition-colors disabled:opacity-40"
-                style={{ backgroundColor: ACCENT }}
-              >
-                {submitting ? "Updating..." : "Update Steps"}
-              </button>
-            </div>
+            <p className="text-xs text-gray-400">
+              You've already logged today's steps. Come back tomorrow.
+            </p>
           ) : (
             <>
               <label className="text-xs text-gray-300 font-medium block">Steps walked today</label>

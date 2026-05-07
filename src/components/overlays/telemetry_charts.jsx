@@ -1,10 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  deleteWeightEntry,
-  fetchTelemetryHistory,
-  fetchWorkoutHistory,
-  updateWeightEntry,
-} from "../../api/survey";
+import { fetchTelemetryHistory, fetchWorkoutHistory } from "../../api/survey";
 
 const WEEK = 7; // records per page
 
@@ -17,66 +12,21 @@ export default function TelemetryCharts({ accent = "#3B82F6" }) {
   const [history, setHistory] = useState({ moods: [], weights: [], steps: [] });
   const [workouts, setWorkouts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [editingWeightId, setEditingWeightId] = useState(null);
-  const [editingWeightValue, setEditingWeightValue] = useState("");
-  const [weightActionError, setWeightActionError] = useState("");
-  const [weightActionLoading, setWeightActionLoading] = useState(false);
-
-  const refreshTelemetry = useCallback(async (cancelled = false) => {
-    const [hist, wk] = await Promise.all([
-      fetchTelemetryHistory({ limit: 90 }),
-      fetchWorkoutHistory({ limit: 60 }),
-    ]);
-    if (cancelled) return;
-    setHistory(hist);
-    setWorkouts(wk);
-    setLoading(false);
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      await refreshTelemetry(cancelled);
+      const [hist, wk] = await Promise.all([
+        fetchTelemetryHistory({ limit: 90 }),
+        fetchWorkoutHistory({ limit: 60 }),
+      ]);
+      if (cancelled) return;
+      setHistory(hist);
+      setWorkouts(wk);
+      setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [refreshTelemetry]);
-
-  const handleSaveWeight = async (entry) => {
-    const nextWeight = Number(editingWeightValue);
-    if (!Number.isFinite(nextWeight) || nextWeight <= 0) {
-      setWeightActionError("Weight must be a positive number.");
-      return;
-    }
-    setWeightActionLoading(true);
-    setWeightActionError("");
-    try {
-      await updateWeightEntry(entry.id, { weight: Math.round(nextWeight) });
-      setEditingWeightId(null);
-      setEditingWeightValue("");
-      await refreshTelemetry();
-    } catch (error) {
-      setWeightActionError(error?.message || "Unable to update that weight entry.");
-    } finally {
-      setWeightActionLoading(false);
-    }
-  };
-
-  const handleDeleteWeight = async (entryId) => {
-    setWeightActionLoading(true);
-    setWeightActionError("");
-    try {
-      await deleteWeightEntry(entryId);
-      if (editingWeightId === entryId) {
-        setEditingWeightId(null);
-        setEditingWeightValue("");
-      }
-      await refreshTelemetry();
-    } catch (error) {
-      setWeightActionError(error?.message || "Unable to delete that weight entry.");
-    } finally {
-      setWeightActionLoading(false);
-    }
-  };
+  }, []);
 
   // newest-first → reverse for chronological order (oldest left)
   const weightSeries = useMemo(
@@ -156,88 +106,7 @@ export default function TelemetryCharts({ accent = "#3B82F6" }) {
         secondStat={weightChange != null ? { label: "Change", value: weightChange } : null}
       >
         {weightSeries.length > 0 && (
-          <>
-            <LineChart points={weightSeries} accent={accent} yUnit="lbs" showTooltip />
-            <div className="mt-4 space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-[10px] uppercase tracking-widest text-slate-500">Recent Weight Entries</p>
-                <p className="text-[10px] text-slate-600">Uses update/delete telemetry routes</p>
-              </div>
-              {weightActionError ? (
-                <p className="text-xs text-rose-300">{weightActionError}</p>
-              ) : null}
-              {(history.weights || []).slice(0, 6).map((entry, index) => (
-                <div
-                  key={entry.id ?? `${entry.last_updated}-${index}`}
-                  className="rounded-lg border border-white/6 bg-[#0B1120] px-3 py-2"
-                >
-                  {editingWeightId === entry.id ? (
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        min={1}
-                        value={editingWeightValue}
-                        onChange={(event) => setEditingWeightValue(event.target.value)}
-                        className="w-28 rounded-md border border-white/10 bg-[#080D19] px-2 py-1 text-sm text-white outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleSaveWeight(entry)}
-                        disabled={weightActionLoading}
-                        className="rounded-md px-3 py-1 text-xs font-semibold text-white disabled:opacity-50"
-                        style={{ backgroundColor: accent }}
-                      >
-                        Save
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingWeightId(null);
-                          setEditingWeightValue("");
-                          setWeightActionError("");
-                        }}
-                        className="rounded-md border border-white/10 px-3 py-1 text-xs text-slate-300"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-semibold text-white">{formatNumber(Number(entry.weight) || 0)} lbs</p>
-                        <p className="text-[11px] text-slate-500">{formatDateLabel(entry.last_updated || entry.created_at)}</p>
-                      </div>
-                      <div className="flex gap-2">
-                        {entry.id != null ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingWeightId(entry.id);
-                                setEditingWeightValue(String(entry.weight || ""));
-                                setWeightActionError("");
-                              }}
-                              className="rounded-md border border-white/10 px-3 py-1 text-xs text-slate-300"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteWeight(entry.id)}
-                              disabled={weightActionLoading}
-                              className="rounded-md border border-rose-500/30 px-3 py-1 text-xs text-rose-300 disabled:opacity-50"
-                            >
-                              Delete
-                            </button>
-                          </>
-                        ) : null}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </>
+          <LineChart points={weightSeries} accent={accent} yUnit="lbs" showTooltip />
         )}
       </ChartCard>
 

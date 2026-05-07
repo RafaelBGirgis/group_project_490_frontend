@@ -5,15 +5,12 @@ import {
   submitDailyMoodSurvey,
   startDailyBodyMetricsSurvey,
   submitDailyBodyMetricsSurvey,
-  startDailyWorkoutSurvey,
-  submitDailyWorkoutSurveyFlexible,
 } from "../../api/survey";
-import { fetchWorkoutPlan } from "../../api/client";
 import ProgressPictures from "./progress_pictures";
 
 const ACCENT = "#3B82F6";
 
-const SECTION_KEYS = ["mood", "body_metrics", "workout"];
+const SECTION_KEYS = ["mood", "body_metrics"];
 
 /**
  * Daily check-in overlay body. The user must call /start before /submit, so
@@ -24,41 +21,28 @@ const SECTION_KEYS = ["mood", "body_metrics", "workout"];
  *   onCompleted — called after any successful submission so the dashboard can
  *                 refresh its summary count.
  */
-export default function DailySurvey({ clientId, onCompleted }) {
-  const [statuses, setStatuses] = useState({ mood: null, body_metrics: null, workout: null });
+export default function DailySurvey({ onCompleted }) {
+  const [statuses, setStatuses] = useState({ mood: null, body_metrics: null });
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState(null);
-  const [workoutActivities, setWorkoutActivities] = useState([]);
 
   useEffect(() => {
-    let cancelled = false;
-
     (async () => {
-      const [all, workoutPlan] = await Promise.all([
-        fetchAllDailySurveys(),
-        clientId ? fetchWorkoutPlan(clientId, getTodayIndex()).catch(() => null) : Promise.resolve(null),
-      ]);
-      if (cancelled) return;
-      setStatuses({ mood: all.mood, body_metrics: all.body_metrics, workout: all.workout });
-      setWorkoutActivities(Array.isArray(workoutPlan?.activities) ? workoutPlan.activities : []);
+      const all = await fetchAllDailySurveys();
+      setStatuses({ mood: all.mood, body_metrics: all.body_metrics });
       setLoading(false);
       const firstAvailableUnfinished = SECTION_KEYS.find(
         (key) => all[key] && !all[key].is_finished,
       );
       setActiveSection(firstAvailableUnfinished ?? null);
     })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [clientId]);
+  }, []);
 
   const handleSubmitted = (key, response) => {
-    const nextStatuses = { ...statuses, [key]: response };
-    setStatuses(nextStatuses);
+    setStatuses((prev) => ({ ...prev, [key]: response }));
     onCompleted?.();
     const next = SECTION_KEYS.find(
-      (k) => k !== key && nextStatuses[k] && !nextStatuses[k].is_finished,
+      (k) => k !== key && statuses[k] && !statuses[k].is_finished,
     );
     setActiveSection(next ?? null);
   };
@@ -67,10 +51,7 @@ export default function DailySurvey({ clientId, onCompleted }) {
     return <p className="text-sm text-gray-400">Loading today's check-in...</p>;
   }
 
-  const allUnavailable =
-    statuses.mood === null &&
-    statuses.body_metrics === null &&
-    statuses.workout === null;
+  const allUnavailable = statuses.mood === null && statuses.body_metrics === null;
 
   return (
     <div className="space-y-4">
@@ -111,19 +92,6 @@ export default function DailySurvey({ clientId, onCompleted }) {
             <BodyMetricsForm
               status={statuses.body_metrics}
               onSubmitted={(response) => handleSubmitted("body_metrics", response)}
-            />
-          </SurveySection>
-
-          <SurveySection
-            title="Workout Completion"
-            status={statuses.workout}
-            expanded={activeSection === "workout"}
-            onToggle={() => setActiveSection(activeSection === "workout" ? null : "workout")}
-          >
-            <WorkoutForm
-              status={statuses.workout}
-              activities={workoutActivities}
-              onSubmitted={(response) => handleSubmitted("workout", response)}
             />
           </SurveySection>
         </>
@@ -226,92 +194,6 @@ function MeterRow({ label, value, onChange }) {
 function ErrorMessage({ message }) {
   if (!message) return null;
   return <p className="text-xs text-red-400 mt-2">{message}</p>;
-}
-
-function WorkoutForm({ status, activities = [], onSubmitted }) {
-  const [selectedIds, setSelectedIds] = useState([]);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState("");
-
-  const toggleActivity = (id) => {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
-    );
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (activities.length === 0) {
-      setError("No workout activities are assigned for today.");
-      return;
-    }
-    if (selectedIds.length === 0) {
-      setError("Select at least one completed activity.");
-      return;
-    }
-    setSubmitting(true);
-    setError("");
-    try {
-      if (!status?.is_started) {
-        await startDailyWorkoutSurvey();
-      }
-      const response = await submitDailyWorkoutSurveyFlexible(selectedIds);
-      onSubmitted(response);
-    } catch (err) {
-      setError(err?.message || "Failed to submit. Please try again.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-3">
-      {activities.length === 0 ? (
-        <p className="text-xs text-gray-400">
-          No workout is assigned for today, so the workout survey cannot be submitted yet.
-        </p>
-      ) : (
-        <div className="space-y-2">
-          <p className="text-xs text-gray-300 font-medium">Select the activities you completed today</p>
-          {activities.map((activity) => (
-            <label
-              key={activity.id}
-              className="flex items-start gap-3 rounded-lg border border-white/10 bg-[#080D19] px-3 py-2 text-sm text-white"
-            >
-              <input
-                type="checkbox"
-                checked={selectedIds.includes(activity.id)}
-                onChange={() => toggleActivity(activity.id)}
-                className="mt-1 accent-blue-500"
-              />
-              <span>
-                <span className="block font-medium">{activity.name}</span>
-                <span className="block text-xs text-gray-500">
-                  {activity.suggested_sets} sets · {activity.suggested_reps} reps · {activity.intensity_value} {activity.intensity_measure}
-                </span>
-              </span>
-            </label>
-          ))}
-        </div>
-      )}
-
-      <ErrorMessage message={error} />
-
-      <button
-        type="submit"
-        disabled={submitting || activities.length === 0}
-        className="w-full py-2.5 rounded-lg text-sm font-bold text-white transition-colors disabled:opacity-40"
-        style={{ backgroundColor: ACCENT }}
-      >
-        {submitting ? "Saving..." : "Submit Workout Check-in"}
-      </button>
-    </form>
-  );
-}
-
-function getTodayIndex() {
-  const day = new Date().getDay();
-  return day === 0 ? 6 : day - 1;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -456,3 +338,4 @@ function BodyMetricsForm({ status, onSubmitted }) {
     </form>
   );
 }
+

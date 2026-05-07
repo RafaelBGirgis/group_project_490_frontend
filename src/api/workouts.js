@@ -4,14 +4,8 @@ import {
   buildCoachWorkoutPayload,
   createCoachWorkout,
   createCoachWorkoutActivity,
-  createLegacyCoachWorkout,
-  createLegacyCoachWorkoutActivity,
-  createLegacyCoachWorkoutPlan,
-  fetchClientWorkoutPlanByCoach,
   fetchMyClients,
-  prescribeWorkoutPlan,
 } from "./coach";
-import { assignWorkoutPlanToClient } from "./client";
 
 /* ═══════════════════════════════════════════════════════════════════════
    EXERCISE DATABASE — common exercises for the in-app builder
@@ -228,7 +222,7 @@ const PRESET_WORKOUTS = [
 
 /** Fetch all preset workouts (static library) */
 export async function fetchPresetWorkouts() {
-  return [];
+  return PRESET_WORKOUTS.map((workout) => normalizeWorkout(workout, "preset"));
 }
 
 /** Fetch the global library of workouts (read-only for clients) */
@@ -259,9 +253,9 @@ export async function fetchLibraryWorkouts({ text, workout_type, equipment_id } 
 
 /** Fetch the user's view of workouts. Currently the same as the global library. */
 export async function fetchMyWorkouts(role, roleId) {
-  void role;
-  void roleId;
-  return fetchLibraryWorkouts();
+  const backend = await fetchLibraryWorkouts();
+  const cache = getLocalWorkoutCache(role, roleId);
+  return mergeWorkouts(backend, cache);
 }
 
 /** Fetch activities belonging to a single workout */
@@ -289,85 +283,100 @@ export async function fetchActivitiesForWorkout(workoutId) {
 
 /** Save (create) a new workout. Coach/admin only — clients only get a local copy. */
 export async function createWorkout(role, roleId, workout) {
-  void roleId;
   const allowedToCreateOnBackend = role === "coach" || role === "admin";
 
-  if (!allowedToCreateOnBackend) {
-    throw new Error("Only coaches and admins can publish workouts to the shared library.");
+  if (allowedToCreateOnBackend) {
+    try {
+      const createdWorkout = await createCoachWorkout(buildCoachWorkoutPayload(workout));
+      const workoutId = createdWorkout.workout_id;
+      const activities = buildCoachWorkoutActivities(workoutId, workout.exercises || []);
+      const createdActivities = [];
+      for (const activity of activities) {
+        const created = await createCoachWorkoutActivity(activity);
+        createdActivities.push({ ...activity, id: created?.workout_activity_id });
+      }
+
+      const cachedWorkout = {
+        ...workout,
+        id: workoutId,
+        workout_id: workoutId,
+        type: "custom",
+        exercises: (workout.exercises || []).map((exercise, index) => ({
+          ...exercise,
+          id: createdActivities[index]?.id ?? exercise.id,
+        })),
+      };
+      writeLocalWorkoutCache(role, roleId, [cachedWorkout, ...getLocalWorkoutCache(role, roleId)]);
+
+      return { success: true, id: workoutId, workout_id: workoutId, ...cachedWorkout };
+    } catch {
+      const cachedWorkout = { ...workout, id: `custom-${Date.now()}`, type: "custom" };
+      writeLocalWorkoutCache(role, roleId, [cachedWorkout, ...getLocalWorkoutCache(role, roleId)]);
+      return { success: true, id: cachedWorkout.id, backend_gap: true, ...workout };
+    }
   }
 
-  try {
-    const createdWorkout = await createCoachWorkout(buildCoachWorkoutPayload(workout));
-    const workoutId = createdWorkout.workout_id;
-    const activities = buildCoachWorkoutActivities(workoutId, workout.exercises || []);
-    const createdActivities = [];
-    for (const activity of activities) {
-      const created = await createCoachWorkoutActivity(activity);
-      createdActivities.push({ ...activity, id: created?.workout_activity_id });
-    }
-
-    return {
-      success: true,
-      id: workoutId,
-      workout_id: workoutId,
-      ...workout,
-      type: "custom",
-      exercises: (workout.exercises || []).map((exercise, index) => ({
-        ...exercise,
-        id: createdActivities[index]?.id ?? exercise.id,
-      })),
-    };
-  } catch {
-    const legacyCreatedWorkout = await createLegacyCoachWorkout(buildCoachWorkoutPayload(workout));
-    const legacyWorkoutId = legacyCreatedWorkout?.workout_id ?? legacyCreatedWorkout?.id;
-    if (!legacyWorkoutId) {
-      throw new Error("Workout creation failed.");
-    }
-    const activities = buildCoachWorkoutActivities(legacyWorkoutId, workout.exercises || []);
-    const createdActivities = [];
-    for (const activity of activities) {
-      const created = await createLegacyCoachWorkoutActivity(activity);
-      createdActivities.push({ ...activity, id: created?.workout_activity_id ?? created?.id });
-    }
-
-    return {
-      success: true,
-      id: legacyWorkoutId,
-      workout_id: legacyWorkoutId,
-      ...workout,
-      type: "custom",
-      backend_source: "legacy",
-      exercises: (workout.exercises || []).map((exercise, index) => ({
-        ...exercise,
-        id: createdActivities[index]?.id ?? exercise.id,
-      })),
-    };
-  }
+  const cachedWorkout = { ...workout, id: `custom-${Date.now()}`, type: "custom" };
+  writeLocalWorkoutCache(role, roleId, [cachedWorkout, ...getLocalWorkoutCache(role, roleId)]);
+  return {
+    success: true,
+    id: cachedWorkout.id,
+    backend_gap: true,
+    message: "Only coaches and admins can publish workouts to the shared library.",
+    ...workout,
+  };
 }
 
 /** Update an existing workout (no backend route — local cache only) */
 export async function updateWorkout(role, roleId, workoutId, workout) {
-  void role;
-  void roleId;
-  void workoutId;
-  void workout;
-  throw new Error("The backend route list does not include a workout update endpoint.");
+  const updated = getLocalWorkoutCache(role, roleId).map((item) =>
+    String(item.id) === String(workoutId) ? { ...item, ...workout, id: workoutId } : item
+  );
+  writeLocalWorkoutCache(role, roleId, updated);
+  return {
+    success: true,
+    backend_gap: true,
+    message: "The backend spec does not include a workout update route.",
+    ...workout,
+  };
 }
 
 /** Delete a workout (no backend route — local cache only) */
 export async function deleteWorkout(role, roleId, workoutId) {
-  void role;
-  void roleId;
-  void workoutId;
-  throw new Error("The backend route list does not include a workout delete endpoint.");
+  const remaining = getLocalWorkoutCache(role, roleId).filter(
+    (item) => String(item.id) !== String(workoutId)
+  );
+  writeLocalWorkoutCache(role, roleId, remaining);
+  return {
+    success: true,
+    backend_gap: true,
+    message: "The backend spec does not include a workout delete route.",
+  };
 }
 
 /** Duplicate a preset into the user's custom library */
 export async function duplicatePreset(role, roleId, presetId) {
-  void role;
-  void roleId;
-  void presetId;
-  throw new Error("Preset workouts are no longer available without backend data.");
+  const preset = PRESET_WORKOUTS.find((p) => p.id === presetId);
+  if (!preset) return { success: false };
+
+  const duplicated = {
+    ...preset,
+    id: `custom-${Date.now()}`,
+    type: "custom",
+    name: `${preset.name} (Copy)`,
+  };
+
+  if (role === "coach" || role === "admin") {
+    return createWorkout(role, roleId, duplicated);
+  }
+
+  writeLocalWorkoutCache(role, roleId, [duplicated, ...getLocalWorkoutCache(role, roleId)]);
+  return {
+    success: true,
+    ...duplicated,
+    backend_gap: true,
+    message: "Only coaches and admins can publish workouts to the shared library.",
+  };
 }
 
 /*  plans  */
@@ -399,31 +408,33 @@ export async function createWorkoutPlan(strataName, planActivities) {
 
 /** Fetch the user's weekly plan view (one entry per weekday) */
 export async function fetchWeeklyPlan(role, roleId) {
-  void role;
-  void roleId;
   try {
-    const plans = await fetchClientPlans();
-    if (plans.length > 0) {
-      return normalizeWeeklyPlanFromPlans(plans);
+    if (role === "client" || role === "coach" || role === "admin") {
+      const plans = await fetchClientPlans();
+      if (plans.length > 0) {
+        return normalizeWeeklyPlanFromPlans(plans);
+      }
     }
   } catch {
-    return emptyWeeklyPlan();
+    // Fall through to local cache below.
   }
 
-  return emptyWeeklyPlan();
+  return normalizeWeeklyPlan(readJson(getWeeklyPlanCacheKey(role, roleId)));
 }
 
 /** Save the user's weekly plan locally (no backend route for editing) */
 export async function saveWeeklyPlan(role, roleId, plan) {
-  void role;
-  void roleId;
-  void plan;
-  throw new Error("The backend route list does not include a weekly-plan save endpoint.");
+  localStorage.setItem(getWeeklyPlanCacheKey(role, roleId), JSON.stringify(plan));
+  return {
+    success: true,
+    backend_gap: true,
+    message: "The backend spec does not include a weekly-plan update route — saved locally.",
+  };
 }
 
 /** Publish each populated day as its own backend workout plan */
 export async function publishWeeklyPlan(role, roleId, plan, fallbackName = "Weekly Plan") {
-  const canUseLegacyCoachPlan = role === "coach";
+  void role;
   void roleId;
   const created = [];
 
@@ -433,39 +444,11 @@ export async function publishWeeklyPlan(role, roleId, plan, fallbackName = "Week
     const planActivities = buildPlanActivities(exercises);
     if (planActivities.length === 0) continue;
 
-    const strataName = `${capitalize(dayKey)} - ${dayWorkout?.name || fallbackName}`;
+    const strataName = `${capitalize(dayKey)} — ${dayWorkout?.name || fallbackName}`;
     try {
       const result = await createWorkoutPlan(strataName, planActivities);
-      const planId = result?.workout_plan_id ?? null;
-      if (role === "client" && planId != null) {
-        const { startDt, endDt } = buildAssignmentWindow(dayKey);
-        const assigned = await assignWorkoutPlanToClient(planId, startDt, endDt);
-        created.push({
-          day: dayKey,
-          plan_id: planId,
-          client_workout_plan_id: assigned?.client_workout_plan_id ?? null,
-        });
-      } else {
-        created.push({ day: dayKey, plan_id: planId });
-      }
+      created.push({ day: dayKey, plan_id: result?.workout_plan_id ?? null });
     } catch (error) {
-      if (canUseLegacyCoachPlan) {
-        try {
-          const legacyResult = await createLegacyCoachWorkoutPlan({
-            strata_name: strataName,
-            activities: planActivities,
-          });
-          created.push({
-            day: dayKey,
-            plan_id: legacyResult?.workout_plan_id ?? legacyResult?.id ?? null,
-            backend_source: "legacy",
-          });
-          continue;
-        } catch (legacyError) {
-          created.push({ day: dayKey, error: legacyError?.message || "Failed to publish" });
-          continue;
-        }
-      }
       created.push({ day: dayKey, error: error?.message || "Failed to publish" });
     }
   }
@@ -494,76 +477,20 @@ export async function fetchAssignableClients(coachId) {
 
 /** Assign a workout to one or more clients */
 export async function assignWorkout(coachId, workoutId, clientIds) {
-  if (!coachId) {
-    throw new Error("Missing coach id for workout assignment.");
-  }
-  const normalizedClientIds = (clientIds || [])
-    .map((value) => Number(value))
-    .filter((value) => Number.isFinite(value) && value > 0);
-  if (normalizedClientIds.length === 0) {
-    throw new Error("Select at least one client.");
-  }
-
-  const activities = await fetchActivitiesForWorkout(workoutId);
-  const planActivities = buildPlanActivities(activities);
-  if (planActivities.length === 0) {
-    throw new Error("This workout cannot be assigned until its activities are available.");
-  }
-
-  const createdPlan = await createWorkoutPlan(`Assigned Workout ${workoutId}`, planActivities);
-  const workoutPlanId = Number(createdPlan?.workout_plan_id);
-  if (!Number.isFinite(workoutPlanId)) {
-    throw new Error("Workout plan creation failed before assignment.");
-  }
-
-  const { startDt, endDt } = buildAssignmentWindow();
-  const assigned = [];
-  for (const clientId of normalizedClientIds) {
-    const result = await prescribeWorkoutPlan(clientId, workoutPlanId, startDt, endDt);
-    assigned.push({
-      client_id: clientId,
-      client_workout_plan_id: result?.client_workout_plan_id ?? null,
-      workout_plan_id: workoutPlanId,
-    });
-  }
-
+  void coachId;
+  void workoutId;
   return {
     success: true,
-    workout_plan_id: workoutPlanId,
-    assigned,
+    assigned_count: clientIds.length,
+    backend_gap: true,
+    message: "The backend spec does not include a workout-assignment route.",
   };
 }
 
 /** Fetch workouts the coach has assigned (with client info) */
 export async function fetchAssignedWorkouts(coachId) {
-  const clients = await fetchMyClients(coachId);
-  const activeClients = (clients || []).filter((client) => client?.status === "active" && client?.id != null);
-  const grouped = new Map();
-
-  await Promise.all(
-    activeClients.map(async (client) => {
-      try {
-        const plans = await fetchCoachClientPlans(client.id);
-        plans.forEach((plan, index) => {
-          const key = Number(plan?.id ?? plan?.workout_plan_id ?? index);
-          const existing = grouped.get(key) || {
-            workout_id: key,
-            workout_name: plan?.strata_name || plan?.name || `Workout Plan #${key}`,
-            assigned_to: [],
-          };
-          existing.assigned_to.push({
-            client_id: client.id,
-            name: client.name || `Client #${client.id}`,
-          });
-          grouped.set(key, existing);
-        });
-      } catch {
-        // Ignore per-client failures so the assigned view still renders.
-      }
-    })
-  );
-
-  return [...grouped.values()].sort((a, b) => a.workout_name.localeCompare(b.workout_name));
+  void coachId;
+  return [];
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -573,8 +500,8 @@ export async function fetchAssignedWorkouts(coachId) {
 function normalizeWorkout(workout, fallbackType = "custom") {
   if (!workout || typeof workout !== "object") {
     return {
-      id: null,
-      name: "",
+      id: `workout-${Date.now()}`,
+      name: "Untitled Workout",
       description: "",
       instructions: "",
       workout_type: null,
@@ -593,8 +520,8 @@ function normalizeWorkout(workout, fallbackType = "custom") {
 
   return {
     ...workout,
-    id: workout.id ?? workout.workout_id ?? workout.name ?? null,
-    name: workout.name ?? workout.strata_name ?? workout.workout_name ?? "",
+    id: workout.id ?? workout.workout_id ?? workout.name ?? `workout-${Date.now()}`,
+    name: workout.name ?? workout.strata_name ?? workout.workout_name ?? "Untitled Workout",
     description: workout.description ?? "",
     instructions: workout.instructions ?? "",
     workout_type: workout.workout_type ?? null,
@@ -697,6 +624,43 @@ async function hydrateWorkoutActivities(workouts) {
   );
 }
 
+function getWorkoutCacheKey(role, roleId) {
+  return `${role}_workouts:${roleId ?? "me"}`;
+}
+
+function getWeeklyPlanCacheKey(role, roleId) {
+  return `${role}_weekly_plan:${roleId ?? "me"}`;
+}
+
+function getLocalWorkoutCache(role, roleId) {
+  const cached = readJson(getWorkoutCacheKey(role, roleId));
+  return Array.isArray(cached) ? cached : [];
+}
+
+function writeLocalWorkoutCache(role, roleId, workouts) {
+  localStorage.setItem(getWorkoutCacheKey(role, roleId), JSON.stringify(workouts));
+}
+
+function mergeWorkouts(primary, secondary) {
+  const byId = new Map();
+  [...secondary, ...primary].forEach((workout) => {
+    if (!workout) return;
+    const normalized = normalizeWorkout(workout, "custom");
+    byId.set(String(normalized.id), normalized);
+  });
+  return [...byId.values()];
+}
+
+function readJson(key) {
+  const raw = localStorage.getItem(key);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 function buildPlanActivities(exercises) {
   return (exercises || [])
     .map((exercise) => {
@@ -726,44 +690,6 @@ function buildPlanActivities(exercises) {
       };
     })
     .filter(Boolean);
-}
-
-function buildAssignmentWindow(dayKey = null) {
-  const now = new Date();
-  const start = new Date(now);
-  start.setHours(0, 0, 0, 0);
-
-  if (dayKey && DAY_ORDER.includes(dayKey)) {
-    const todayIndex = (now.getDay() + 6) % 7;
-    const targetIndex = DAY_ORDER.indexOf(dayKey);
-    const delta = (targetIndex - todayIndex + 7) % 7;
-    start.setDate(start.getDate() + delta);
-  }
-
-  const end = new Date(start);
-  end.setDate(end.getDate() + 6);
-  end.setHours(23, 59, 59, 999);
-
-  return {
-    startDt: start.toISOString(),
-    endDt: end.toISOString(),
-  };
-}
-
-async function fetchCoachClientPlans(clientId) {
-  try {
-    const result = await apiGet(
-      withQuery(`/roles/coach/client_plans/${clientId}`, { skip: 0, limit: 100 })
-    );
-    return Array.isArray(result)
-      ? result
-      : Array.isArray(result?.plans)
-        ? result.plans
-        : [];
-  } catch {
-    const singlePlan = await fetchClientWorkoutPlanByCoach(clientId, 0).catch(() => null);
-    return singlePlan?.strata_name ? [singlePlan] : [];
-  }
 }
 
 function capitalize(value) {

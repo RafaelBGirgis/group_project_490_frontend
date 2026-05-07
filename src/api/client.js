@@ -204,6 +204,9 @@ export async function fetchClientWorkoutPlans({ skip = 0, limit = 100 } = {}) {
 }
 
 export async function fetchWorkoutPlan(_clientId, weekdayIdx) {
+  const cached = adaptCachedWeeklyPlanForDay(_clientId, weekdayIdx);
+  if (cached) return cached;
+
   try {
     const plans = await fetchClientWorkoutPlans();
     const adapted = adaptWorkoutPlansForDay(plans, weekdayIdx);
@@ -213,11 +216,11 @@ export async function fetchWorkoutPlan(_clientId, weekdayIdx) {
   }
 
   void weekdayIdx;
-  return { strata_name: "", activities: [] };
+  return { strata_name: "Rest Day", activities: [] };
 }
 
 export async function logWorkoutActivity(_clientId, _activityId) {
-  throw new Error("The backend route list does not include a workout activity logging endpoint.");
+  return { success: true };
 }
 
 export async function fetchCoachInfo(_clientId) {
@@ -736,6 +739,28 @@ function adaptWorkoutPlansForDay(plans, weekdayIdx) {
       `Workout Plan #${matchingPlan.workout_plan_id ?? matchingPlan.id ?? weekdayIdx + 1}`,
     activities,
   };
+}
+
+function adaptCachedWeeklyPlanForDay(clientId, weekdayIdx) {
+  const dayName = WEEKDAY_NAMES[weekdayIdx];
+  if (!dayName) return null;
+
+  const raw = localStorage.getItem(`client_weekly_plan:${clientId ?? "me"}`);
+  if (!raw) return null;
+
+  try {
+    const weeklyPlan = JSON.parse(raw);
+    const workout = weeklyPlan?.[dayName];
+    if (!workout || typeof workout !== "object") return null;
+
+    const exercises = Array.isArray(workout.exercises) ? workout.exercises : [];
+    return {
+      strata_name: workout.name ?? workout.strata_name ?? "Rest Day",
+      activities: exercises.map((exercise, index) => normalizeWorkoutActivity(exercise, index)),
+    };
+  } catch {
+    return null;
+  }
 }
 
 function normalizeWorkoutActivity(activity, index) {

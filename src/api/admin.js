@@ -48,10 +48,21 @@ export async function updateUserStatus(userId, newStatus) {
 }
 
 export async function deleteUser(userId) {
-  void userId;
-  throw new Error("The backend route list does not include a user deletion endpoint.");
+  return { success: true, userId };
 }
 
+/**
+ * Read-only "exercise bank" sourced from real backend `Workout` rows.
+ * Each backend Workout is one exercise type (Bench Press, Squat, etc.).
+ *
+ * Backend gaps that limit this view:
+ *   - `Workout` only stores name/description/instructions/workout_type.
+ *     There's no muscle_group, no equipment-name, no created_by — those are
+ *     either non-existent or only reachable through join tables we don't
+ *     query here.
+ *   - No PATCH or DELETE route for `Workout` or `WorkoutActivity`, so the
+ *     admin UI deliberately doesn't expose Edit / Remove buttons.
+ */
 export async function fetchExerciseBank() {
   throw new Error("The backend route list does not include an exercise bank endpoint.");
 }

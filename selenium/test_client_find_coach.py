@@ -16,6 +16,8 @@ from helpers import scroll
 
 
 FRONTEND_URL = "http://localhost:5173"
+WII_FIT_TRAINER_EMAIL = "wiifittrainer@gmail.com"
+WII_FIT_TRAINER_PASSWORD = "password"
 
 
 def wait_for_coaches_to_load(driver, wait):
@@ -58,37 +60,84 @@ def click_button_inside_card(card, button_text):
     return button
 
 
+def login_as_coach(coach_driver, email, password):
+    """Log into an existing coach account and wait for the coach dashboard."""
+
+    coach_wait = WebDriverWait(coach_driver, 10)
+
+    print("Opening coach login page...")
+    coach_driver.get(FRONTEND_URL)
+
+    login_link = coach_wait.until(
+        EC.element_to_be_clickable((By.LINK_TEXT, "Log in"))
+    )
+    login_link.click()
+
+    coach_wait.until(EC.url_contains("/login"))
+    wait_for_page_to_fully_load(coach_driver)
+
+    email_input = coach_wait.until(
+        EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='email']"))
+    )
+    password_input = coach_wait.until(
+        EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='password']"))
+    )
+
+    email_input.clear()
+    email_input.send_keys(email)
+
+    password_input.clear()
+    password_input.send_keys(password)
+
+    submit_button = coach_wait.until(
+        EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit']"))
+    )
+    submit_button.click()
+
+    coach_wait.until(EC.url_contains("/coach"))
+    wait_for_page_to_fully_load(coach_driver)
+
+    coach_wait.until(
+        EC.presence_of_element_located(
+            (By.XPATH, "//h3[contains(normalize-space(), 'Client Requests')]")
+        )
+    )
+
+    print(f"Coach logged in successfully: {coach_driver.current_url}")
+
+
 def test_client_find_coach():
-    driver = createDriver()
+    client_driver = createDriver()
+    coach_driver = None
 
     try:
-        wait = WebDriverWait(driver, 10)
+        client_wait = WebDriverWait(client_driver, 10)
 
         # Create brand new user
-        signup(driver)
+        signup(client_driver)
 
         # Navigate to /find-coach
         print("Navigating to Find Coach page...")
-        driver.get(f"{FRONTEND_URL}/find-coach")
+        client_driver.get(f"{FRONTEND_URL}/find-coach")
 
-        wait.until(EC.url_contains("/find-coach"))
-        wait_for_page_to_fully_load(driver)
+        client_wait.until(EC.url_contains("/find-coach"))
+        wait_for_page_to_fully_load(client_driver)
 
-        wait.until(
+        client_wait.until(
             EC.presence_of_element_located(
                 (By.XPATH, "//h1[normalize-space()='Find a Coach']")
             )
         )
 
-        wait_for_coaches_to_load(driver, wait)
+        wait_for_coaches_to_load(client_driver, client_wait)
 
-        print(f"Successfully navigated to: {driver.current_url}")
+        print(f"Successfully navigated to: {client_driver.current_url}")
 
         # Test filter by gender
         print("Testing gender filter...")
 
         gender_select = Select(
-            wait.until(
+            client_wait.until(
                 EC.presence_of_element_located(
                     (
                         By.XPATH,
@@ -99,14 +148,14 @@ def test_client_find_coach():
         )
 
         gender_select.select_by_value("female")
-        wait_for_coaches_to_load(driver, wait)
+        wait_for_coaches_to_load(client_driver, client_wait)
         print("Filtered coaches by gender: female")
 
         # Test filter by highest rating, then most reviewed
         print("Testing sort dropdown...")
 
         sort_select = Select(
-            wait.until(
+            client_wait.until(
                 EC.presence_of_element_located(
                     (
                         By.XPATH,
@@ -117,29 +166,29 @@ def test_client_find_coach():
         )
 
         sort_select.select_by_value("rating_count")
-        wait_for_coaches_to_load(driver, wait)
+        wait_for_coaches_to_load(client_driver, client_wait)
         print("Sorted coaches by most reviewed")
 
         # Test Quick Details
         print("Testing Quick Details and Hide Details...")
         time.sleep(1)
 
-        quick_details_button = wait.until(
+        quick_details_button = client_wait.until(
             EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='Quick Details']"))
         )
-        ActionChains(driver).move_to_element(quick_details_button).perform()
+        ActionChains(client_driver).move_to_element(quick_details_button).perform()
         time.sleep(1)
         quick_details_button.click()
         print("Quick Details opened successfully")
         
         time.sleep(1)
         
-        hide_details_button = wait.until(
+        hide_details_button = client_wait.until(
             EC.element_to_be_clickable(
                 (By.XPATH, "//button[normalize-space()='Hide Details']")
             )
         )
-        ActionChains(driver).move_to_element(hide_details_button).perform()
+        ActionChains(client_driver).move_to_element(hide_details_button).perform()
         time.sleep(1)
         hide_details_button.click()
         print("Hide Details closed successfully")
@@ -147,37 +196,37 @@ def test_client_find_coach():
 
         # Test View Profile
         print("Testing View Profile...")
-        view_profile_button = wait.until(
+        view_profile_button = client_wait.until(
             EC.element_to_be_clickable(
                 (By.XPATH, "//button[normalize-space()='View Profile']")
             )
         )
-        ActionChains(driver).move_to_element(view_profile_button).perform()
+        ActionChains(client_driver).move_to_element(view_profile_button).perform()
         time.sleep(1)
         view_profile_button.click()
         
-        wait.until(EC.url_contains("/coaches"))
-        wait_for_page_to_fully_load(driver)
-        wait.until(
+        client_wait.until(EC.url_contains("/coaches"))
+        wait_for_page_to_fully_load(client_driver)
+        client_wait.until(
             EC.presence_of_element_located(
                 (By.XPATH, "//h1[normalize-space()='Coach Profile']")
             )
         )
         time.sleep(1)
-        print(f"Successfully opened coach profile: {driver.current_url}")
+        print(f"Successfully opened coach profile: {client_driver.current_url}")
 
         # Scroll through profile, then exit
         print("Scrolling through coach profile...")
-        scroll(driver, "down", 0.01, 20)
-        scroll(driver, "up", 0.01, 20)
+        scroll(client_driver, "down", 0.01, 20)
+        scroll(client_driver, "up", 0.01, 20)
         time.sleep(1)
 
         print("Going back to Find Coach page...")
-        driver.back()
+        client_driver.back()
 
-        wait.until(EC.url_contains("/find-coach"))
-        wait_for_page_to_fully_load(driver)
-        wait_for_coaches_to_load(driver, wait)
+        client_wait.until(EC.url_contains("/find-coach"))
+        wait_for_page_to_fully_load(client_driver)
+        wait_for_coaches_to_load(client_driver, client_wait)
 
         print("Returned to Find Coach page successfully")
         time.sleep(1)
@@ -185,7 +234,7 @@ def test_client_find_coach():
         # Test Request 'Wii Fit Trainer' Coach
         print("Testing Request Coach for Wii Fit Trainer...")
 
-        search_input = wait.until(
+        search_input = client_wait.until(
             EC.presence_of_element_located(
                 (By.CSS_SELECTOR, "input[placeholder='Search by coach name']")
             )
@@ -195,9 +244,9 @@ def test_client_find_coach():
         search_input.send_keys("Wii Fit Trainer")
 
         time.sleep(1)
-        wait_for_coaches_to_load(driver, wait)
+        wait_for_coaches_to_load(client_driver, client_wait)
 
-        wii_fit_card = find_coach_card_by_name(driver, wait, "Wii Fit Trainer")
+        wii_fit_card = find_coach_card_by_name(client_driver, client_wait, "Wii Fit Trainer")
 
         request_button = wii_fit_card.find_element(
             By.XPATH,
@@ -206,10 +255,11 @@ def test_client_find_coach():
 
         request_button_text = request_button.text.strip()
 
+        # Click 'Request Coach' button
         if "Request Coach" in request_button_text:
             request_button.click()
 
-            wait.until(
+            client_wait.until(
                 lambda d: "Cancel Request" in wii_fit_card.text
                 or "Sending..." not in wii_fit_card.text
             )
@@ -219,39 +269,153 @@ def test_client_find_coach():
             )
 
             print("Successfully requested Wii Fit Trainer as coach")
-
         else:
             print("Wii Fit Trainer was already requested")
+        print("Requested coach.")
+        time.sleep(1)
 
-        # -------------------------------------Accepting Request-------------------------------------
-        #
-        # This cannot be completed from the client Find Coach page alone.
-        # To test acceptance, we need either:
-        # 1. a coach login helper that logs in as Wii Fit Trainer and accepts the request, or
-        # 2. a backend/API helper that approves the request directly.
-        
-        print("Skipping coach acceptance step: requires coach-side login or backend helper.")
+        # Return to dashboard to see 'Coach Request Status'
+        print("Returning to client dashboard...")
+        client_driver.get(f"{FRONTEND_URL}/client")
 
-        # Reload page
-        print("Reloading Find Coach page...")
-        driver.refresh()
+        client_wait.until(EC.url_contains("/client"))
+        wait_for_page_to_fully_load(client_driver)
 
-        wait_for_page_to_fully_load(driver)
-        wait_for_coaches_to_load(driver, wait)
-
-        assert "/find-coach" in driver.current_url, (
-            f"Expected to still be on '/find-coach', got: {driver.current_url}"
+        coach_request_status_card = client_wait.until(
+            EC.presence_of_element_located(
+                (
+                    By.XPATH,
+                    "//h3[normalize-space()='Coach Request Status']/ancestor::div[contains(@class, 'rounded-2xl')][1]",
+                )
+            )
         )
 
-        printSuccess(f"No errors: {driver.current_url}")
+        # Hover over 'Coach Request Status' with ActionChains
+        ActionChains(client_driver).move_to_element(coach_request_status_card).perform()
+        time.sleep(2)
+
+        print("Coach Request Status is pending, waiting for response...")
+
+        # -------------------------------------Accepting Request-------------------------------------
+        print("Opening coach browser to accept the request...")
+        coach_driver = createDriver()
+        coach_wait = WebDriverWait(coach_driver, 10)
+
+        login_as_coach(
+            coach_driver,
+            WII_FIT_TRAINER_EMAIL,
+            WII_FIT_TRAINER_PASSWORD,
+        )
+
+        manage_requests_button = coach_wait.until(
+            EC.element_to_be_clickable(
+                (By.XPATH, "//h3[contains(normalize-space(), 'Client Requests')]/following::button[contains(normalize-space(), 'Manage')][1]")
+            )
+        )
+        ActionChains(coach_driver).move_to_element(manage_requests_button).perform()
+        time.sleep(1)
+        manage_requests_button.click()
+
+        client_request_card = coach_wait.until(
+            EC.presence_of_element_located(
+                (
+                    By.XPATH,
+                    "//div[contains(@class, 'rounded-2xl')][.//p[normalize-space()='John Doe'] and .//button[normalize-space()='Accept']]",
+                )
+            )
+        )
+        ActionChains(coach_driver).move_to_element(client_request_card).perform()
+        time.sleep(1)
+
+        accept_button = coach_wait.until(
+            EC.element_to_be_clickable(
+                (
+                    By.XPATH,
+                    "//div[contains(@class, 'rounded-2xl')][.//p[normalize-space()='John Doe'] and .//button[normalize-space()='Accept']]"
+                    "//button[normalize-space()='Accept']",
+                )
+            )
+        )
+        accept_button.click()
+
+        print("Coach accepted the client request successfully")
+
+        close_requests_button = coach_wait.until(
+            EC.element_to_be_clickable(
+                (
+                    By.XPATH,
+                    "//h2[normalize-space()='Client Requests']/following-sibling::button[1]",
+                )
+            )
+        )
+        close_requests_button.click()
+
+        coach_wait.until(
+            EC.invisibility_of_element_located(
+                (By.XPATH, "//h2[normalize-space()='Client Requests']")
+            )
+        )
+
+        my_clients_card = coach_wait.until(
+            EC.presence_of_element_located(
+                (
+                    By.XPATH,
+                    "//h3[contains(normalize-space(), 'My Clients')]/ancestor::div[contains(@class, 'rounded-2xl')][1]",
+                )
+            )
+        )
+        ActionChains(coach_driver).move_to_element(my_clients_card).perform()
+        time.sleep(2)
+
+        coach_driver.quit()
+        coach_driver = None
+        print("Coach browser closed")
+
+        # Reload page to check Request Status
+        print("Checking if request was accepted...")
+        client_driver.refresh()
+
+        wait_for_page_to_fully_load(client_driver)
+
+        my_coach_card = client_wait.until(
+            EC.presence_of_element_located(
+                (By.XPATH, "//h3[normalize-space()='My Coach']")
+            )
+        )
+        client_wait.until(
+            EC.presence_of_element_located(
+                (By.XPATH, "//p[normalize-space()='Wii Fit Trainer']")
+            )
+        )
+        time.sleep(2)
+
+        assert "/client" in client_driver.current_url, (
+            f"Expected to still be on '/client', got: {client_driver.current_url}"
+        )
+
+        fire_coach_button = client_wait.until(
+            EC.element_to_be_clickable(
+                (By.XPATH, "//button[normalize-space()='Fire Coach']")
+            )
+        )
+        fire_coach_button.click()        
+        relationship_alert = client_wait.until(EC.alert_is_present())
+        time.sleep(1)
+        relationship_alert.accept()
+        time.sleep(2)
+
+        printSuccess(f"No errors: {client_driver.current_url}")
 
     except Exception as e:
         printFailure(f"Test failed: {e}")
         raise
 
     finally:
-        driver.quit()
-        print("Browser closed \n")
+        if coach_driver is not None:
+            coach_driver.quit()
+            print("Coach browser closed")
+        client_driver.quit()
+        print("Client browser closed \n")
 
 
 if __name__ == "__main__":

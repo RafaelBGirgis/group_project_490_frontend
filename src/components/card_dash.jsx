@@ -36,9 +36,9 @@ export function DashboardCard({ title, action, footer, role = "client", children
       />
 
       {/* Header + Body */}
-      <div className="relative z-10 p-5 flex flex-col gap-4 flex-1">
+      <div className={`relative z-10 p-5 flex flex-col gap-4 flex-1 ${className?.includes("items-center") ? "items-center" : ""}`}>
         {(title || action) && (
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between w-full">
             {title && (
               <h3 className="text-white font-semibold text-base group-hover:translate-x-1 transition-transform duration-300">
                 {title}

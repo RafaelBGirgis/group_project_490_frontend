@@ -13,7 +13,7 @@ import ChatPage from "./pages/chat";
 import CoachChatPage from "./pages/coach_chat";
 import ClientChatPage from "./pages/client_chat";
 import FindCoachPage from "./pages/find_coach";
-import WorkoutsPage from "./pages/workouts";
+import PlanPage from "./pages/plan";
 import CoachPublicProfilePage from "./pages/coach_public_profile";
 
 function App() {
@@ -39,7 +39,8 @@ function App() {
           <Route path="/coach-chat" element={<Navigate to="/coach/messages" replace />} />
           <Route path="/find-coach" element={<FindCoachPage />} />
           <Route path="/coaches/:coachId" element={<CoachPublicProfilePage />} />
-          <Route path="/workouts" element={<WorkoutsPage />} />
+          <Route path="/plan" element={<PlanPage />} />
+          <Route path="/workouts" element={<Navigate to="/plan" replace />} />
           {/* Catch-all: redirect unknown routes back to the landing page */}
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>

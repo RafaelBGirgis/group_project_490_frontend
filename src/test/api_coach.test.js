@@ -80,12 +80,56 @@ describe("coach request actions", () => {
 
 describe("saveCoachAvailability", () => {
   it("uses the coach information patch route", async () => {
-    mockFetchOk({ coach_id: 7 });
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: { get: () => "application/json" },
+        json: () => Promise.resolve({ coach_id: 7 }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: { get: () => "application/json" },
+        json: () => Promise.resolve([
+          { weekday: "monday", start_time: "09:00:00", end_time: "10:00:00" },
+          { weekday: "tuesday", start_time: "09:00:00", end_time: "10:00:00" },
+          { weekday: "wednesday", start_time: "09:00:00", end_time: "10:00:00" },
+          { weekday: "thursday", start_time: "09:00:00", end_time: "10:00:00" },
+          { weekday: "friday", start_time: "09:00:00", end_time: "10:00:00" },
+          { weekday: "saturday", start_time: "09:00:00", end_time: "10:00:00" },
+          { weekday: "sunday", start_time: "09:00:00", end_time: "10:00:00" },
+        ]),
+      });
     await saveCoachAvailability(7, [{ time: "9AM", slots: Array(7).fill("available") }]);
     const [url, opts] = global.fetch.mock.calls[0];
     expect(url).toContain("/roles/coach/information");
     expect(opts.method).toBe("PATCH");
     expect(JSON.parse(opts.body).availabilities.length).toBeGreaterThan(0);
+  });
+
+  it("uses nested singular availability data returned from the coach patch response", async () => {
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: { get: () => "application/json" },
+        json: () => Promise.resolve({
+          coach_account: {
+            availability: [
+              { weekday: "monday", start_time: "09:00:00", end_time: "10:00:00" },
+            ],
+          },
+        }),
+      });
+
+    const result = await saveCoachAvailability(7, [
+      { time: "9AM", slots: ["available", null, null, null, null, null, null] },
+    ]);
+
+    expect(result).toEqual([
+      { time: "9AM", slots: ["available", null, null, null, null, null, null] },
+    ]);
   });
 });
 
@@ -97,6 +141,39 @@ describe("fetchCoachAvailability", () => {
     localStorage.clear();
     const result = await fetchCoachAvailability(7);
     expect(result).toEqual([]);
+  });
+
+  it("prefers the shared full-profile route for coach availability hydration", async () => {
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: { get: () => "application/json" },
+        json: () => Promise.resolve({
+          account: { id: 1, coach_id: 7 },
+          roles: ["coach"],
+          coach_details: {
+            id: 7,
+            availabilities: [
+              { weekday: "monday", start_time: "09:00:00", end_time: "10:00:00" },
+            ],
+          },
+        }),
+        text: () => Promise.resolve(""),
+      });
+
+    const result = await fetchCoachAvailability(7);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/roles/shared/account/me"),
+      expect.objectContaining({
+        credentials: "include",
+        headers: expect.objectContaining({ "Content-Type": "application/json" }),
+      })
+    );
+    expect(result).toEqual([
+      { time: "9AM", slots: ["available", null, null, null, null, null, null] },
+    ]);
   });
 });
 
@@ -141,6 +218,9 @@ describe("coach payload builders", () => {
       { Mon: ["9AM"], Tue: [], Wed: [], Thu: [], Fri: [], Sat: [], Sun: [] }
     );
     expect(payload.availabilities[0].weekday).toBe("monday");
+    expect(payload.availabilities[0].start_time).toBe("09:00:00");
+    expect(payload.availabilities[0].end_time).toBe("10:00:00");
+    expect("max_time_commitment_seconds" in payload.availabilities[0]).toBe(false);
     expect(payload.certifications[0].certification_name).toBe("CSCS");
     expect(payload.experiences[0].experience_name).toBe("Iron Gym");
   });
@@ -155,6 +235,15 @@ describe("coach payload builders", () => {
     expect(payload.specialties).toEqual(["Weight Loss"]);
     expect(payload.certifications[0].certification_organization).toBe("NASM");
     expect(payload.experiences[0].experience_title).toBe("Trainer");
+  });
+
+  it("includes an empty availability array when the coach clears availability", () => {
+    const payload = buildCoachInformationPayload({
+      availability: { Mon: [], Tue: [], Wed: [], Thu: [], Fri: [], Sat: [], Sun: [] },
+    });
+
+    expect(payload).toHaveProperty("availabilities");
+    expect(payload.availabilities).toEqual([]);
   });
 
   it("builds coach workout payloads and activities", () => {

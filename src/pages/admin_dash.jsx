@@ -279,43 +279,47 @@ export default function AdminDash() {
   useEffect(() => {
     if (!authed) return;
     (async () => {
-      // Fetch account info — use a direct fetch to avoid the global 401
-      // redirect in apiFetch (admin may not have a backend-valid JWT yet)
       try {
-        const token = getToken();
-        const API_BASE = import.meta.env.PROD ? "https://api.till-failure.us" : "";
-        const res = await fetch(`${API_BASE}/me`, {
-          credentials: "include",
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        });
-        if (res.ok) {
-          const me = await res.json();
-          if (me?.name) setInitials(me.name.split(" ").map((n) => n[0]).join("").toUpperCase());
+        setLoading(true);
+
+        // Fetch account info — use a direct fetch to avoid the global 401
+        // redirect in apiFetch (admin may not have a backend-valid JWT yet)
+        try {
+          const token = getToken();
+          const API_BASE = import.meta.env.PROD ? "https://api.till-failure.us" : "";
+          const res = await fetch(`${API_BASE}/me`, {
+            credentials: "include",
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          if (res.ok) {
+            const me = await res.json();
+            if (me?.name) setInitials(me.name.split(" ").map((n) => n[0]).join("").toUpperCase());
+          }
+        } catch {
+          // Initials are decorative; keep loading the dashboard if this request fails.
         }
-      } catch {
-        // Initials are decorative; keep loading the dashboard if this request fails.
+
+        const [s, u, ex, an, requests] = await Promise.all([
+          fetchAdminStats(),
+          fetchAllUsers({ sortBy: userSortBy, sortDir: userSortDir }),
+          fetchExerciseBank(),
+          fetchAnalytics(),
+          fetchCoachRequests(),
+        ]);
+        const transactions = await fetchTotalTransactions().catch(() => ({ total_transactions: 0 }));
+        setStats(s);
+        setUsers(u);
+        setExercises(ex);
+        setAnalytics(an);
+        setRoleRequests(requests);
+        setTotalTransactions(transactions.total_transactions || 0);
+        setReports([
+          { id: 1, reporter_name: "Aisha Patel",  reported_name: "Coach X", reason: "Inappropriate content", created_at: "1 hr ago" },
+          { id: 2, reporter_name: "Chris Nguyen", reported_name: "Coach Y", reason: "No show",               created_at: "3 hrs ago" },
+        ]);
+      } finally {
+        setLoading(false);
       }
-
-      const [s, u, ex, an, requests] = await Promise.all([
-        fetchAdminStats(),
-        fetchAllUsers({ sortBy: userSortBy, sortDir: userSortDir }),
-        fetchExerciseBank(),
-        fetchAnalytics(),
-        fetchCoachRequests(),
-      ]);
-      const transactions = await fetchTotalTransactions().catch(() => ({ total_transactions: 0 }));
-      setStats(s);
-      setUsers(u);
-      setExercises(ex);
-      setAnalytics(an);
-      setRoleRequests(requests);
-      setTotalTransactions(transactions.total_transactions || 0);
-      setReports([
-        { id: 1, reporter_name: "Aisha Patel",  reported_name: "Coach X", reason: "Inappropriate content", created_at: "1 hr ago" },
-        { id: 2, reporter_name: "Chris Nguyen", reported_name: "Coach Y", reason: "No show",               created_at: "3 hrs ago" },
-      ]);
-
-      setLoading(false);
     })();
   }, [authed, userSortBy, userSortDir]);
 

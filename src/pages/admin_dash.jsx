@@ -13,25 +13,20 @@ import {
 } from "../components";
 import { getToken } from "../api/auth";
 import {
-  fetchAdminStats,
   fetchAllUsers,
   updateUserStatus,
   deleteUser,
   fetchExerciseBank,
-  createExercise,
-  updateExercise,
-  deleteExercise,
   fetchAnalytics,
   fetchCoachRequests,
   fetchTotalTransactions,
+  refreshPayments,
   resolveCoachRequest,
 } from "../api/admin";
 import RoleRequestsDetail from "../components/overlays/role_requests_detail";
 import ReportsDetail from "../components/overlays/reports_detail";
 
 const role = "admin";
-const MUSCLE_GROUPS = ["Chest", "Back", "Shoulders", "Legs", "Arms", "Core", "Cardio"];
-const EQUIPMENT = ["Barbell", "Dumbbell", "Cable", "Machine", "Bodyweight"];
 const USERS_PER_PAGE = 10;
 const EXERCISES_PER_PAGE = 10;
 
@@ -252,6 +247,10 @@ export default function AdminDash() {
   const [roleRequests, setRoleRequests] = useState([]);
   const [reports, setReports] = useState([]);
   const [totalTransactions, setTotalTransactions] = useState(0);
+  const [refreshingPayments, setRefreshingPayments] = useState(false);
+  const [paymentsMessage, setPaymentsMessage] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [adminMessage, setAdminMessage] = useState("");
 
   /*  overlay state  */
   const [overlay, setOverlay] = useState(null);
@@ -262,15 +261,11 @@ export default function AdminDash() {
   const [userRoleFilter, setUserRoleFilter] = useState("all");
   const [userStatusFilter, setUserStatusFilter] = useState("all");
   const [userPage, setUserPage] = useState(1);
-  const [userSortBy, setUserSortBy] = useState("name");
-  const [userSortDir, setUserSortDir] = useState("asc");
 
   /*  exercise bank state  */
   const [exSearch, setExSearch] = useState("");
   const [exGroupFilter, setExGroupFilter] = useState("All");
   const [exPage, setExPage] = useState(1);
-  const [editingExercise, setEditingExercise] = useState(null);
-  const [newExercise, setNewExercise] = useState(null);
 
   /*  analytics state  */
   const [analyticsPeriod, setAnalyticsPeriod] = useState("daily");
@@ -279,6 +274,10 @@ export default function AdminDash() {
   useEffect(() => {
     if (!authed) return;
     (async () => {
+      setLoading(true);
+      setLoadError("");
+      setAdminMessage("");
+
       // Fetch account info — use a direct fetch to avoid the global 401
       // redirect in apiFetch (admin may not have a backend-valid JWT yet)
       try {
@@ -296,72 +295,157 @@ export default function AdminDash() {
         // Initials are decorative; keep loading the dashboard if this request fails.
       }
 
-      const [s, u, ex, an, requests] = await Promise.all([
-        fetchAdminStats(),
-        fetchAllUsers({ sortBy: userSortBy, sortDir: userSortDir }),
-        fetchExerciseBank(),
-        fetchAnalytics(),
-        fetchCoachRequests(),
-      ]);
-      const transactions = await fetchTotalTransactions().catch(() => ({ total_transactions: 0 }));
-      setStats(s);
-      setUsers(u);
-      setExercises(ex);
-      setAnalytics(an);
-      setRoleRequests(requests);
-      setTotalTransactions(transactions.total_transactions || 0);
-      setReports([
-        { id: 1, reporter_name: "Aisha Patel",  reported_name: "Coach X", reason: "Inappropriate content", created_at: "1 hr ago" },
-        { id: 2, reporter_name: "Chris Nguyen", reported_name: "Coach Y", reason: "No show",               created_at: "3 hrs ago" },
-      ]);
+      try {
+        const [usersResponse, analyticsResponse, requestsResponse, transactionsResponse] = await Promise.all([
+          fetchAllUsers({ sortBy: userSortBy, sortDir: userSortDir }).catch(() => []),
+          fetchAnalytics().catch(() => null),
+          fetchCoachRequests().catch(() => []),
+          fetchTotalTransactions().catch(() => ({ total_transactions: 0 })),
+        ]);
+        const exerciseResponse = await fetchExerciseBank().catch((error) => {
+          setAdminMessage(error?.message || "Exercise bank is unavailable.");
+          return [];
+        });
 
-      setLoading(false);
+        setStats({
+          total_accounts: usersResponse.length,
+          total_clients: usersResponse.filter((item) => item.role === "client").length,
+          total_coaches: usersResponse.filter((item) => item.role === "coach").length,
+          pending_role_requests: requestsResponse.length,
+          active_today: 0,
+          active_this_week: 0,
+          active_this_month: 0,
+          total_revenue: transactionsResponse.total_transactions ?? 0,
+          revenue_this_month: 0,
+          active_subscriptions: 0,
+          revenue_change: 0,
+        });
+        setUsers(usersResponse);
+        setExercises(exerciseResponse);
+        setAnalytics(
+          analyticsResponse || { daily: [], weekly: [], monthly: [], summary: {} }
+        );
+        setRoleRequests(requestsResponse);
+        setTotalTransactions(transactionsResponse.total_transactions || 0);
+        setReports([]);
+      } catch (error) {
+        setLoadError(error?.message || "Unable to load the admin dashboard.");
+        setStats({
+          total_accounts: 0,
+          total_clients: 0,
+          total_coaches: 0,
+          pending_role_requests: 0,
+          active_today: 0,
+          active_this_week: 0,
+          active_this_month: 0,
+          total_revenue: 0,
+          revenue_this_month: 0,
+          active_subscriptions: 0,
+          revenue_change: 0,
+        });
+        setUsers([]);
+        setExercises([]);
+        setAnalytics({ daily: [], weekly: [], monthly: [], summary: {} });
+        setRoleRequests([]);
+        setReports([]);
+        setTotalTransactions(0);
+      } finally {
+        setLoading(false);
+      }
     })();
-  }, [authed, userSortBy, userSortDir]);
+  }, [authed]);
 
   /*  handlers  */
   const handleApprove = async (id) => {
-    await resolveCoachRequest(id, true);
-    setRoleRequests((p) => p.map((r) => r.id === id ? { ...r, is_approved: true } : r));
+    try {
+      await resolveCoachRequest(id, true);
+      setRoleRequests((p) => p.map((r) => r.id === id ? { ...r, is_approved: true } : r));
+      setAdminMessage("Coach request approved.");
+    } catch (error) {
+      setAdminMessage(error?.message || "Unable to approve this coach request.");
+    }
   };
 
   const handleReject = async (id) => {
-    await resolveCoachRequest(id, false);
-    setRoleRequests((p) => p.map((r) => r.id === id ? { ...r, is_approved: false } : r));
+    try {
+      await resolveCoachRequest(id, false);
+      setRoleRequests((p) => p.map((r) => r.id === id ? { ...r, is_approved: false } : r));
+      setAdminMessage("Coach request rejected.");
+    } catch (error) {
+      setAdminMessage(error?.message || "Unable to reject this coach request.");
+    }
   };
   const handleDismissReport = (id) => setReports((p) => p.filter((r) => r.id !== id));
 
   const handleUserStatusChange = async (userId, newStatus) => {
-    await updateUserStatus(userId, newStatus);
-    setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, status: newStatus } : u));
-  };
-
-  const handleUserSort = (sortBy) => {
-    setUserSortBy(sortBy);
-    setUserSortDir((prev) => userSortBy === sortBy && prev === "asc" ? "desc" : "asc");
+    try {
+      await updateUserStatus(userId, newStatus);
+      setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, status: newStatus } : u));
+      setAdminMessage("User status updated.");
+    } catch (error) {
+      setAdminMessage(error?.message || "Unable to update this user.");
+    }
   };
 
   const handleDeleteUser = async (userId) => {
     if (!window.confirm("Permanently delete this account? This cannot be undone.")) return;
-    await deleteUser(userId);
-    setUsers((prev) => prev.filter((u) => u.id !== userId));
+    try {
+      await deleteUser(userId);
+      setUsers((prev) => prev.filter((u) => u.id !== userId));
+      setAdminMessage("User deleted.");
+    } catch (error) {
+      setAdminMessage(error?.message || "Unable to delete this user.");
+    }
   };
 
   const handleSaveExercise = async (exercise) => {
-    if (exercise.id) {
-      await updateExercise(exercise.id, exercise);
-      setExercises((prev) => prev.map((e) => e.id === exercise.id ? { ...e, ...exercise } : e));
-    } else {
-      const result = await createExercise(exercise);
-      setExercises((prev) => [...prev, { ...exercise, id: result.id || Date.now(), created_by: "Admin" }]);
+    try {
+      if (exercise.id) {
+        await updateExercise(exercise.id, exercise);
+        setExercises((prev) => prev.map((e) => e.id === exercise.id ? { ...e, ...exercise } : e));
+      } else {
+        const result = await createExercise(exercise);
+        if (result?.id == null) {
+          throw new Error("Exercise creation did not return an id.");
+        }
+        setExercises((prev) => [...prev, { ...exercise, id: result.id, created_by: "Admin" }]);
+      }
+      setEditingExercise(null);
+      setNewExercise(null);
+      setAdminMessage("Exercise saved.");
+    } catch (error) {
+      setAdminMessage(error?.message || "Unable to save this exercise.");
     }
-    setEditingExercise(null);
-    setNewExercise(null);
   };
 
   const handleDeleteExercise = async (exerciseId) => {
-    await deleteExercise(exerciseId);
-    setExercises((prev) => prev.filter((e) => e.id !== exerciseId));
+    try {
+      await deleteExercise(exerciseId);
+      setExercises((prev) => prev.filter((e) => e.id !== exerciseId));
+      setAdminMessage("Exercise deleted.");
+    } catch (error) {
+      setAdminMessage(error?.message || "Unable to delete this exercise.");
+    }
+  };
+
+  const handleRefreshPayments = async () => {
+    setRefreshingPayments(true);
+    setPaymentsMessage("");
+    try {
+      await refreshPayments();
+      const transactions = await fetchTotalTransactions().catch(() => ({ total_transactions: totalTransactions }));
+      setTotalTransactions(transactions.total_transactions || 0);
+      setStats((prev) =>
+        prev
+          ? { ...prev, total_revenue: transactions.total_transactions || prev.total_revenue }
+          : prev
+      );
+      setPaymentsMessage("Payments refreshed.");
+    } catch (error) {
+      setPaymentsMessage(error?.message || "Unable to refresh payments.");
+    } finally {
+      setRefreshingPayments(false);
+    }
   };
 
   /*  computed  */
@@ -433,6 +517,17 @@ export default function AdminDash() {
       />
 
       <div className="max-w-7xl mx-auto px-6 py-6 space-y-8">
+        {loadError ? (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+            {loadError}
+          </div>
+        ) : null}
+
+        {adminMessage ? (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+            {adminMessage}
+          </div>
+        ) : null}
 
         {/* ═══════════════════════════════════════════════════════════════
             OVERVIEW STATS
@@ -467,11 +562,24 @@ export default function AdminDash() {
           {/* Total Revenue — feature card */}
           <div className="bg-[#0E1628] rounded-2xl p-5 relative overflow-hidden">
             <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full bg-green-500/5 blur-2xl" />
-            <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">TOTAL REVENUE</p>
+            <div className="mb-1 flex items-start justify-between gap-3">
+              <p className="text-[10px] text-gray-500 uppercase tracking-widest">TOTAL REVENUE</p>
+              <button
+                type="button"
+                onClick={handleRefreshPayments}
+                disabled={refreshingPayments}
+                className="rounded-lg border border-green-500/30 px-3 py-1 text-[10px] font-semibold text-green-300 transition-colors hover:bg-green-500/10 disabled:opacity-50"
+              >
+                {refreshingPayments ? "Refreshing..." : "Refresh Payments"}
+              </button>
+            </div>
             <p className="text-3xl font-bold text-white">
               $<AnimatedNumber value={stats?.total_revenue ?? 0} duration={1500} />
             </p>
             <p className="text-xs text-gray-500 mt-1">All-time platform earnings</p>
+            {paymentsMessage ? (
+              <p className="mt-1 text-[10px] text-slate-400">{paymentsMessage}</p>
+            ) : null}
             <div className="mt-3">
               <Sparkline data={activeAnalytics.map((d) => d.active_users * 28 + d.new_signups * 50)} color="#22C55E" />
             </div>
@@ -693,20 +801,8 @@ export default function AdminDash() {
           <div className="divide-y divide-white/5">
             {/* Header row */}
             <div className="grid grid-cols-12 gap-4 px-5 py-2.5 text-[10px] text-gray-500 uppercase tracking-widest">
-              <button
-                type="button"
-                onClick={() => handleUserSort("name")}
-                className="col-span-3 text-left hover:text-gray-300 transition-colors"
-              >
-                User {userSortBy === "name" ? (userSortDir === "asc" ? "↑" : "↓") : ""}
-              </button>
-              <button
-                type="button"
-                onClick={() => handleUserSort("email")}
-                className="col-span-3 text-left hover:text-gray-300 transition-colors"
-              >
-                Email {userSortBy === "email" ? (userSortDir === "asc" ? "↑" : "↓") : ""}
-              </button>
+              <span className="col-span-3">User</span>
+              <span className="col-span-3">Email</span>
               <span className="col-span-1">Role</span>
               <span className="col-span-1">Status</span>
               <span className="col-span-2">Last Active</span>
@@ -878,39 +974,22 @@ export default function AdminDash() {
                 onChange={(e) => setExGroupFilter(e.target.value)}
                 className="bg-[#0A1020] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-gray-300 focus:outline-none"
               >
-                <option value="All">All Groups</option>
-                {MUSCLE_GROUPS.map((g) => <option key={g} value={g}>{g}</option>)}
+                <option value="All">All Types</option>
+                <option value="Rep">Rep</option>
+                <option value="Duration">Duration</option>
               </select>
-              <button
-                onClick={() => setNewExercise({ name: "", muscle_group: "Chest", equipment: "Barbell" })}
-                className="px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors flex items-center gap-2"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                Add Exercise
-              </button>
             </div>
-            <p className="text-gray-500 text-xs mt-2">{filteredExercises.length} exercise{filteredExercises.length !== 1 ? "s" : ""} in bank</p>
+            <p className="text-gray-500 text-xs mt-2">
+              {filteredExercises.length} exercise{filteredExercises.length !== 1 ? "s" : ""} in the library (read-only — backend has no Workout edit/delete routes)
+            </p>
           </div>
 
-          {/* Add/Edit inline form */}
-          {(newExercise || editingExercise) && (
-            <div className="p-5 border-b border-white/5 bg-[#0A1020]/50">
-              <ExerciseForm
-                initial={newExercise || editingExercise}
-                onSave={handleSaveExercise}
-                onCancel={() => { setNewExercise(null); setEditingExercise(null); }}
-              />
-            </div>
-          )}
-
-          {/* Exercise list */}
+          {/* Exercise list (read-only) */}
           <div className="divide-y divide-white/5">
             <div className="grid grid-cols-12 gap-4 px-5 py-2.5 text-[10px] text-gray-500 uppercase tracking-widest">
-              <span className="col-span-4">Exercise</span>
-              <span className="col-span-2">Muscle Group</span>
-              <span className="col-span-2">Equipment</span>
-              <span className="col-span-2">Added By</span>
-              <span className="col-span-2 text-right">Actions</span>
+              <span className="col-span-5">Exercise</span>
+              <span className="col-span-2">Type</span>
+              <span className="col-span-5">Description</span>
             </div>
 
             {filteredExercises.length === 0 ? (
@@ -918,26 +997,11 @@ export default function AdminDash() {
             ) : (
               paginatedExercises.map((ex) => (
                 <div key={ex.id} className="grid grid-cols-12 gap-4 px-5 py-3 items-center hover:bg-white/[0.02] transition-colors">
-                  <span className="col-span-4 text-white text-sm font-medium">{ex.name}</span>
+                  <span className="col-span-5 text-white text-sm font-medium">{ex.name}</span>
                   <div className="col-span-2">
                     <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-red-500/10 text-red-400">{ex.muscle_group}</span>
                   </div>
-                  <span className="col-span-2 text-gray-400 text-sm">{ex.equipment}</span>
-                  <span className="col-span-2 text-gray-500 text-xs">{ex.created_by}</span>
-                  <div className="col-span-2 flex justify-end gap-2">
-                    <button
-                      onClick={() => setEditingExercise({ ...ex })}
-                      className="text-[10px] px-3 py-1.5 rounded-lg border border-white/10 text-gray-300 hover:bg-white/5 transition-colors"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => handleDeleteExercise(ex.id)}
-                      className="text-[10px] px-3 py-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors"
-                    >
-                      Remove
-                    </button>
-                  </div>
+                  <span className="col-span-5 text-gray-400 text-xs truncate">{ex.description || "—"}</span>
                 </div>
               ))
             )}
@@ -1029,61 +1093,3 @@ export default function AdminDash() {
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   EXERCISE FORM — inline add/edit for exercise bank
-   ═══════════════════════════════════════════════════════════════════════ */
-
-function ExerciseForm({ initial, onSave, onCancel }) {
-  const [name, setName] = useState(initial.name ?? "");
-  const [muscleGroup, setMuscleGroup] = useState(initial.muscle_group ?? "Chest");
-  const [equipment, setEquipment] = useState(initial.equipment ?? "Barbell");
-
-  return (
-    <div className="flex gap-3 items-end">
-      <div className="flex-1">
-        <label className="text-[10px] text-gray-500 uppercase tracking-widest">Exercise Name</label>
-        <input
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. Bulgarian Split Squat"
-          className="w-full bg-[#080D19] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none mt-1"
-          autoFocus
-        />
-      </div>
-      <div>
-        <label className="text-[10px] text-gray-500 uppercase tracking-widest">Muscle Group</label>
-        <select
-          value={muscleGroup}
-          onChange={(e) => setMuscleGroup(e.target.value)}
-          className="w-full bg-[#080D19] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none mt-1"
-        >
-          {MUSCLE_GROUPS.map((g) => <option key={g} value={g}>{g}</option>)}
-        </select>
-      </div>
-      <div>
-        <label className="text-[10px] text-gray-500 uppercase tracking-widest">Equipment</label>
-        <select
-          value={equipment}
-          onChange={(e) => setEquipment(e.target.value)}
-          className="w-full bg-[#080D19] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none mt-1"
-        >
-          {EQUIPMENT.map((e) => <option key={e} value={e}>{e}</option>)}
-        </select>
-      </div>
-      <button
-        onClick={() => name.trim() && onSave({ ...initial, name: name.trim(), muscle_group: muscleGroup, equipment })}
-        disabled={!name.trim()}
-        className="px-5 py-2 rounded-lg text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors disabled:opacity-40"
-      >
-        {initial.id ? "Update" : "Add"}
-      </button>
-      <button
-        onClick={onCancel}
-        className="px-4 py-2 rounded-lg text-sm border border-white/10 text-gray-400 hover:bg-white/5 transition-colors"
-      >
-        Cancel
-      </button>
-    </div>
-  );
-}

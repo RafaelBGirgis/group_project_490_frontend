@@ -30,6 +30,17 @@ const EMPTY_TRAINING_AVAILABILITY = {
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
+const normalizeGenderToOnboardingValue = (value) => {
+  const normalized = String(value || "").trim().toLowerCase().replaceAll("_", "-");
+  if (normalized === "male") return "male";
+  if (normalized === "female") return "female";
+  if (normalized === "non-binary" || normalized === "nonbinary") return "non-binary";
+  if (normalized === "prefer-not-to-say" || normalized === "prefer not to say") {
+    return "prefer_not_to_say";
+  }
+  return "";
+};
+
 const buildAccountUpdatePayload = ({ age, email, bio, gender }) => {
   const payload = {};
 
@@ -173,7 +184,7 @@ function OnboardingPage() {
           name: account.name || prev.name,
           email,
           age: account.age != null ? String(account.age) : prev.age,
-          gender: account.gender || prev.gender,
+          gender: normalizeGenderToOnboardingValue(account.gender) || prev.gender,
           bio: account.bio || prev.bio,
         }));
       } catch (err) {

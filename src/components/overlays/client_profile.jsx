@@ -70,7 +70,12 @@ function TelemetryBlock({ title, items, hasMore, onLoadMore, children }) {
  *   clientId     – number
  *   detail       – object from lookupClient (base_account, fitness_goals, etc.)
  */
-export default function ClientProfile({ clientId, detail }) {
+export default function ClientProfile({
+  clientId,
+  detail,
+  onTerminateRelationship,
+  terminatingRelationshipId = null,
+}) {
   const [activeDay, setActiveDay] = useState(TODAY_IDX);
   const [workoutPlan, setWorkoutPlan] = useState(null);
   const [workoutActivities, setWorkoutActivities] = useState([]);
@@ -167,13 +172,17 @@ export default function ClientProfile({ clientId, detail }) {
     setMealsSkip((s) => s + PAGE_SIZE);
   };
 
-  const name         = detail?.base_account?.name || "—";
-  const age          = detail?.base_account?.age || "—";
-  const gender       = detail?.base_account?.gender || "—";
-  const goal         = detail?.fitness_goals?.[0]?.goal_enum || "—";
-  const bio          = detail?.base_account?.bio;
-  const pfpUrl       = detail?.base_account?.pfp_url;
+  const name = detail?.base_account?.name || "—";
+  const age = detail?.base_account?.age || "—";
+  const gender = detail?.base_account?.gender || "—";
+  const goal = detail?.fitness_goals?.[0]?.goal_enum || "—";
+  const bio = detail?.base_account?.bio;
+  const pfpUrl = detail?.base_account?.pfp_url;
   const currentWeight = weights[0]?.weight ?? null;
+  const relationshipId =
+    detail?.relationship_id ??
+    detail?.client_coach_relationship?.id ??
+    null;
 
   return (
     <div className="space-y-5">
@@ -182,7 +191,24 @@ export default function ClientProfile({ clientId, detail }) {
       <div className="flex items-start gap-5 rounded-2xl border border-white/6 bg-[#0B1120] p-5">
         <ProfileAvatar src={pfpUrl} name={name} size="xl" />
         <div className="flex-1 min-w-0">
-          <h2 className="text-white font-bold text-xl">{name}</h2>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <h2 className="text-white font-bold text-xl">{name}</h2>
+            {relationshipId ? (
+              <button
+                type="button"
+                onClick={() => onTerminateRelationship?.({
+                  id: clientId,
+                  name,
+                  relationship_id: relationshipId,
+                  details: detail,
+                })}
+                disabled={terminatingRelationshipId === relationshipId}
+                className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-xs font-semibold text-red-300 hover:bg-red-500/20 disabled:opacity-60"
+              >
+                {terminatingRelationshipId === relationshipId ? "Firing..." : "Fire Client"}
+              </button>
+            ) : null}
+          </div>
           <div className="flex flex-wrap gap-x-5 gap-y-1 mt-2">
             <span className="text-gray-400 text-sm">Age: <span className="text-white">{age}</span></span>
             <span className="text-gray-400 text-sm">Gender: <span className="text-white">{gender}</span></span>

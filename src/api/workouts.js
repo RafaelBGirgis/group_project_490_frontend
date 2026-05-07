@@ -4,8 +4,13 @@ import {
   buildCoachWorkoutPayload,
   createCoachWorkout,
   createCoachWorkoutActivity,
-  fetchMyClients,
+  createLegacyCoachWorkout,
+  createLegacyCoachWorkoutActivity,
+  createLegacyCoachWorkoutPlan,
+  fetchClientWorkoutPlanByCoach,
+  prescribeWorkoutPlan,
 } from "./coach";
+import { assignWorkoutPlanToClient } from "./client";
 
 /* ═══════════════════════════════════════════════════════════════════════
    EXERCISE DATABASE — common exercises for the in-app builder
@@ -87,134 +92,6 @@ export async function fetchSupportedEquipment({ skip = 0, limit = 100 } = {}) {
   }
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   PRESET WORKOUTS — built-in templates anyone can use
-   ═══════════════════════════════════════════════════════════════════════ */
-
-const PRESET_WORKOUTS = [
-  {
-    id: "preset-ppl-push",
-    name: "Push Day",
-    description: "Chest, shoulders, and triceps focused compound and isolation work.",
-    type: "preset",
-    category: "Strength",
-    difficulty: "Intermediate",
-    est_duration_min: 60,
-    muscle_groups: ["Chest", "Shoulders", "Arms"],
-    exercises: [
-      { name: "Bench Press",            sets: 4, reps: 6,  weight: 185, intensity_measure: "lbs", notes: "Warm up with bar first", rest_seconds: 60, equipment: "Barbell", estimated_calories_per_unit_frequency: 8 },
-      { name: "Incline Dumbbell Press", sets: 3, reps: 10, weight: 60,  intensity_measure: "lbs",  notes: "", rest_seconds: 60, equipment: "Dumbbell", estimated_calories_per_unit_frequency: 7 },
-      { name: "Overhead Press",         sets: 3, reps: 8,  weight: 95,  intensity_measure: "lbs", notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 6 },
-      { name: "Lateral Raises",         sets: 4, reps: 15, weight: 25,  intensity_measure: "lbs",  notes: "Control the negative", equipment: "Dumbbell", estimated_calories_per_unit_frequency: 4 },
-      { name: "Tricep Pushdown",        sets: 3, reps: 12, weight: 50,  intensity_measure: "lbs",  notes: "", equipment: "Cable", estimated_calories_per_unit_frequency: 5 },
-      { name: "Cable Flyes",            sets: 3, reps: 12, weight: 30,  intensity_measure: "lbs",  notes: "Squeeze at peak", equipment: "Cable", estimated_calories_per_unit_frequency: 5 },
-    ],
-  },
-  {
-    id: "preset-ppl-pull",
-    name: "Pull Day",
-    description: "Back and biceps — heavy rows, pulldowns, and isolation curls.",
-    type: "preset",
-    category: "Strength",
-    difficulty: "Intermediate",
-    est_duration_min: 55,
-    muscle_groups: ["Back", "Arms"],
-    exercises: [
-      { name: "Barbell Row",       sets: 4, reps: 8,  weight: 155, intensity_measure: "lbs", notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 8 },
-      { name: "Lat Pulldown",      sets: 3, reps: 10, weight: 120, intensity_measure: "lbs",  notes: "", equipment: "Cable", estimated_calories_per_unit_frequency: 6 },
-      { name: "Seated Cable Row",  sets: 3, reps: 10, weight: 100, intensity_measure: "lbs",  notes: "", equipment: "Cable", estimated_calories_per_unit_frequency: 6 },
-      { name: "Face Pulls",        sets: 3, reps: 15, weight: 30,  intensity_measure: "lbs",  notes: "", equipment: "Cable", estimated_calories_per_unit_frequency: 4 },
-      { name: "Bicep Curls",       sets: 3, reps: 12, weight: 35,  intensity_measure: "lbs",  notes: "", equipment: "Dumbbell", estimated_calories_per_unit_frequency: 4 },
-      { name: "Hammer Curls",      sets: 3, reps: 12, weight: 30,  intensity_measure: "lbs",  notes: "", equipment: "Dumbbell", estimated_calories_per_unit_frequency: 4 },
-    ],
-  },
-  {
-    id: "preset-ppl-legs",
-    name: "Leg Day",
-    description: "Full lower-body session with compounds and accessories.",
-    type: "preset",
-    category: "Strength",
-    difficulty: "Intermediate",
-    est_duration_min: 65,
-    muscle_groups: ["Legs", "Core"],
-    exercises: [
-      { name: "Barbell Squat",         sets: 4, reps: 6,  weight: 225, intensity_measure: "lbs", notes: "Hit depth", equipment: "Barbell", estimated_calories_per_unit_frequency: 10 },
-      { name: "Romanian Deadlift",     sets: 3, reps: 10, weight: 185, intensity_measure: "lbs", notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 9 },
-      { name: "Leg Press",             sets: 3, reps: 12, weight: 360, intensity_measure: "lbs",  notes: "", equipment: "Machine", estimated_calories_per_unit_frequency: 7 },
-      { name: "Leg Curl",              sets: 3, reps: 12, weight: 80,  intensity_measure: "lbs",  notes: "", equipment: "Machine", estimated_calories_per_unit_frequency: 5 },
-      { name: "Calf Raises",           sets: 4, reps: 15, weight: 90,  intensity_measure: "lbs",  notes: "", equipment: "Machine", estimated_calories_per_unit_frequency: 4 },
-      { name: "Hanging Leg Raises",    sets: 3, reps: 12, weight: 0,   intensity_measure: "bw",   notes: "", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 5 },
-    ],
-  },
-  {
-    id: "preset-upper-lower-upper",
-    name: "Upper Body Power",
-    description: "Heavy compound lifts for upper-body strength and mass.",
-    type: "preset",
-    category: "Strength",
-    difficulty: "Advanced",
-    est_duration_min: 70,
-    muscle_groups: ["Chest", "Back", "Shoulders", "Arms"],
-    exercises: [
-      { name: "Bench Press",        sets: 5, reps: 5,  weight: 205, intensity_measure: "lbs", notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 9 },
-      { name: "Barbell Row",        sets: 5, reps: 5,  weight: 175, intensity_measure: "lbs", notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 9 },
-      { name: "Overhead Press",     sets: 4, reps: 6,  weight: 115, intensity_measure: "lbs", notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 7 },
-      { name: "Pull-ups",           sets: 4, reps: 8,  weight: 0,   intensity_measure: "bw",  notes: "Add weight if possible", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 8 },
-      { name: "Dumbbell Flyes",     sets: 3, reps: 12, weight: 40,  intensity_measure: "lbs",  notes: "", equipment: "Dumbbell", estimated_calories_per_unit_frequency: 5 },
-      { name: "Skull Crushers",     sets: 3, reps: 10, weight: 55,  intensity_measure: "lbs",  notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 5 },
-    ],
-  },
-  {
-    id: "preset-full-body-beginner",
-    name: "Full Body — Beginner",
-    description: "Simple full-body routine for those new to lifting. Focus on form.",
-    type: "preset",
-    category: "General",
-    difficulty: "Beginner",
-    est_duration_min: 45,
-    muscle_groups: ["Chest", "Back", "Legs", "Core"],
-    exercises: [
-      { name: "Barbell Squat",     sets: 3, reps: 8,  weight: 95,  intensity_measure: "lbs", notes: "Start light, get the form right", equipment: "Barbell", estimated_calories_per_unit_frequency: 8 },
-      { name: "Bench Press",       sets: 3, reps: 8,  weight: 95,  intensity_measure: "lbs", notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 7 },
-      { name: "Barbell Row",       sets: 3, reps: 8,  weight: 85,  intensity_measure: "lbs", notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 7 },
-      { name: "Overhead Press",    sets: 3, reps: 8,  weight: 65,  intensity_measure: "lbs",  notes: "", equipment: "Barbell", estimated_calories_per_unit_frequency: 6 },
-      { name: "Plank",             sets: 3, reps: 30, weight: 0,   intensity_measure: "sec",  notes: "Hold for time", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 3 },
-    ],
-  },
-  {
-    id: "preset-hiit-cardio",
-    name: "HIIT Cardio Blast",
-    description: "High-intensity interval training for fat burning and conditioning.",
-    type: "preset",
-    category: "Cardio",
-    difficulty: "Intermediate",
-    est_duration_min: 30,
-    muscle_groups: ["Cardio", "Core"],
-    exercises: [
-      { name: "Jump Rope",         sets: 5, reps: 60,  weight: 0, intensity_measure: "sec",  notes: "60s on, 30s off", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 12 },
-      { name: "Russian Twists",    sets: 3, reps: 20,  weight: 15, intensity_measure: "lbs", notes: "", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 5 },
-      { name: "Push-ups",          sets: 3, reps: 15,  weight: 0, intensity_measure: "bw",   notes: "", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 6 },
-      { name: "Rowing Machine",    sets: 4, reps: 90,  weight: 0, intensity_measure: "sec",  notes: "90s all-out effort", equipment: "Machine", estimated_calories_per_unit_frequency: 14 },
-      { name: "Hanging Leg Raises", sets: 3, reps: 12, weight: 0, intensity_measure: "bw",   notes: "", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 5 },
-    ],
-  },
-  {
-    id: "preset-mobility-recovery",
-    name: "Mobility & Recovery",
-    description: "Light movement, stretches, and recovery work for rest days.",
-    type: "preset",
-    category: "Recovery",
-    difficulty: "Beginner",
-    est_duration_min: 25,
-    muscle_groups: ["Core", "Legs"],
-    exercises: [
-      { name: "Plank",              sets: 3, reps: 45, weight: 0, intensity_measure: "sec", notes: "Engage core fully", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 3 },
-      { name: "Ab Rollout",         sets: 3, reps: 10, weight: 0, intensity_measure: "bw",  notes: "Slow and controlled", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 5 },
-      { name: "Bulgarian Split Squat", sets: 2, reps: 10, weight: 0, intensity_measure: "bw", notes: "Per leg — go light", equipment: "Bodyweight", estimated_calories_per_unit_frequency: 6 },
-      { name: "Hip Thrust",         sets: 3, reps: 12, weight: 0, intensity_measure: "bw",  notes: "Focus on glute squeeze", equipment: "Barbell", estimated_calories_per_unit_frequency: 6 },
-    ],
-  },
-];
 
 /* ═══════════════════════════════════════════════════════════════════════
    API FUNCTIONS
@@ -406,14 +283,34 @@ export async function createWorkoutPlan(strataName, planActivities) {
   });
 }
 
-/** Fetch the user's weekly plan view (one entry per weekday) */
+/** Self-assign a backend WorkoutPlan to the authenticated client. */
+export async function assignPlanToSelf(workoutPlanId, startDt, endDt) {
+  return apiPost("/roles/client/assign_plan", {
+    workout_plan_id: workoutPlanId,
+    start_dt: startDt,
+    end_dt: endDt,
+  });
+}
+
+/** Coach prescribes a backend WorkoutPlan to one of their accepted clients. */
+export async function prescribePlanToClient(workoutPlanId, clientId, startDt, endDt) {
+  return apiPost("/roles/coach/prescribe_plan", {
+    workout_plan_id: workoutPlanId,
+    client_id: clientId,
+    start_dt: startDt,
+    end_dt: endDt,
+  });
+}
+
+/** Fetch the user's weekly plan view (one entry per weekday).
+ *  Backend returns bare ClientWorkoutPlan rows (no enriched activities), so
+ *  the weekly view shows a placeholder per active plan with no exercise list.
+ */
 export async function fetchWeeklyPlan(role, roleId) {
   try {
-    if (role === "client" || role === "coach" || role === "admin") {
-      const plans = await fetchClientPlans();
-      if (plans.length > 0) {
-        return normalizeWeeklyPlanFromPlans(plans);
-      }
+    const plans = await fetchClientPlans();
+    if (plans.length > 0) {
+      return normalizeWeeklyPlanFromPlans(plans);
     }
   } catch {
     // Fall through to local cache below.
@@ -437,12 +334,21 @@ export async function publishWeeklyPlan(role, roleId, plan, fallbackName = "Week
   void role;
   void roleId;
   const created = [];
+  let populatedDays = 0;
 
   for (const dayKey of DAY_ORDER) {
     const dayWorkout = plan?.[dayKey];
     const exercises = Array.isArray(dayWorkout?.exercises) ? dayWorkout.exercises : [];
+    if (exercises.length === 0) continue;
+    populatedDays++;
+
     const planActivities = buildPlanActivities(exercises);
-    if (planActivities.length === 0) continue;
+    if (planActivities.length === 0) {
+      // Exercise list contains only items lacking real backend activity ids
+      // (e.g. presets the user hasn't published as a workout first).
+      created.push({ day: dayKey, error: "No backend-tracked activities to publish" });
+      continue;
+    }
 
     const strataName = `${capitalize(dayKey)} — ${dayWorkout?.name || fallbackName}`;
     try {
@@ -500,8 +406,8 @@ export async function fetchAssignedWorkouts(coachId) {
 function normalizeWorkout(workout, fallbackType = "custom") {
   if (!workout || typeof workout !== "object") {
     return {
-      id: `workout-${Date.now()}`,
-      name: "Untitled Workout",
+      id: null,
+      name: "",
       description: "",
       instructions: "",
       workout_type: null,
@@ -520,8 +426,8 @@ function normalizeWorkout(workout, fallbackType = "custom") {
 
   return {
     ...workout,
-    id: workout.id ?? workout.workout_id ?? workout.name ?? `workout-${Date.now()}`,
-    name: workout.name ?? workout.strata_name ?? workout.workout_name ?? "Untitled Workout",
+    id: workout.id ?? workout.workout_id ?? workout.name ?? null,
+    name: workout.name ?? workout.strata_name ?? workout.workout_name ?? "",
     description: workout.description ?? "",
     instructions: workout.instructions ?? "",
     workout_type: workout.workout_type ?? null,
@@ -559,22 +465,6 @@ function emptyWeeklyPlan() {
     saturday: null,
     sunday: null,
   };
-}
-
-function normalizeWeeklyPlan(response) {
-  const base = emptyWeeklyPlan();
-  if (!response || typeof response !== "object") {
-    return base;
-  }
-
-  Object.keys(base).forEach((day) => {
-    const rawValue = response[day];
-    base[day] = rawValue && typeof rawValue === "object"
-      ? normalizeWorkout(rawValue, "custom")
-      : null;
-  });
-
-  return base;
 }
 
 function normalizeWeeklyPlanFromPlans(plans) {
@@ -624,43 +514,6 @@ async function hydrateWorkoutActivities(workouts) {
   );
 }
 
-function getWorkoutCacheKey(role, roleId) {
-  return `${role}_workouts:${roleId ?? "me"}`;
-}
-
-function getWeeklyPlanCacheKey(role, roleId) {
-  return `${role}_weekly_plan:${roleId ?? "me"}`;
-}
-
-function getLocalWorkoutCache(role, roleId) {
-  const cached = readJson(getWorkoutCacheKey(role, roleId));
-  return Array.isArray(cached) ? cached : [];
-}
-
-function writeLocalWorkoutCache(role, roleId, workouts) {
-  localStorage.setItem(getWorkoutCacheKey(role, roleId), JSON.stringify(workouts));
-}
-
-function mergeWorkouts(primary, secondary) {
-  const byId = new Map();
-  [...secondary, ...primary].forEach((workout) => {
-    if (!workout) return;
-    const normalized = normalizeWorkout(workout, "custom");
-    byId.set(String(normalized.id), normalized);
-  });
-  return [...byId.values()];
-}
-
-function readJson(key) {
-  const raw = localStorage.getItem(key);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
 function buildPlanActivities(exercises) {
   return (exercises || [])
     .map((exercise) => {
@@ -690,6 +543,44 @@ function buildPlanActivities(exercises) {
       };
     })
     .filter(Boolean);
+}
+
+function buildAssignmentWindow(dayKey = null) {
+  const now = new Date();
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+
+  if (dayKey && DAY_ORDER.includes(dayKey)) {
+    const todayIndex = (now.getDay() + 6) % 7;
+    const targetIndex = DAY_ORDER.indexOf(dayKey);
+    const delta = (targetIndex - todayIndex + 7) % 7;
+    start.setDate(start.getDate() + delta);
+  }
+
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+  end.setHours(23, 59, 59, 999);
+
+  return {
+    startDt: start.toISOString(),
+    endDt: end.toISOString(),
+  };
+}
+
+async function fetchCoachClientPlans(clientId) {
+  try {
+    const result = await apiGet(
+      withQuery(`/roles/coach/client_plans/${clientId}`, { skip: 0, limit: 100 })
+    );
+    return Array.isArray(result)
+      ? result
+      : Array.isArray(result?.plans)
+        ? result.plans
+        : [];
+  } catch {
+    const singlePlan = await fetchClientWorkoutPlanByCoach(clientId, 0).catch(() => null);
+    return singlePlan?.strata_name ? [singlePlan] : [];
+  }
 }
 
 function capitalize(value) {

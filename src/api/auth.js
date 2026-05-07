@@ -66,7 +66,6 @@ export async function refreshToken(email, password) {
 
 export function clearAuth() {
   localStorage.removeItem("jwt");
-  localStorage.removeItem("active_client_id");
   // Delete cookies with and without domain to cover both local and production
   const cookieConfigs = [
     "path=/",
@@ -120,7 +119,6 @@ export function getToken() {
   for (const cookieName of SESSION_COOKIE_NAMES) {
     const cookieToken = readCookie(cookieName);
     if (cookieToken) {
-      localStorage.setItem("jwt", cookieToken);
       return cookieToken;
     }
   }
@@ -137,14 +135,18 @@ export function syncTokenFromCookie() {
 }
 
 export async function initiateGoogleOAuth() {
+  const query = new URLSearchParams({ redirect: window.location.href });
   try {
-    const data = await apiGet("/auth/google/url");
-    if (data && data.url) {
+    const data = await apiGet(`/auth/google?${query.toString()}`);
+    if (data?.url) {
       window.location.href = data.url;
+      return;
     }
-  } catch (err) {
-    console.error("Failed to initiate Google OAuth:", err);
+  } catch {
+    // Fall back to the documented redirect endpoint below.
   }
+
+  window.location.href = `/auth/google?${query.toString()}`;
 }
 
 export async function handleGoogleOAuthCallback(code, state) {

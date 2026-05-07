@@ -64,6 +64,8 @@ export default function ClientChatPage() {
     loadConversations()
       .then(async (convos) => {
         const myCoach = await fetchMyCoach().catch(() => null);
+        const coachAccountId =
+          myCoach?.account_id ?? myCoach?.accountId ?? myCoach?.id ?? null;
         let nextConversations = convos;
         let nextActiveChat = null;
 

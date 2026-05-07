@@ -2,20 +2,12 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useState, useEffect, useMemo } from "react";
 import { Navbar, Overlay, SkeletonDashCard } from "../components";
 import { ROLE_THEMES } from "../components/theme";
-import { fetchMe } from "../api/client";
+import { fetchMe, logWorkoutActivity } from "../api/client";
 import {
-  fetchPresetWorkouts,
   fetchMyWorkouts,
   createWorkout,
-  updateWorkout,
-  deleteWorkout,
-  duplicatePreset,
-  assignWorkout,
-  fetchAssignableClients,
-  fetchAssignedWorkouts,
   fetchWeeklyPlan,
   publishWeeklyPlan,
-  saveWeeklyPlan,
   fetchSupportedEquipment,
   EXERCISE_DATABASE,
   MUSCLE_GROUPS,
@@ -48,16 +40,14 @@ export default function WorkoutsPage() {
   const [loading, setLoading] = useState(true);
   const [initials, setInitials] = useState("??");
   const [publishStatus, setPublishStatus] = useState(null);
+  const [actionError, setActionError] = useState("");
 
   // Data
-  const [presets, setPresets] = useState([]);
   const [myWorkouts, setMyWorkouts] = useState([]);
-  const [assignedWorkouts, setAssignedWorkouts] = useState([]);
-  const [clients, setClients] = useState([]);
   const [equipmentOptions, setEquipmentOptions] = useState(DEFAULT_EQUIPMENT_OPTIONS);
 
   // UI state
-  const [tab, setTab] = useState("my"); // "my" | "presets" | "assigned" (coach only)
+  const [tab, setTab] = useState("library"); // "library" | "weekly"
   const [search, setSearch] = useState("");
   const [filterGroup, setFilterGroup] = useState("All");
 
@@ -66,15 +56,45 @@ export default function WorkoutsPage() {
     monday: null, tuesday: null, wednesday: null, thursday: null,
     friday: null, saturday: null, sunday: null,
   });
-  const [weeklyDirty, setWeeklyDirty] = useState(false);
+  const [, setWeeklyDirty] = useState(false);
   const [weeklySaving, setWeeklySaving] = useState(false);
 
   // Overlays
   const [viewWorkout, setViewWorkout] = useState(null);
-  const [editWorkout, setEditWorkout] = useState(null); // null = closed, {} = new, {id,...} = edit
-  const [assignOverlay, setAssignOverlay] = useState(null); // workout to assign
-  const [selectedClients, setSelectedClients] = useState([]);
-  const [assignSent, setAssignSent] = useState(false);
+  const [editWorkout, setEditWorkout] = useState(null); // null = closed; {} = new
+  const [logPrompt, setLogPrompt] = useState(null); // { exercise, completedSets, completedReps }
+  const [logSubmitting, setLogSubmitting] = useState(false);
+  const [logError, setLogError] = useState("");
+  const [logSuccess, setLogSuccess] = useState("");
+
+  const openLogPrompt = (exercise) => {
+    setLogError("");
+    setLogSuccess("");
+    setLogPrompt({
+      exercise,
+      completedSets: String(exercise.sets ?? exercise.suggested_sets ?? ""),
+      completedReps: String(exercise.reps ?? exercise.suggested_reps ?? ""),
+    });
+  };
+
+  const submitLogPrompt = async () => {
+    if (!logPrompt) return;
+    setLogSubmitting(true);
+    setLogError("");
+    try {
+      await logWorkoutActivity(account?.client_id, 0, logPrompt.exercise, {
+        completedSets: logPrompt.completedSets,
+        completedReps: logPrompt.completedReps,
+      });
+      setLogPrompt(null);
+      setLogSuccess(`Logged "${logPrompt.exercise.name}" ✓`);
+      setTimeout(() => setLogSuccess(""), 2500);
+    } catch (err) {
+      setLogError(err?.message || "Failed to log activity.");
+    } finally {
+      setLogSubmitting(false);
+    }
+  };
 
   const theme = ROLE_THEMES[role] ?? ROLE_THEMES.client;
   const roleId =
@@ -135,71 +155,37 @@ export default function WorkoutsPage() {
           : role === "admin"
             ? account.admin_id
             : account.client_id;
-      const [p, mw, wp] = await Promise.all([
-        fetchPresetWorkouts(),
+      const [mw, wp, equipment] = await Promise.all([
         fetchMyWorkouts(role, rid),
         fetchWeeklyPlan(role, rid),
+        fetchSupportedEquipment().catch(() => []),
       ]);
-      setPresets(p);
       setMyWorkouts(mw);
       setWeeklyPlan(wp);
-
-      if (role === "coach" && account.coach_id) {
-        const [aw, cl, equipment] = await Promise.all([
-          fetchAssignedWorkouts(account.coach_id),
-          fetchAssignableClients(account.coach_id),
-          fetchSupportedEquipment(),
-        ]);
-        setAssignedWorkouts(aw);
-        setClients(cl);
-        setEquipmentOptions(
-          equipment.length > 0
-            ? Array.from(new Set([...equipment, ...DEFAULT_EQUIPMENT_OPTIONS]))
-            : DEFAULT_EQUIPMENT_OPTIONS
-        );
-      } else {
-        const equipment = await fetchSupportedEquipment().catch(() => []);
-        setEquipmentOptions(
-          equipment.length > 0
-            ? Array.from(new Set([...equipment, ...DEFAULT_EQUIPMENT_OPTIONS]))
-            : DEFAULT_EQUIPMENT_OPTIONS
-        );
-      }
+      setEquipmentOptions(
+        equipment.length > 0
+          ? Array.from(new Set([...equipment, ...DEFAULT_EQUIPMENT_OPTIONS]))
+          : DEFAULT_EQUIPMENT_OPTIONS
+      );
       setLoading(false);
     })();
   }, [account, role]);
 
   /*  filtered lists  */
 
-  const activeList = tab === "presets" ? presets : myWorkouts;
   const filtered = useMemo(() => {
-    return activeList.filter((w) => {
+    return myWorkouts.filter((w) => {
       if (search && !w.name.toLowerCase().includes(search.toLowerCase()) &&
           !w.description?.toLowerCase().includes(search.toLowerCase())) return false;
       if (filterGroup !== "All" && !w.muscle_groups?.includes(filterGroup)) return false;
       return true;
     });
-  }, [activeList, search, filterGroup]);
+  }, [myWorkouts, search, filterGroup]);
 
   /*  handlers  */
 
-  const handleDuplicate = async (preset) => {
-    const result = await duplicatePreset(role, roleId, preset.id);
-    if (result.success) {
-      setMyWorkouts((prev) => [
-        { ...preset, ...result, type: "custom", name: result.name || `${preset.name} (Copy)` },
-        ...prev,
-      ]);
-      setTab("my");
-    }
-  };
-
-  const handleDelete = async (workoutId) => {
-    await deleteWorkout(role, roleId, workoutId);
-    setMyWorkouts((prev) => prev.filter((w) => w.id !== workoutId));
-    setViewWorkout(null);
-  };
-
+  // Backend has no workout edit / delete routes — only creation. Workouts
+  // are immutable once published.
   const handleSaveWorkout = async (workout) => {
     if (workout.id && myWorkouts.some((w) => w.id === workout.id)) {
       // Update existing
@@ -236,18 +222,34 @@ export default function WorkoutsPage() {
     setPublishStatus(null);
     try {
       const result = await publishWeeklyPlan(role, roleId, weeklyPlan, `${role} weekly plan`);
-      const successCount = (result?.published || []).filter((entry) => entry.plan_id != null).length;
-      const failCount = (result?.published || []).filter((entry) => entry.error).length;
-      if (successCount === 0 && failCount === 0) {
+      const published = result?.published || [];
+      const populated = result?.populated_days ?? 0;
+      const linked = published.filter((e) => e.client_workout_plan_id != null).length;
+      const orphan = published.filter((e) => e.unlinked).length;
+      const failures = published.filter((e) => e.error).length;
+
+      if (populated === 0) {
         setPublishStatus({ kind: "info", message: "No populated days to publish." });
-      } else if (failCount === 0) {
-        setPublishStatus({ kind: "success", message: `Published ${successCount} day${successCount === 1 ? "" : "s"}.` });
-      } else {
+      } else if (failures > 0) {
         setPublishStatus({
           kind: "partial",
-          message: `Published ${successCount} day${successCount === 1 ? "" : "s"}, ${failCount} failed (activities may need backend IDs).`,
+          message: `${linked + orphan} of ${populated} day${populated === 1 ? "" : "s"} published, ${failures} failed.`,
+        });
+      } else if (linked > 0) {
+        setPublishStatus({
+          kind: "success",
+          message: `Plan published — ${linked} day${linked === 1 ? "" : "s"} on your dashboard.`,
+        });
+      } else {
+        setPublishStatus({
+          kind: "info",
+          message: `Created ${orphan} workout plan${orphan === 1 ? "" : "s"} (not yet assigned to a client).`,
         });
       }
+      // Refresh from backend so the UI matches what was actually saved.
+      const refreshed = await fetchWeeklyPlan(role, roleId);
+      setWeeklyPlan(refreshed);
+      setWeeklyDirty(false);
     } catch (error) {
       setPublishStatus({ kind: "error", message: error?.message || "Failed to publish plan." });
     } finally {
@@ -269,10 +271,8 @@ export default function WorkoutsPage() {
   /*  render  */
 
   const tabs = [
-    { key: "my",      label: "My Workouts" },
-    { key: "presets", label: "Preset Library" },
+    { key: "library", label: "Workout Library" },
     { key: "weekly",  label: "Weekly Plan" },
-    ...(role === "coach" ? [{ key: "assigned", label: "Assigned" }] : []),
   ];
 
   return (
@@ -306,6 +306,12 @@ export default function WorkoutsPage() {
           )}
         </div>
 
+        {actionError ? (
+          <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+            {actionError}
+          </div>
+        ) : null}
+
         {/* Tabs */}
         <div className="flex gap-1 bg-[#0A1020] rounded-xl p-1 mb-6">
           {tabs.map((t) => (
@@ -328,7 +334,7 @@ export default function WorkoutsPage() {
         </div>
 
         {/* Search + Filters (not for assigned/weekly tabs) */}
-        {tab !== "assigned" && tab !== "weekly" && (
+        {tab !== "weekly" && (
           <div className="space-y-4 mb-6">
             <input
               type="text"
@@ -368,51 +374,23 @@ export default function WorkoutsPage() {
           /*  Weekly planner  */
           <WeeklyPlanner
             weeklyPlan={weeklyPlan}
-            allWorkouts={[...myWorkouts, ...presets]}
+            allWorkouts={myWorkouts}
             theme={theme}
             onSetDay={handleSetDay}
             onClearDay={handleClearDay}
-            onSave={handleSaveWeeklyPlan}
             onPublish={handlePublishWeeklyPlan}
             publishLabel={role === "client" ? "Publish My Plan" : "Publish Plan"}
             publishStatus={publishStatus}
-            dirty={weeklyDirty}
             saving={weeklySaving}
           />
-        ) : tab === "assigned" ? (
-          /*  Assigned workouts tab (coach only)  */
-          <div className="space-y-4">
-            {assignedWorkouts.length === 0 ? (
-              <div className="text-center py-16">
-                <p className="text-gray-500 text-sm">No workouts assigned yet.</p>
-                <p className="text-gray-600 text-xs mt-2">Create or duplicate a workout, then assign it to your clients.</p>
-              </div>
-            ) : (
-              assignedWorkouts.map((aw) => (
-                <div key={aw.workout_id} className="bg-[#0D1424] border border-white/5 rounded-2xl p-5">
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-white font-bold">{aw.workout_name}</p>
-                    <span className="text-xs text-gray-500">{aw.assigned_to.length} client{aw.assigned_to.length !== 1 ? "s" : ""}</span>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {aw.assigned_to.map((c) => (
-                      <span key={c.client_id} className="px-3 py-1 rounded-full text-xs font-medium bg-white/5 text-gray-300">
-                        {c.name}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
         ) : (
           /*  Workout grid  */
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filtered.length === 0 ? (
               <div className="col-span-full text-center py-16">
                 <p className="text-gray-500 text-sm">
-                  {tab === "my"
-                    ? "No custom workouts yet — create one or duplicate a preset!"
+                  {myWorkouts.length === 0
+                    ? "No workouts in the library yet."
                     : "No workouts match your filters."}
                 </p>
               </div>
@@ -425,9 +403,6 @@ export default function WorkoutsPage() {
                   role={role}
                   canManage={canManageWorkouts}
                   onView={() => setViewWorkout(w)}
-                  onEdit={canManageWorkouts ? () => setEditWorkout({ ...w }) : undefined}
-                  onDuplicate={tab === "presets" && canManageWorkouts ? () => handleDuplicate(w) : undefined}
-                  onAssign={role === "coach" ? () => { setAssignOverlay(w); setSelectedClients([]); setAssignSent(false); } : undefined}
                 />
               ))
             )}
@@ -437,6 +412,9 @@ export default function WorkoutsPage() {
 
       {/*  View Workout Overlay  */}
       <Overlay open={!!viewWorkout} onClose={() => setViewWorkout(null)} title={viewWorkout?.name ?? "Workout"} wide>
+        {logSuccess && (
+          <p className="text-green-400 text-xs mb-2">{logSuccess}</p>
+        )}
         {viewWorkout && (
           <WorkoutView
             workout={viewWorkout}
@@ -444,10 +422,8 @@ export default function WorkoutsPage() {
             role={role}
             canManage={canManageWorkouts}
             onAddToPlan={role === "client" ? (dayKey) => { handleSetDay(dayKey, viewWorkout); setViewWorkout(null); setTab("weekly"); } : undefined}
-            onEdit={canManageWorkouts ? () => { setEditWorkout({ ...viewWorkout }); setViewWorkout(null); } : undefined}
-            onDelete={canManageWorkouts && viewWorkout.type === "custom" ? () => handleDelete(viewWorkout.id) : undefined}
-            onDuplicate={canManageWorkouts && viewWorkout.type === "preset" ? () => { handleDuplicate(viewWorkout); setViewWorkout(null); } : undefined}
-            onAssign={role === "coach" ? () => { setAssignOverlay(viewWorkout); setSelectedClients([]); setAssignSent(false); setViewWorkout(null); } : undefined}
+            onLogExercise={role === "client" ? openLogPrompt : undefined}
+            theme={theme}
           />
         )}
       </Overlay>
@@ -471,46 +447,66 @@ export default function WorkoutsPage() {
       </Overlay>
 
       {/*  Assign Overlay (coach)  */}
-      <Overlay open={!!assignOverlay} onClose={() => setAssignOverlay(null)} title={`Assign: ${assignOverlay?.name ?? ""}`}>
-        {assignOverlay && (
+      {/*  Log Exercise Prompt  */}
+      <Overlay
+        open={!!logPrompt}
+        onClose={() => { if (!logSubmitting) { setLogPrompt(null); setLogError(""); } }}
+        title={logPrompt ? `Log: ${logPrompt.exercise.name}` : "Log Activity"}
+      >
+        {logPrompt && (
           <div className="space-y-4">
-            <p className="text-gray-400 text-sm">Select clients to assign this workout to:</p>
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {clients.map((c) => (
-                <label
-                  key={c.id}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-xl border cursor-pointer transition-colors ${
-                    selectedClients.includes(c.id)
-                      ? "border-opacity-50 bg-opacity-10"
-                      : "border-white/5 bg-white/[0.02] hover:bg-white/[0.04]"
-                  }`}
-                  style={selectedClients.includes(c.id) ? { borderColor: `${theme.accent}60`, backgroundColor: `${theme.accent}10` } : {}}
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedClients.includes(c.id)}
-                    onChange={() =>
-                      setSelectedClients((prev) =>
-                        prev.includes(c.id) ? prev.filter((x) => x !== c.id) : [...prev, c.id]
-                      )
-                    }
-                    className="accent-blue-500"
-                  />
-                  <div>
-                    <p className="text-white text-sm font-medium">{c.name}</p>
-                    <p className="text-gray-500 text-xs">{c.goal}</p>
-                  </div>
-                </label>
-              ))}
+            <p className="text-gray-400 text-sm">
+              {logPrompt.exercise.intensity_value
+                ? `Intensity: ${logPrompt.exercise.intensity_value} ${logPrompt.exercise.intensity_measure}`
+                : "Enter what you actually completed"}
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block">
+                <span className="block text-xs text-gray-500 uppercase tracking-widest mb-1">Completed Sets</span>
+                <input
+                  type="number"
+                  min="0"
+                  inputMode="numeric"
+                  value={logPrompt.completedSets}
+                  onChange={(e) =>
+                    setLogPrompt((prev) => prev && { ...prev, completedSets: e.target.value })
+                  }
+                  className="w-full bg-[#0A1020] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none"
+                  autoFocus
+                />
+              </label>
+              <label className="block">
+                <span className="block text-xs text-gray-500 uppercase tracking-widest mb-1">Completed Reps</span>
+                <input
+                  type="number"
+                  min="0"
+                  inputMode="numeric"
+                  value={logPrompt.completedReps}
+                  onChange={(e) =>
+                    setLogPrompt((prev) => prev && { ...prev, completedReps: e.target.value })
+                  }
+                  className="w-full bg-[#0A1020] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none"
+                />
+              </label>
             </div>
-            <button
-              onClick={handleAssign}
-              disabled={selectedClients.length === 0 || assignSent}
-              className="w-full py-3 rounded-xl text-sm font-bold text-white transition-colors disabled:opacity-40"
-              style={{ backgroundColor: assignSent ? "#22c55e" : theme.accent }}
-            >
-              {assignSent ? "Assigned!" : `Assign to ${selectedClients.length} Client${selectedClients.length !== 1 ? "s" : ""}`}
-            </button>
+            {logError && <p className="text-amber-300 text-xs">{logError}</p>}
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => { if (!logSubmitting) { setLogPrompt(null); setLogError(""); } }}
+                disabled={logSubmitting}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold border border-white/10 text-gray-300 hover:bg-white/5 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitLogPrompt}
+                disabled={logSubmitting}
+                className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-colors disabled:opacity-50"
+                style={{ backgroundColor: theme.accent }}
+              >
+                {logSubmitting ? "Logging..." : "Log"}
+              </button>
+            </div>
           </div>
         )}
       </Overlay>
@@ -522,10 +518,11 @@ export default function WorkoutsPage() {
    WORKOUT CARD — grid card for each workout
    ═══════════════════════════════════════════════════════════════════════ */
 
-function WorkoutCard({ workout, theme, role, canManage, onView, onEdit, onDuplicate, onAssign }) {
+function WorkoutCard({ workout, theme, role, canManage, onView }) {
   void role;
+  void canManage;
+  void theme;
   const w = workout;
-  const hasActions = Boolean((canManage && (onEdit || w.type === "custom")) || onDuplicate || onAssign);
   return (
     <div
       className="bg-[#0D1424] border border-white/5 rounded-2xl p-5 flex flex-col justify-between hover:border-white/10 transition-colors cursor-pointer"
@@ -565,39 +562,7 @@ function WorkoutCard({ workout, theme, role, canManage, onView, onEdit, onDuplic
         </div>
       </div>
 
-      {/* Action buttons */}
-      {hasActions ? (
-        <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
-          {canManage && w.type === "custom" && onEdit && (
-            <button
-              onClick={onEdit}
-              className="flex-1 py-2 rounded-lg text-xs font-semibold border transition-colors"
-              style={{ borderColor: `${theme.accent}40`, color: theme.accentText }}
-            >
-              Edit
-            </button>
-          )}
-          {onDuplicate && (
-            <button
-              onClick={onDuplicate}
-              className="flex-1 py-2 rounded-lg text-xs font-semibold border border-white/10 text-gray-300 hover:bg-white/5 transition-colors"
-            >
-              + My Library
-            </button>
-          )}
-          {onAssign && (
-            <button
-              onClick={onAssign}
-              className="flex-1 py-2 rounded-lg text-xs font-semibold text-white transition-colors"
-              style={{ backgroundColor: theme.accent }}
-            >
-              Assign
-            </button>
-          )}
-        </div>
-      ) : (
-        <p className="text-[11px] text-gray-500 text-center pt-1">Tap to view activities</p>
-      )}
+      <p className="text-[11px] text-gray-500 text-center pt-1">Tap to view activities</p>
     </div>
   );
 }
@@ -606,7 +571,7 @@ function WorkoutCard({ workout, theme, role, canManage, onView, onEdit, onDuplic
    WORKOUT VIEW — overlay detail view
    ═══════════════════════════════════════════════════════════════════════ */
 
-function WorkoutView({ workout, theme, role, canManage, onAddToPlan, onEdit, onDelete, onDuplicate, onAssign }) {
+function WorkoutView({ workout, theme, role, canManage, onAddToPlan, onLogExercise }) {
   void role;
   void canManage;
   const w = workout;
@@ -664,7 +629,18 @@ function WorkoutView({ workout, theme, role, canManage, onAddToPlan, onEdit, onD
                 </div>
                 {ex.notes && <p className="text-gray-600 text-xs mt-1 italic">{ex.notes}</p>}
               </div>
-              <span className="text-gray-600 text-xs font-bold ml-3">#{i + 1}</span>
+              <div className="flex items-center gap-2 ml-3">
+                {onLogExercise && Number.isFinite(Number(ex.id)) && Number(ex.id) > 0 && (
+                  <button
+                    onClick={() => onLogExercise(ex)}
+                    className="text-xs px-3 py-1.5 rounded-full border transition-colors"
+                    style={{ borderColor: `${theme.accent}50`, color: theme.accentText }}
+                  >
+                    Log →
+                  </button>
+                )}
+                <span className="text-gray-600 text-xs font-bold">#{i + 1}</span>
+              </div>
             </div>
           );
         })}
@@ -698,43 +674,6 @@ function WorkoutView({ workout, theme, role, canManage, onAddToPlan, onEdit, onD
             </button>
           </div>
         )}
-        <div className="flex gap-3">
-          {onEdit && w.type === "custom" && (
-            <button
-              onClick={onEdit}
-              className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-colors"
-              style={{ backgroundColor: theme.accent }}
-            >
-              Edit Workout
-            </button>
-          )}
-          {onDuplicate && (
-            <button
-              onClick={onDuplicate}
-              className="flex-1 py-2.5 rounded-xl text-sm font-bold border transition-colors"
-              style={{ borderColor: `${theme.accent}40`, color: theme.accentText }}
-            >
-              Copy to My Library
-            </button>
-          )}
-          {onAssign && (
-            <button
-              onClick={onAssign}
-              className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-colors"
-              style={{ backgroundColor: theme.accent }}
-            >
-              Assign to Client
-            </button>
-          )}
-          {onDelete && (
-            <button
-              onClick={onDelete}
-              className="px-4 py-2.5 rounded-xl text-sm font-bold text-red-400 border border-red-500/30 hover:bg-red-500/10 transition-colors"
-            >
-              Delete
-            </button>
-          )}
-        </div>
       </div>
     </div>
   );
@@ -1059,11 +998,9 @@ function WeeklyPlanner({
   theme,
   onSetDay,
   onClearDay,
-  onSave,
   onPublish,
   publishLabel,
   publishStatus,
-  dirty,
   saving,
 }) {
   const [pickerDay, setPickerDay] = useState(null); // day key currently being assigned
@@ -1118,20 +1055,12 @@ function WeeklyPlanner({
               <button
                 onClick={onPublish}
                 disabled={saving}
-                className="px-5 py-2.5 rounded-xl text-sm font-bold transition-colors disabled:opacity-30 border border-white/10"
-                style={{ backgroundColor: `${theme.accent}20`, color: theme.accentText }}
+                className="px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-colors disabled:opacity-30"
+                style={{ backgroundColor: theme.accent }}
               >
                 {saving ? "Publishing..." : (publishLabel || "Publish Plan")}
               </button>
             ) : null}
-            <button
-              onClick={onSave}
-              disabled={!dirty || saving}
-              className="px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-colors disabled:opacity-30"
-              style={{ backgroundColor: theme.accent }}
-            >
-              {saving ? "Saving..." : dirty ? "Save Plan" : "Saved ✓"}
-            </button>
           </div>
           {publishStatus && (
             <p

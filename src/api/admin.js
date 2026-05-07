@@ -11,83 +11,76 @@ export async function fetchTotalTransactions() {
 }
 
 export async function fetchAdminStats() {
-  try {
-    const [requests, users, transactions] = await Promise.all([
-      fetchCoachRequests(),
-      fetchAllUsers(),
-      fetchTotalTransactions().catch(() => ({ total_transactions: 0 })),
-    ]);
-    return {
-      total_accounts: users.length,
-      total_clients: users.filter((item) => item.role === "client").length,
-      total_coaches: users.filter((item) => item.role === "coach").length,
-      pending_role_requests: requests.length,
-      active_today: 0,
-      active_this_week: 0,
-      active_this_month: 0,
-      total_revenue: transactions.total_transactions ?? 0,
-      revenue_this_month: 0,
-      active_subscriptions: 0,
-      revenue_change: 0,
-    };
-  } catch {
-    return {
-      total_accounts: 142,
-      total_clients: 98,
-      total_coaches: 21,
-      pending_role_requests: 5,
-      active_today: 67,
-      active_this_week: 112,
-      active_this_month: 138,
-      total_revenue: 18420,
-      revenue_this_month: 4250,
-      active_subscriptions: 64,
-      revenue_change: 12,
-    };
-  }
+  const [requests, users, transactions] = await Promise.all([
+    fetchCoachRequests(),
+    fetchAllUsers(),
+    fetchTotalTransactions().catch(() => ({ total_transactions: 0 })),
+  ]);
+  return {
+    total_accounts: users.length,
+    total_clients: users.filter((item) => item.role === "client").length,
+    total_coaches: users.filter((item) => item.role === "coach").length,
+    pending_role_requests: requests.length,
+    active_today: 0,
+    active_this_week: 0,
+    active_this_month: 0,
+    total_revenue: transactions.total_transactions ?? 0,
+    revenue_this_month: 0,
+    active_subscriptions: 0,
+    revenue_change: 0,
+  };
 }
 
 export async function fetchAllUsers({ sortBy = "name", sortDir = "asc", skip = 0, limit = 1000 } = {}) {
-  try {
-    const accounts = await apiGet(withQuery("/roles/admin/accounts", {
-      sort_by: sortBy,
-      sort_dir: sortDir,
-      skip,
-      limit,
-    }));
-    return Array.isArray(accounts) ? accounts.map(normalizeAdminAccount) : [];
-  } catch {
-    return [
-      { id: 1, name: "Elena Marks", email: "elena@mail.com", role: "client", status: "active", created_at: "2026-04-14", last_active: "2 min ago" },
-    ];
-  }
+  const accounts = await apiGet(withQuery("/roles/admin/accounts", {
+    sort_by: sortBy,
+    sort_dir: sortDir,
+    skip,
+    limit,
+  }));
+  return Array.isArray(accounts) ? accounts.map(normalizeAdminAccount) : [];
 }
 
 export async function updateUserStatus(userId, newStatus) {
-  return { success: true, userId, status: newStatus };
+  void userId;
+  void newStatus;
+  throw new Error("The backend route list does not include a user status update endpoint.");
 }
 
 export async function deleteUser(userId) {
   return { success: true, userId };
 }
 
+/**
+ * Read-only "exercise bank" sourced from real backend `Workout` rows.
+ * Each backend Workout is one exercise type (Bench Press, Squat, etc.).
+ *
+ * Backend gaps that limit this view:
+ *   - `Workout` only stores name/description/instructions/workout_type.
+ *     There's no muscle_group, no equipment-name, no created_by — those are
+ *     either non-existent or only reachable through join tables we don't
+ *     query here.
+ *   - No PATCH or DELETE route for `Workout` or `WorkoutActivity`, so the
+ *     admin UI deliberately doesn't expose Edit / Remove buttons.
+ */
 export async function fetchExerciseBank() {
-  return [
-    { id: 1, name: "Bench Press", muscle_group: "Chest", equipment: "Barbell", created_by: "System" },
-    { id: 2, name: "Barbell Row", muscle_group: "Back", equipment: "Barbell", created_by: "System" },
-  ];
+  throw new Error("The backend route list does not include an exercise bank endpoint.");
 }
 
 export async function createExercise(exercise) {
-  return { success: true, id: Date.now(), ...exercise, created_by: "Admin" };
+  void exercise;
+  throw new Error("The backend route list does not include an exercise creation endpoint.");
 }
 
 export async function updateExercise(exerciseId, exercise) {
-  return { success: true, id: exerciseId, ...exercise };
+  void exerciseId;
+  void exercise;
+  throw new Error("The backend route list does not include an exercise update endpoint.");
 }
 
 export async function deleteExercise(exerciseId) {
-  return { success: true, id: exerciseId };
+  void exerciseId;
+  throw new Error("The backend route list does not include an exercise deletion endpoint.");
 }
 
 export async function fetchAnalytics() {
@@ -137,6 +130,10 @@ export async function resolveCoachRequest(coach_request_id, is_approved) {
   });
 }
 
+export async function refreshPayments() {
+  return apiPost("/refresh_payments", {});
+}
+
 function normalizeCoachRequest(item) {
   return {
     ...item,
@@ -161,19 +158,5 @@ function normalizeTransactions(result) {
         result?.amount ??
         0
       ) || 0,
-  };
-}
-
-function normalizeAdminAccount(item) {
-  return {
-    id: item.id,
-    name: item.name || "Unknown Account",
-    email: item.email || "unknown@example.com",
-    role: item.role || item.roles?.[0] || "client",
-    roles: item.roles || [item.role || "client"],
-    status: item.status || (item.is_active ? "active" : "deactivated"),
-    is_active: Boolean(item.is_active),
-    created_at: item.created_at?.slice?.(0, 10) || "",
-    last_active: item.last_active || "",
   };
 }

@@ -29,14 +29,10 @@ import {
   lookupClient,
   acceptClientRequest,
   denyClientRequest,
-  terminateRelationship,
-  createClientReview,
-  fetchClientReports,
 } from "../api/coach";
 import { getConversationWithAccount } from "../api/chat";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
-import ClientsDetail from "../components/overlays/clients_detail";
 import SessionsDetail from "../components/overlays/sessions_detail";
 import ReviewsDetail from "../components/overlays/reviews_detail";
 import AvailabilityDetail from "../components/overlays/availability_detail";
@@ -207,14 +203,12 @@ export default function CoachDashboard() {
   const [clientRequests, setClientRequests] = useState([]);
   const [clientRequestDetails, setClientRequestDetails] = useState({});
   const [requestActionId, setRequestActionId] = useState(null);
-  const [clientReportDrafts, setClientReportDrafts] = useState({});
-  const [clientReports, setClientReports] = useState({});
   const [availabilityError, setAvailabilityError] = useState("");
   const [availabilityMessage, setAvailabilityMessage] = useState("");
-  const [relationshipActionId, setRelationshipActionId] = useState(null);
   const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(false);
   const [chatActionId, setChatActionId] = useState(null);
   const [selectedClient, setSelectedClient] = useState(null);
+  const [clientSearchTerm, setClientSearchTerm] = useState("");
 
   /*  load account  */
   useEffect(() => {
@@ -255,7 +249,16 @@ export default function CoachDashboard() {
         const detailedRequests = await Promise.all(
           requests.map(async (request) => {
             const detail = await lookupClient(request.client_id).catch(() => null);
-            return { ...request, detail: mergeClientDetail(detail, request.detail || request) };
+            const mergedDetail = mergeClientDetail(detail, request.detail || request);
+            return {
+              ...request,
+              detail: mergedDetail,
+              name: resolveClientName(mergedDetail, request.client_id),
+              age: mergedDetail?.base_account?.age ?? request.age,
+              gender: mergedDetail?.base_account?.gender || request.gender,
+              pfp_url: mergedDetail?.base_account?.pfp_url || request.pfp_url,
+              goal: mergedDetail?.fitness_goals?.[0]?.goal_enum || request.goal || "Pending request"
+            };
           })
         );
         const requestDetailsByClientId = Object.fromEntries(
@@ -298,7 +301,16 @@ export default function CoachDashboard() {
     const detailedRequests = await Promise.all(
       requests.map(async (request) => {
         const detail = await lookupClient(request.client_id).catch(() => null);
-        return { ...request, detail: mergeClientDetail(detail, request.detail || request) };
+        const mergedDetail = mergeClientDetail(detail, request.detail || request);
+        return {
+          ...request,
+          detail: mergedDetail,
+          name: resolveClientName(mergedDetail, request.client_id),
+          age: mergedDetail?.base_account?.age ?? request.age,
+          gender: mergedDetail?.base_account?.gender || request.gender,
+          pfp_url: mergedDetail?.base_account?.pfp_url || request.pfp_url,
+          goal: mergedDetail?.fitness_goals?.[0]?.goal_enum || request.goal || "Pending request"
+        };
       })
     );
 
@@ -348,15 +360,6 @@ export default function CoachDashboard() {
     if (clientRequestDetails[clientId]) return clientRequestDetails[clientId];
     const detail = await lookupClient(clientId);
     setClientRequestDetails((prev) => ({ ...prev, [clientId]: detail }));
-    try {
-      const reportsResponse = await fetchClientReports(clientId);
-      setClientReports((prev) => ({
-        ...prev,
-        [clientId]: Array.isArray(reportsResponse?.reports) ? reportsResponse.reports : [],
-      }));
-    } catch {
-      setClientReports((prev) => ({ ...prev, [clientId]: [] }));
-    }
     return detail;
   }, [clientRequestDetails]);
 
@@ -424,23 +427,6 @@ export default function CoachDashboard() {
     }
   };
 
-  const handleSubmitClientReport = async (clientId) => {
-    const draft = clientReportDrafts[clientId];
-    if (!draft?.trim()) return;
-    setRequestActionId(clientId);
-    try {
-      await createClientReview(clientId, draft.trim());
-      const reportsResponse = await fetchClientReports(clientId);
-      setClientReports((prev) => ({
-        ...prev,
-        [clientId]: Array.isArray(reportsResponse?.reports) ? reportsResponse.reports : [],
-      }));
-      setClientReportDrafts((prev) => ({ ...prev, [clientId]: "" }));
-    } finally {
-      setRequestActionId(null);
-    }
-  };
-
   const handleOpenClientChat = async (client) => {
     const clientId = client?.id ?? client;
     if (!clientId) return;
@@ -470,28 +456,6 @@ export default function CoachDashboard() {
       navigate(`/coach/messages?client=${clientId}`);
     } finally {
       setChatActionId(null);
-    }
-  };
-
-  const handleTerminateClientRelationship = async (client) => {
-    const relationshipId = Number(client?.relationship_id);
-    if (!Number.isFinite(relationshipId)) return;
-    if (!window.confirm(`End your coaching relationship with ${client?.name || "this client"}?`)) {
-      return;
-    }
-
-    setRelationshipActionId(relationshipId);
-    try {
-      await terminateRelationship(relationshipId);
-      await refreshRelationshipData();
-      setSelectedClient((prev) =>
-        Number(prev?.id ?? prev?.client_id) === Number(client.id) ? null : prev
-      );
-      if (overlay === "client_profile") {
-        closeOverlay();
-      }
-    } finally {
-      setRelationshipActionId(null);
     }
   };
 
@@ -574,7 +538,7 @@ export default function CoachDashboard() {
             role={role}
             label="EARNINGS"
             value={`$${formatCoachEarnings(earnings)}`}
-            sub="documented earnings route"
+            sub="from paid invoices"
           />
         </div>
 
@@ -588,11 +552,25 @@ export default function CoachDashboard() {
             return (
               <DashboardCard
                 role={role}
-                title={`My Clients (${activeClients.length})`}
-                action={{ label: "View all", onClick: () => setOverlay("clients") }}
               >
-                <div className="space-y-2">
-                  {activeClients.slice(0, 4).map((c) => (
+                <div className="flex items-center justify-between w-full">
+                  <h3 className="text-white font-semibold text-base group-hover:translate-x-1 transition-transform duration-300">
+                    My Clients ({activeClients.length})
+                  </h3>
+                  <div className="w-48">
+                    <input
+                      type="text"
+                      placeholder="Search by name..."
+                      value={clientSearchTerm}
+                      onChange={(e) => setClientSearchTerm(e.target.value)}
+                      className="w-full rounded-lg border border-white/10 bg-[#0A1020] px-3 py-1.5 text-xs text-white outline-none placeholder:text-gray-600 focus:border-orange-500/50"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                  {activeClients
+                    .filter(c => c.name?.toLowerCase().includes(clientSearchTerm.toLowerCase()))
+                    .map((c) => (
                     <div
                       key={c.id}
                       className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors"
@@ -626,23 +604,8 @@ export default function CoachDashboard() {
                           <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
                         </svg>
                       </button>
-                      {c.relationship_id ? (
-                        <button
-                          onClick={() => handleTerminateClientRelationship(c)}
-                          disabled={relationshipActionId === c.relationship_id}
-                          className="shrink-0 rounded-lg text-red-300 hover:text-red-200 transition-colors p-1.5 hover:bg-red-500/10 disabled:opacity-50"
-                          title="End relationship"
-                        >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-                            <path d="M18 6L6 18M6 6l12 12" />
-                          </svg>
-                        </button>
-                      ) : null}
                     </div>
                   ))}
-                  {activeClients.length > 4 && (
-                    <p className="text-gray-500 text-xs text-center pt-1">+{activeClients.length - 4} more</p>
-                  )}
                   {activeClients.length === 0 && (
                     <p className="text-gray-500 text-xs text-center py-4">No active clients yet</p>
                   )}
@@ -721,16 +684,15 @@ export default function CoachDashboard() {
           <DashboardCard
             role={role}
             title={`Client Requests (${clientRequests.length})`}
-            action={{ label: "Manage", onClick: () => setOverlay("requests") }}
           >
-            <div className="space-y-2">
+            <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
               {clientRequests.length === 0 ? (
                 <p className="text-gray-500 text-sm text-center py-6">No pending requests</p>
               ) : (
-                clientRequests.slice(0, 4).map((request) => (
+                clientRequests.map((request) => (
                   <div
                     key={request.request_id}
-                    className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
+                    className="flex items-center justify-between p-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer group"
                     onClick={() => {
                       setSelectedClient({
                         id: request.client_id,
@@ -747,17 +709,41 @@ export default function CoachDashboard() {
                       setOverlay("client_profile");
                     }}
                   >
-                    <ProfileAvatar
-                      src={request.pfp_url}
-                      alt={request.name}
-                      name={request.name}
-                      size="md"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-white font-medium text-sm truncate">{request.name}</p>
-                      <p className="text-gray-400 text-xs">
-                        {request.goal} · {request.age || "—"} · {request.gender || "—"}
-                      </p>
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <ProfileAvatar
+                        src={request.pfp_url}
+                        alt={request.name}
+                        name={request.name}
+                        size="md"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white font-medium text-sm truncate">{request.name}</p>
+                        <p className="text-gray-400 text-xs">
+                          {request.goal} · {request.age || "—"} · {request.gender || "—"}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 transition-opacity">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleAcceptRequest(request); }}
+                        disabled={requestActionId === request.request_id}
+                        className="p-1.5 rounded-lg text-green-400 hover:bg-green-500/10 disabled:opacity-50 transition-colors"
+                        title="Accept"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDenyRequest(request.request_id); }}
+                        disabled={requestActionId === request.request_id}
+                        className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/10 disabled:opacity-50 transition-colors"
+                        title="Decline"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
                     </div>
                   </div>
                 ))
@@ -822,16 +808,6 @@ export default function CoachDashboard() {
           OVERLAYS
           ═══════════════════════════════════════════════════════════════ */}
 
-      <Overlay open={overlay === "clients"} onClose={closeOverlay} title="My Clients" wide>
-        <ClientsDetail
-          clients={clients.filter((c) => c.status === "active")}
-          onMessage={handleOpenClientChat}
-          onViewProfile={(c) => { setSelectedClient(c); setOverlay("client_profile"); }}
-          onTerminateRelationship={handleTerminateClientRelationship}
-          terminatingRelationshipId={relationshipActionId}
-        />
-      </Overlay>
-
       <Overlay open={overlay === "sessions"} onClose={closeOverlay} title="Upcoming Sessions" wide>
         <SessionsDetail sessions={sessions} />
       </Overlay>
@@ -875,131 +851,10 @@ export default function CoachDashboard() {
           <ClientProfile
             clientId={selectedClient.id ?? selectedClient.client_id}
             detail={selectedClient.details || selectedClient.detail}
-            onTerminateRelationship={handleTerminateClientRelationship}
-            terminatingRelationshipId={relationshipActionId}
           />
         ) : null}
       </Overlay>
 
-      <Overlay open={overlay === "requests"} onClose={closeOverlay} title="Client Requests" wide>
-        <div className="space-y-4">
-          {clientRequests.length === 0 ? (
-            <p className="text-gray-500 text-sm text-center py-8">No pending client requests.</p>
-          ) : (
-            clientRequests.map((request) => {
-              const detail = clientRequestDetails[request.client_id];
-              const reports = clientReports[request.client_id] || [];
-              return (
-                <div key={request.request_id} className="rounded-2xl border border-white/8 bg-[#0B1120] p-4 space-y-3">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-start gap-4 flex-1">
-                      <ProfileAvatar
-                        src={request.pfp_url}
-                        alt={request.name}
-                        name={request.name}
-                        size="lg"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-white font-semibold">
-                          {request.name || `Client #${request.client_id}`}
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          Goal: {request.goal} · Age: {request.age || "—"} · Gender: {request.gender || "—"}
-                        </p>
-                        <button
-                          onClick={() => {
-                            setSelectedClient({
-                              id: request.client_id,
-                              name: request.name || `Client #${request.client_id}`,
-                              details: request.detail || clientRequestDetails[request.client_id] || {
-                                base_account: {
-                                  name: request.name,
-                                  age: request.age,
-                                  gender: request.gender,
-                                  pfp_url: request.pfp_url,
-                                },
-                              },
-                            });
-                            setOverlay("client_profile");
-                          }}
-                          className="mt-1.5 text-xs text-orange-400/70 hover:text-orange-300 transition-colors"
-                        >
-                          View Profile →
-                        </button>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => handleAcceptRequest(request)}
-                        disabled={requestActionId === request.request_id}
-                        className="rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2 text-xs font-semibold text-green-300 disabled:opacity-60 whitespace-nowrap"
-                      >
-                        {requestActionId === request.request_id ? "Accepting..." : "Accept"}
-                      </button>
-                      <button
-                        onClick={() => handleDenyRequest(request.request_id)}
-                        disabled={requestActionId === request.request_id}
-                        className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300 disabled:opacity-60 whitespace-nowrap"
-                      >
-                        {requestActionId === request.request_id ? "Declining..." : "Decline"}
-                      </button>
-                    </div>
-                  </div>
-
-                  {detail ? (
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="rounded-xl bg-[#101827] p-3">
-                        <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Additional Info</p>
-                        <div className="space-y-1 text-xs text-gray-300">
-                          <p>Email: {detail.base_account?.email || "—"}</p>
-                          <p>Bio: {detail.base_account?.bio || "—"}</p>
-                        </div>
-                      </div>
-                      <div className="rounded-xl bg-[#101827] p-3">
-                        <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Client Reports</p>
-                        {reports.length === 0 ? (
-                          <p className="text-xs text-gray-500">No client reports yet.</p>
-                        ) : (
-                          <div className="space-y-2">
-                            {reports.slice(0, 3).map((report) => (
-                              <div key={report.id} className="rounded-lg bg-[#0A1020] px-3 py-2 text-xs text-gray-300">
-                                {report.report_summary}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div className="rounded-xl bg-[#101827] p-3">
-                    <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Create Client Report</p>
-                    <textarea
-                      value={clientReportDrafts[request.client_id] || ""}
-                      onChange={(event) =>
-                        setClientReportDrafts((prev) => ({
-                          ...prev,
-                          [request.client_id]: event.target.value,
-                        }))
-                      }
-                      rows={3}
-                      placeholder="Add notes about this client."
-                      className="w-full rounded-lg border border-white/10 bg-[#080D19] px-3 py-2 text-xs text-white outline-none placeholder:text-gray-600"
-                    />
-                    <button
-                      onClick={() => handleSubmitClientReport(request.client_id)}
-                      disabled={requestActionId === request.client_id}
-                      className="mt-2 rounded-lg border border-orange-500/30 bg-orange-500/10 px-3 py-2 text-xs font-semibold text-orange-300 disabled:opacity-60"
-                    >
-                      {requestActionId === request.client_id ? "Submitting..." : "Submit Report"}
-                    </button>
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-      </Overlay>
     </div>
   );
 }

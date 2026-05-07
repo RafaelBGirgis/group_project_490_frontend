@@ -1,9 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Navbar } from "../components/navbar";
+import AvailabilityDetail from "../components/overlays/availability_detail";
 import { fetchMe } from "../api/client";
 import { buildCoachRequestPayload, createCoachRequest, fetchCoachProfile } from "../api/coach";
-import { EMPTY_TRAINING_AVAILABILITY } from "../utils/availabilityModel";
+import {
+  convertGridToTrainingAvailability,
+  convertTrainingAvailabilityToGrid,
+  EMPTY_TRAINING_AVAILABILITY,
+} from "../utils/availabilityModel";
 
 const SPECIALIZATION_OPTIONS = [
   "Strength Training",
@@ -18,10 +23,6 @@ const SPECIALIZATION_OPTIONS = [
   "Rehabilitation",
 ];
 const AVAILABILITY_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const AVAILABILITY_TIMES = [
-  "6AM", "7AM", "8AM", "9AM", "10AM", "11AM",
-  "12PM", "1PM", "2PM", "3PM", "4PM", "5PM", "6PM", "7PM", "8PM",
-];
 
 function CoachRequestFormPage() {
   const navigate = useNavigate();
@@ -374,41 +375,19 @@ function CoachRequestFormPage() {
               <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
                 Availability
               </label>
-              <div className="rounded-xl border border-white/6 bg-[#101827] p-4">
-                <div className="mb-3 grid grid-cols-[70px_repeat(7,minmax(0,1fr))] gap-2 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
-                  <div>Time</div>
-                  {AVAILABILITY_DAYS.map((day) => (
-                    <div key={day} className="text-center">{day}</div>
-                  ))}
-                </div>
-                <div className="space-y-2">
-                  {AVAILABILITY_TIMES.map((time) => (
-                    <div key={time} className="grid grid-cols-[70px_repeat(7,minmax(0,1fr))] gap-2">
-                      <div className="flex items-center text-xs text-slate-400">{time}</div>
-                      {AVAILABILITY_DAYS.map((day) => {
-                        const selected = availability[day].includes(time);
-                        return (
-                          <button
-                            key={`${day}-${time}`}
-                            type="button"
-                            onClick={() => toggleAvailability(day, time)}
-                            disabled={isViewMode}
-                            className="rounded-lg border px-2 py-2 text-[10px] font-semibold transition"
-                            style={{
-                              borderColor: selected ? "#F59E0B" : "rgba(255,255,255,0.08)",
-                              backgroundColor: selected ? "rgba(245,158,11,0.18)" : "rgba(255,255,255,0.03)",
-                              color: selected ? "#FBBF24" : "#64748B",
-                              cursor: isViewMode ? "default" : "pointer",
-                            }}
-                          >
-                            {selected ? "Open" : ""}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <AvailabilityDetail
+                slots={convertTrainingAvailabilityToGrid(availability)}
+                weekdays={AVAILABILITY_DAYS}
+                role="coach"
+                onSave={
+                  isViewMode
+                    ? undefined
+                    : async (updatedSlots) => {
+                        setAvailability(convertGridToTrainingAvailability(updatedSlots));
+                      }
+                }
+                showDefaultRows={true}
+              />
             </div>
 
             <div className="space-y-3">

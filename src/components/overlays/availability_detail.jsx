@@ -226,6 +226,7 @@ export default function AvailabilityDetail({
         </div>
       </div>
 
+<<<<<<< HEAD
       {/*  Instructions  */}
       <div className="rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3">
         <p className="text-gray-400 text-xs leading-relaxed">
@@ -235,6 +236,8 @@ export default function AvailabilityDetail({
         </p>
       </div>
 
+=======
+>>>>>>> 30980fb4de99751b26ace972f6b40cc2bdc44b92
       {/*  Schedule Grid  */}
       <div className="rounded-xl border border-white/5 bg-[rgba(255,255,255,0.02)] p-4">
         {/* Header row with clickable day names */}
@@ -245,6 +248,7 @@ export default function AvailabilityDetail({
             return (
               <div key={d} className="text-center">
                 <button
+                  type="button"
                   onClick={() => dayHasSlots ? clearDay(dayIdx) : setDayAvailable(dayIdx)}
                   className="text-xs text-gray-400 font-semibold hover:text-white transition-colors"
                   title={dayHasSlots ? `Clear all ${d}` : `Set all ${d} available`}
@@ -264,6 +268,10 @@ export default function AvailabilityDetail({
             </p>
             {onSave && (
               <button
+<<<<<<< HEAD
+=======
+                type="button"
+>>>>>>> 30980fb4de99751b26ace972f6b40cc2bdc44b92
                 onClick={() => {
                   setSlots(createBlankRows());
                   setHasChanges(true);
@@ -319,6 +327,7 @@ export default function AvailabilityDetail({
       {/*  Action Buttons  */}
       <div className="flex items-center gap-3 pt-2 border-t border-white/5">
         <button
+          type="button"
           onClick={clearAll}
           className="text-xs text-gray-500 hover:text-red-400 transition-colors"
         >
@@ -330,6 +339,7 @@ export default function AvailabilityDetail({
         )}
         {onSave && (
           <button
+            type="button"
             onClick={handleSave}
             disabled={saving || !hasChanges}
             className={`px-6 py-2.5 rounded-xl text-sm font-medium text-white transition-colors disabled:cursor-not-allowed ${

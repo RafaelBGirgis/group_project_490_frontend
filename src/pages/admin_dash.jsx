@@ -279,6 +279,13 @@ export default function AdminDash() {
   useEffect(() => {
     if (!authed) return;
     (async () => {
+<<<<<<< HEAD
+=======
+      setLoading(true);
+
+      // Fetch account info — use a direct fetch to avoid the global 401
+      // redirect in apiFetch (admin may not have a backend-valid JWT yet)
+>>>>>>> 30980fb4de99751b26ace972f6b40cc2bdc44b92
       try {
         setLoading(true);
 
@@ -320,6 +327,57 @@ export default function AdminDash() {
       } finally {
         setLoading(false);
       }
+<<<<<<< HEAD
+=======
+
+      try {
+        const [s, u, an, requests] = await Promise.all([
+          fetchAdminStats().catch(() => ({
+            total_accounts: 0,
+            total_clients: 0,
+            total_coaches: 0,
+            pending_role_requests: 0,
+            active_today: 0,
+            active_this_week: 0,
+            active_this_month: 0,
+            total_revenue: 0,
+            revenue_this_month: 0,
+            active_subscriptions: 0,
+            revenue_change: 0,
+          })),
+          fetchAllUsers().catch(() => []),
+          fetchAnalytics().catch(() => ({
+            daily: [],
+            weekly: [],
+            monthly: [],
+            summary: {
+              dau: 0,
+              wau: 0,
+              mau: 0,
+              dau_change: 0,
+              wau_change: 0,
+              mau_change: 0,
+              total_signups_30d: 0,
+              avg_session_min: 0,
+              retention_7d: 0,
+            },
+          })),
+          fetchCoachRequests().catch(() => []),
+        ]);
+        const transactions = await fetchTotalTransactions().catch(() => ({ total_transactions: 0 }));
+        const exerciseResponse = await fetchExerciseBank().catch(() => []);
+
+        setStats(s);
+        setUsers(u);
+        setExercises(exerciseResponse);
+        setAnalytics(an);
+        setRoleRequests(requests);
+        setTotalTransactions(transactions.total_transactions || 0);
+        setReports([]);
+      } finally {
+        setLoading(false);
+      }
+>>>>>>> 30980fb4de99751b26ace972f6b40cc2bdc44b92
     })();
   }, [authed, userSortBy, userSortDir]);
 

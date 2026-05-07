@@ -508,29 +508,25 @@ export default function ClientDash() {
           </div>
 
           <DashboardCard role={role} title="Calories" className="items-center">
-            <div className="flex justify-center">
-              <ProgressRing
-                role={role}
-                percent={calPercent}
-                size={120}
-                label={
-                  caloriesConsumed !== null ? caloriesConsumed.toString() : "—"
-                }
-                sublabel={`of ${caloriesGoal} kcal`}
-              />
-            </div>
+            <ProgressRing
+              role={role}
+              percent={calPercent}
+              size={120}
+              label={
+                caloriesConsumed !== null ? caloriesConsumed.toString() : "—"
+              }
+              sublabel={`of ${caloriesGoal} kcal`}
+            />
           </DashboardCard>
 
           <DashboardCard role={role} title="Progress" className="items-center">
-            <div className="flex justify-center">
-              <ProgressRing
-                role={role}
-                percent={workoutPercent}
-                size={120}
-                label={`${workoutPercent}%`}
-                sublabel="weekly goal"
-              />
-            </div>
+            <ProgressRing
+              role={role}
+              percent={workoutPercent}
+              size={120}
+              label={`${workoutPercent}%`}
+              sublabel="weekly goal"
+            />
             <div className="w-full bg-[#0A1020] rounded-xl px-4 py-2 text-center mt-2">
               <p className="text-[10px] text-gray-500 uppercase tracking-widest">
                 Workouts
@@ -597,10 +593,10 @@ export default function ClientDash() {
             }}
             footer={
               <button
-                onClick={() => navigate("/workouts?role=client")}
+                onClick={() => navigate("/plan?role=client")}
                 className="w-full py-2 rounded-xl border border-blue-500/30 text-blue-400 text-xs font-semibold hover:bg-blue-500/10 transition-colors"
               >
-                Browse & Build Workouts
+                Plan My Week
               </button>
             }
           >
@@ -749,9 +745,6 @@ export default function ClientDash() {
                 <p className="text-[10px] uppercase tracking-widest text-gray-500">Booked</p>
               </div>
             </div>
-            <p className="mb-3 text-xs text-gray-500">
-              Saved as one-hour windows through your client availability route.
-            </p>
             <div className="grid grid-cols-8 gap-1 mb-2">
               <div />
               {WEEKDAYS.map((d) => (

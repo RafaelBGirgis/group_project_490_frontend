@@ -11,8 +11,8 @@ async function resolvePostLoginPath(account) {
   const coachAccess = await getCoachAccessState(account, roleState);
 
   if (roleState.hasAdminRole) return "/admin";
-  if (coachAccess.canAccessCoach) return "/coach";
   if (roleState.hasClientRole) return "/client";
+  if (coachAccess.canAccessCoach) return "/coach";
   return "/onboarding";
 }
 
@@ -244,5 +244,4 @@ function FeatureCard({ emoji, title, text }) {
 }
 
 export default LoginPage;
-
 

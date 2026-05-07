@@ -12,6 +12,7 @@ export async function fetchTotalTransactions() {
 
 export async function fetchAdminStats() {
 <<<<<<< HEAD
+<<<<<<< HEAD
   try {
     const [requests, users, transactions] = await Promise.all([
       fetchCoachRequests(),
@@ -85,6 +86,30 @@ export async function fetchAllUsers({ sortBy = "name", sortDir = "asc", skip = 0
 }
 
 export async function fetchAllUsers({ sortBy = "name", sortDir = "asc", skip = 0, limit = 1000 } = {}) {
+=======
+  const [requests, users, transactions] = await Promise.all([
+    fetchCoachRequests(),
+    fetchAllUsers(),
+    fetchTotalTransactions().catch(() => ({ total_transactions: 0 })),
+  ]);
+
+  return {
+    total_accounts: users.length,
+    total_clients: users.filter((item) => item.role === "client").length,
+    total_coaches: users.filter((item) => item.role === "coach").length,
+    pending_role_requests: requests.length,
+    active_today: 0,
+    active_this_week: 0,
+    active_this_month: 0,
+    total_revenue: transactions.total_transactions ?? 0,
+    revenue_this_month: 0,
+    active_subscriptions: 0,
+    revenue_change: 0,
+  };
+}
+
+export async function fetchAllUsers({ sortBy = "name", sortDir = "asc", skip = 0, limit = 1000 } = {}) {
+>>>>>>> 30980fb4de99751b26ace972f6b40cc2bdc44b92
   const accounts = await apiGet(withQuery("/roles/admin/accounts", {
     sort_by: sortBy,
     sort_dir: sortDir,
@@ -92,7 +117,10 @@ export async function fetchAllUsers({ sortBy = "name", sortDir = "asc", skip = 0
     limit,
   }));
   return Array.isArray(accounts) ? accounts.map(normalizeAdminAccount) : [];
+<<<<<<< HEAD
 >>>>>>> 1107c76343c40bcd02fffd17b03604608ca60b2e
+=======
+>>>>>>> 30980fb4de99751b26ace972f6b40cc2bdc44b92
 }
 
 export async function updateUserStatus(userId, newStatus) {

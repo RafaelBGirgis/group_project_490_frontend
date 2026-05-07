@@ -210,6 +210,7 @@ function ProfilePage({ role = "client" }) {
   });
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
+  const [hasCoachStatus, setHasCoachStatus] = useState(false);
   const [progressPicPage, setProgressPicPage] = useState(0);
   const PICS_PER_PAGE = 6;
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
@@ -286,6 +287,7 @@ function ProfilePage({ role = "client" }) {
         const data = meData;
         const coachAccess = await getCoachAccessState(data);
         setCanSwitchToCoach(coachAccess.canAccessCoach);
+        setHasCoachStatus(coachAccess.hasCoachRecord);
         if (isCoach && !coachAccess.canAccessCoach) {
           navigate("/profile");
           return;
@@ -863,13 +865,15 @@ function ProfilePage({ role = "client" }) {
               <>
                 <SidebarCard title="Account Actions">
                   <div className="space-y-3">
-                    <button
-                      onClick={() => navigate("/coach-request")}
-                      className="w-full rounded-xl px-4 py-3 text-sm font-semibold text-white"
-                      style={{ backgroundColor: "#F59E0B" }}
-                    >
-                      Become Coach
-                    </button>
+                    {!hasCoachStatus && (
+                      <button
+                        onClick={() => navigate("/coach-request")}
+                        className="w-full rounded-xl px-4 py-3 text-sm font-semibold text-white"
+                        style={{ backgroundColor: "#F59E0B" }}
+                      >
+                        Become Coach
+                      </button>
+                    )}
 
                     <button
                       onClick={handleDeactivateAccount}
@@ -1686,7 +1690,6 @@ function EditableMetadataSection({
 }
 
 export default ProfilePage;
-
 
 
 

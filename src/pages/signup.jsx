@@ -5,7 +5,6 @@ import { isAuthenticated, signup as signupRequest, storeToken } from "../api/aut
 import { fetchMe } from "../api/client";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
-import { saveSignupPrefill } from "../utils/profileDrafts";
 
 async function resolvePostSignupPath(account) {
   const roleState = await resolveRoleState();
@@ -90,14 +89,6 @@ export default function SignupPage() {
         formData.bio.trim() || undefined
       );
       storeToken(data.access_token);
-      saveSignupPrefill({
-        name: formData.name,
-        email: formData.email,
-        age: parsedAge,
-        gender: formData.gender,
-        bio: formData.bio.trim(),
-        pfpUrl: formData.pfpUrl.trim(),
-      });
       const account = await fetchMe();
       window.location.href = await resolvePostSignupPath(account);
     } catch (err) {
@@ -359,5 +350,4 @@ function FeatureCard({ emoji, title, text }) {
     </div>
   );
 }
-
 

@@ -8,6 +8,14 @@ export async function fetchConversationWithAccount(accountId, fallback = {}) {
     const result = await apiGet(`/roles/shared/chat/by-account/${accountId}`);
     return normalizeConversation(result, fallback);
   } catch (error) {
+    if (error?.status && error.status !== 404) {
+      try {
+        const legacyResult = await apiGet(`/roles/shared/chat/chat_with_account/${accountId}`);
+        return normalizeConversation(legacyResult, fallback);
+      } catch {
+        // Fall through to the original error below.
+      }
+    }
     if (error?.status === 404) {
       return null;
     }
@@ -17,7 +25,13 @@ export async function fetchConversationWithAccount(accountId, fallback = {}) {
 
 export async function fetchConversations(_accountId, _role = "client", options = {}) {
   const partnerAccounts = Array.isArray(options.partnerAccounts)
-    ? options.partnerAccounts.filter((item) => item?.account_id)
+    ? Array.from(
+        new Map(
+          options.partnerAccounts
+            .filter((item) => item?.account_id)
+            .map((item) => [Number(item.account_id), item])
+        ).values()
+      )
     : [];
 
   if (partnerAccounts.length === 0) {
@@ -43,34 +57,74 @@ export async function getConversationWithAccount(accountId, partner = {}) {
   return fetchConversationWithAccount(accountId, partner);
 }
 
+export async function createConversation(accountId) {
+  const result = await apiPost("/roles/shared/chat/new_chat", {
+    account_id: Number(accountId),
+  });
+  return normalizeConversation(result, { account_id: Number(accountId) });
+}
+
 export function cacheConversationForAccount() {}
 
 export function updateConversationPreview() {}
 
 export async function fetchMessages(chatId, { skip = 0, limit = 100 } = {}) {
-  const result = await apiGet(withQuery(`/roles/shared/chat/messages/${chatId}`, { skip, limit }));
-  const messages = Array.isArray(result?.messages) ? result.messages : [];
-  return messages.map((message) => ({
-    id: message.id,
-    from_account_id: message.from_account_id,
-    content: message.message_text,
-    created_at: message.last_updated || new Date().toISOString(),
-    is_read: message.is_read,
-  }));
+  let result;
+  try {
+    result = await apiGet(
+      withQuery(`/roles/shared/chat/messages/${chatId}`, { skip, limit })
+    );
+  } catch (error) {
+    if (error?.status === 404 || error?.status === 405) {
+      result = await apiGet(
+        withQuery(`/roles/shared/chat/get_messages/${chatId}`, { skip, limit })
+      );
+    } else {
+      throw error;
+    }
+  }
+  const messages =
+    Array.isArray(result)
+      ? result
+      : Array.isArray(result?.messages)
+        ? result.messages
+        : Array.isArray(result?.items)
+          ? result.items
+          : [];
+  return messages.map(normalizeMessage).filter(Boolean);
 }
 
 export async function sendMessage(chatId, content) {
-  const result = await apiPost(withQuery(`/roles/shared/chat/messages/${chatId}`, {
-    message_text: content,
-  }));
-  const createdAt = new Date().toISOString();
-  return {
-    id: result?.message_id,
-    from_account_id: result?.from_account_id,
-    content: result?.message_text,
-    created_at: createdAt,
-    is_read: true,
-  };
+  let result;
+  try {
+    result = await apiPost(
+      withQuery(`/roles/shared/chat/messages/${chatId}`, {
+        message_text: content,
+      })
+    );
+  } catch (error) {
+    if (error?.status === 404 || error?.status === 405) {
+      result = await apiPost(
+        withQuery(`/roles/shared/chat/send_message/${chatId}`, {
+          message_text: content,
+        })
+      );
+    } else {
+      throw error;
+    }
+  }
+  return (
+    normalizeMessage(result?.message || result?.data || result) || {
+      id: result?.message_id ?? result?.id ?? Date.now(),
+      from_account_id: result?.from_account_id ?? result?.account_id ?? null,
+      content: result?.message_text ?? result?.content ?? content,
+      created_at:
+        result?.created_at ??
+        result?.last_updated ??
+        new Date().toISOString(),
+      is_read: Boolean(result?.is_read ?? true),
+    }
+  );
 }
 
 export function formatChatTimestamp(value, { includeZone = false } = {}) {
@@ -88,25 +142,27 @@ export function formatChatTimestamp(value, { includeZone = false } = {}) {
   }
 }
 
-function readJson(key) {
-  const raw = localStorage.getItem(key);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
 function normalizeConversation(result, fallback = {}) {
   if (!result || typeof result !== "object") return null;
 
-  const chatId = result.chat_id ?? result.id ?? result.chat?.id;
+  const chatId =
+    result.chat_id ??
+    result.id ??
+    result.chat?.id ??
+    result.chat?.chat_id;
   if (!chatId) return null;
 
+  const account =
+    result.account ||
+    result.partner ||
+    result.chat_with ||
+    result.other_account ||
+    null;
   const lastMessage =
     result.last_message?.message_text ||
     result.last_message?.content ||
+    result.messages?.[result.messages.length - 1]?.message_text ||
+    result.messages?.[result.messages.length - 1]?.content ||
     result.last_message_text ||
     result.preview ||
     "";
@@ -123,16 +179,20 @@ function normalizeConversation(result, fallback = {}) {
       fallback.id ??
       fallback.partner_id ??
       result.partner_id ??
+      result.partner?.id ??
+      result.account?.id ??
       result.account_id ??
       null,
     partner_account_id:
       fallback.account_id ??
       fallback.accountId ??
+      account?.id ??
       result.account_id ??
       null,
     partner_name:
       fallback.name ||
       fallback.partner_name ||
+      account?.name ||
       result.partner_name ||
       result.account_name ||
       result.name ||
@@ -148,25 +208,48 @@ function normalizeConversation(result, fallback = {}) {
   };
 }
 
+function normalizeMessage(message) {
+  if (!message || typeof message !== "object") return null;
+
+  return {
+    id: message.id ?? message.message_id ?? null,
+    from_account_id:
+      message.from_account_id ??
+      message.account_id ??
+      message.sender_account_id ??
+      null,
+    content:
+      message.message_text ??
+      message.content ??
+      message.text ??
+      "",
+    created_at:
+      message.created_at ??
+      message.last_updated ??
+      message.sent_at ??
+      new Date().toISOString(),
+    is_read: Boolean(message.is_read ?? true),
+  };
+}
+
 /* relationship management */
 
 export async function deleteCoachRequest(requestId) {
   try {
-    return await apiDelete(`/roles/shared/client_coach_relationship/delete_coach_request/${requestId}`);
-  } catch {
-    return { message: "Request deleted successfully" };
+    return await apiDelete(`/roles/client/rescind_request/${requestId}`);
+  } catch (error) {
+    if (error?.status === 404 || error?.status === 405) {
+      return apiDelete(`/roles/shared/client_coach_relationship/delete_coach_request/${requestId}`);
+    }
+    throw error;
   }
 }
 
 export async function terminateRelationship(relationshipId) {
-  try {
-    return await apiPost(
-      `/roles/shared/client_coach_relationship/terminate_relationship/${relationshipId}`,
-      {}
-    );
-  } catch {
-    return { details: "success" };
-  }
+  return apiPost(
+    `/roles/shared/client_coach_relationship/terminate_relationship/${relationshipId}`,
+    {}
+  );
 }
 
 /* shared account updates */

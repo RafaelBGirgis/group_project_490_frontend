@@ -8,7 +8,13 @@ import ProfileAvatar from "../profile_avatar";
  *   onMessage – (clientId) => void
  */
 
-export default function ClientsDetail({ clients, onMessage, onViewProfile }) {
+export default function ClientsDetail({
+  clients,
+  onMessage,
+  onViewProfile,
+  onTerminateRelationship,
+  terminatingRelationshipId,
+}) {
   const active = clients.filter((c) => c.status === "active");
   const paused = clients.filter((c) => c.status !== "active");
 
@@ -62,6 +68,15 @@ export default function ClientsDetail({ clients, onMessage, onViewProfile }) {
               >
                 Message
               </button>
+              {c.relationship_id ? (
+                <button
+                  onClick={() => onTerminateRelationship?.(c)}
+                  disabled={terminatingRelationshipId === c.relationship_id}
+                  className="text-xs text-red-300 border border-red-500/30 rounded-full px-3 py-1 hover:bg-red-500/10 transition-colors disabled:opacity-60"
+                >
+                  {terminatingRelationshipId === c.relationship_id ? "Firing..." : "Fire Client"}
+                </button>
+              ) : null}
             </div>
           </div>
         ))}

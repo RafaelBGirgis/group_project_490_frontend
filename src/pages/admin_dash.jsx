@@ -13,7 +13,6 @@ import {
 } from "../components";
 import { getToken } from "../api/auth";
 import {
-  fetchAdminStats,
   fetchAllUsers,
   updateUserStatus,
   deleteUser,
@@ -24,6 +23,7 @@ import {
   fetchAnalytics,
   fetchCoachRequests,
   fetchTotalTransactions,
+  refreshPayments,
   resolveCoachRequest,
 } from "../api/admin";
 import RoleRequestsDetail from "../components/overlays/role_requests_detail";
@@ -252,6 +252,10 @@ export default function AdminDash() {
   const [roleRequests, setRoleRequests] = useState([]);
   const [reports, setReports] = useState([]);
   const [totalTransactions, setTotalTransactions] = useState(0);
+  const [refreshingPayments, setRefreshingPayments] = useState(false);
+  const [paymentsMessage, setPaymentsMessage] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [adminMessage, setAdminMessage] = useState("");
 
   /*  overlay state  */
   const [overlay, setOverlay] = useState(null);
@@ -277,6 +281,10 @@ export default function AdminDash() {
   useEffect(() => {
     if (!authed) return;
     (async () => {
+      setLoading(true);
+      setLoadError("");
+      setAdminMessage("");
+
       // Fetch account info — use a direct fetch to avoid the global 401
       // redirect in apiFetch (admin may not have a backend-valid JWT yet)
       try {
@@ -294,6 +302,7 @@ export default function AdminDash() {
         // Initials are decorative; keep loading the dashboard if this request fails.
       }
 
+<<<<<<< Updated upstream
       const [s, u, ex, an, requests] = await Promise.all([
         fetchAdminStats(),
         fetchAllUsers(),
@@ -312,49 +321,159 @@ export default function AdminDash() {
         { id: 1, reporter_name: "Aisha Patel",  reported_name: "Coach X", reason: "Inappropriate content", created_at: "1 hr ago" },
         { id: 2, reporter_name: "Chris Nguyen", reported_name: "Coach Y", reason: "No show",               created_at: "3 hrs ago" },
       ]);
+=======
+      try {
+        const [usersResponse, analyticsResponse, requestsResponse, transactionsResponse] = await Promise.all([
+          fetchAllUsers({ sortBy: userSortBy, sortDir: userSortDir }).catch(() => []),
+          fetchAnalytics().catch(() => null),
+          fetchCoachRequests().catch(() => []),
+          fetchTotalTransactions().catch(() => ({ total_transactions: 0 })),
+        ]);
+        const exerciseResponse = await fetchExerciseBank().catch((error) => {
+          setAdminMessage(error?.message || "Exercise bank is unavailable.");
+          return [];
+        });
+>>>>>>> Stashed changes
 
-      setLoading(false);
+        setStats({
+          total_accounts: usersResponse.length,
+          total_clients: usersResponse.filter((item) => item.role === "client").length,
+          total_coaches: usersResponse.filter((item) => item.role === "coach").length,
+          pending_role_requests: requestsResponse.length,
+          active_today: 0,
+          active_this_week: 0,
+          active_this_month: 0,
+          total_revenue: transactionsResponse.total_transactions ?? 0,
+          revenue_this_month: 0,
+          active_subscriptions: 0,
+          revenue_change: 0,
+        });
+        setUsers(usersResponse);
+        setExercises(exerciseResponse);
+        setAnalytics(
+          analyticsResponse || { daily: [], weekly: [], monthly: [], summary: {} }
+        );
+        setRoleRequests(requestsResponse);
+        setTotalTransactions(transactionsResponse.total_transactions || 0);
+        setReports([]);
+      } catch (error) {
+        setLoadError(error?.message || "Unable to load the admin dashboard.");
+        setStats({
+          total_accounts: 0,
+          total_clients: 0,
+          total_coaches: 0,
+          pending_role_requests: 0,
+          active_today: 0,
+          active_this_week: 0,
+          active_this_month: 0,
+          total_revenue: 0,
+          revenue_this_month: 0,
+          active_subscriptions: 0,
+          revenue_change: 0,
+        });
+        setUsers([]);
+        setExercises([]);
+        setAnalytics({ daily: [], weekly: [], monthly: [], summary: {} });
+        setRoleRequests([]);
+        setReports([]);
+        setTotalTransactions(0);
+      } finally {
+        setLoading(false);
+      }
     })();
   }, [authed]);
 
   /*  handlers  */
   const handleApprove = async (id) => {
-    await resolveCoachRequest(id, true);
-    setRoleRequests((p) => p.map((r) => r.id === id ? { ...r, is_approved: true } : r));
+    try {
+      await resolveCoachRequest(id, true);
+      setRoleRequests((p) => p.map((r) => r.id === id ? { ...r, is_approved: true } : r));
+      setAdminMessage("Coach request approved.");
+    } catch (error) {
+      setAdminMessage(error?.message || "Unable to approve this coach request.");
+    }
   };
 
   const handleReject = async (id) => {
-    await resolveCoachRequest(id, false);
-    setRoleRequests((p) => p.map((r) => r.id === id ? { ...r, is_approved: false } : r));
+    try {
+      await resolveCoachRequest(id, false);
+      setRoleRequests((p) => p.map((r) => r.id === id ? { ...r, is_approved: false } : r));
+      setAdminMessage("Coach request rejected.");
+    } catch (error) {
+      setAdminMessage(error?.message || "Unable to reject this coach request.");
+    }
   };
   const handleDismissReport = (id) => setReports((p) => p.filter((r) => r.id !== id));
 
   const handleUserStatusChange = async (userId, newStatus) => {
-    await updateUserStatus(userId, newStatus);
-    setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, status: newStatus } : u));
+    try {
+      await updateUserStatus(userId, newStatus);
+      setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, status: newStatus } : u));
+      setAdminMessage("User status updated.");
+    } catch (error) {
+      setAdminMessage(error?.message || "Unable to update this user.");
+    }
   };
 
   const handleDeleteUser = async (userId) => {
     if (!window.confirm("Permanently delete this account? This cannot be undone.")) return;
-    await deleteUser(userId);
-    setUsers((prev) => prev.filter((u) => u.id !== userId));
+    try {
+      await deleteUser(userId);
+      setUsers((prev) => prev.filter((u) => u.id !== userId));
+      setAdminMessage("User deleted.");
+    } catch (error) {
+      setAdminMessage(error?.message || "Unable to delete this user.");
+    }
   };
 
   const handleSaveExercise = async (exercise) => {
-    if (exercise.id) {
-      await updateExercise(exercise.id, exercise);
-      setExercises((prev) => prev.map((e) => e.id === exercise.id ? { ...e, ...exercise } : e));
-    } else {
-      const result = await createExercise(exercise);
-      setExercises((prev) => [...prev, { ...exercise, id: result.id || Date.now(), created_by: "Admin" }]);
+    try {
+      if (exercise.id) {
+        await updateExercise(exercise.id, exercise);
+        setExercises((prev) => prev.map((e) => e.id === exercise.id ? { ...e, ...exercise } : e));
+      } else {
+        const result = await createExercise(exercise);
+        if (result?.id == null) {
+          throw new Error("Exercise creation did not return an id.");
+        }
+        setExercises((prev) => [...prev, { ...exercise, id: result.id, created_by: "Admin" }]);
+      }
+      setEditingExercise(null);
+      setNewExercise(null);
+      setAdminMessage("Exercise saved.");
+    } catch (error) {
+      setAdminMessage(error?.message || "Unable to save this exercise.");
     }
-    setEditingExercise(null);
-    setNewExercise(null);
   };
 
   const handleDeleteExercise = async (exerciseId) => {
-    await deleteExercise(exerciseId);
-    setExercises((prev) => prev.filter((e) => e.id !== exerciseId));
+    try {
+      await deleteExercise(exerciseId);
+      setExercises((prev) => prev.filter((e) => e.id !== exerciseId));
+      setAdminMessage("Exercise deleted.");
+    } catch (error) {
+      setAdminMessage(error?.message || "Unable to delete this exercise.");
+    }
+  };
+
+  const handleRefreshPayments = async () => {
+    setRefreshingPayments(true);
+    setPaymentsMessage("");
+    try {
+      await refreshPayments();
+      const transactions = await fetchTotalTransactions().catch(() => ({ total_transactions: totalTransactions }));
+      setTotalTransactions(transactions.total_transactions || 0);
+      setStats((prev) =>
+        prev
+          ? { ...prev, total_revenue: transactions.total_transactions || prev.total_revenue }
+          : prev
+      );
+      setPaymentsMessage("Payments refreshed.");
+    } catch (error) {
+      setPaymentsMessage(error?.message || "Unable to refresh payments.");
+    } finally {
+      setRefreshingPayments(false);
+    }
   };
 
   /*  computed  */
@@ -426,6 +545,17 @@ export default function AdminDash() {
       />
 
       <div className="max-w-7xl mx-auto px-6 py-6 space-y-8">
+        {loadError ? (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+            {loadError}
+          </div>
+        ) : null}
+
+        {adminMessage ? (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+            {adminMessage}
+          </div>
+        ) : null}
 
         {/* ═══════════════════════════════════════════════════════════════
             OVERVIEW STATS
@@ -460,11 +590,24 @@ export default function AdminDash() {
           {/* Total Revenue — feature card */}
           <div className="bg-[#0E1628] rounded-2xl p-5 relative overflow-hidden">
             <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full bg-green-500/5 blur-2xl" />
-            <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">TOTAL REVENUE</p>
+            <div className="mb-1 flex items-start justify-between gap-3">
+              <p className="text-[10px] text-gray-500 uppercase tracking-widest">TOTAL REVENUE</p>
+              <button
+                type="button"
+                onClick={handleRefreshPayments}
+                disabled={refreshingPayments}
+                className="rounded-lg border border-green-500/30 px-3 py-1 text-[10px] font-semibold text-green-300 transition-colors hover:bg-green-500/10 disabled:opacity-50"
+              >
+                {refreshingPayments ? "Refreshing..." : "Refresh Payments"}
+              </button>
+            </div>
             <p className="text-3xl font-bold text-white">
               $<AnimatedNumber value={stats?.total_revenue ?? 0} duration={1500} />
             </p>
             <p className="text-xs text-gray-500 mt-1">All-time platform earnings</p>
+            {paymentsMessage ? (
+              <p className="mt-1 text-[10px] text-slate-400">{paymentsMessage}</p>
+            ) : null}
             <div className="mt-3">
               <Sparkline data={activeAnalytics.map((d) => d.active_users * 28 + d.new_signups * 50)} color="#22C55E" />
             </div>

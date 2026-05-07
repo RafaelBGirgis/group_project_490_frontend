@@ -80,23 +80,27 @@ export default function AvailabilityDetail({
   role = "client",
 }) {
   const isCoach = role === "coach";
-  const normalizeRows = useCallback(
-    (rows) =>
-      (rows ?? []).map((row) => ({
-        ...row,
-        slots: Array.from({ length: 7 }, (_, i) =>
+  const normalizeRows = useCallback((rows) => {
+    const incoming = new Map(
+      (rows ?? []).map((row) => [
+        row.time,
+        Array.from({ length: 7 }, (_, i) =>
           normalizeStatus(Array.isArray(row.slots) ? row.slots[i] : null)
         ),
-      })),
-    []
-  );
+      ])
+    );
+
+    return DEFAULT_TIME_OPTIONS.map((time) => ({
+      time,
+      slots: incoming.get(time) || Array(7).fill(null),
+    }));
+  }, []);
   const [slots, setSlots] = useState(() =>
     normalizeRows(initialSlots)
   );
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
-  const [showAddRow, setShowAddRow] = useState(false);
 
   useEffect(() => {
     setSlots(normalizeRows(initialSlots));
@@ -122,35 +126,6 @@ export default function AvailabilityDetail({
     setHasChanges(true);
     setSaved(false);
   }, []);
-
-  /*  add a time row  */
-  const existingTimes = new Set(slots.map((r) => r.time));
-  const availableTimes = DEFAULT_TIME_OPTIONS.filter((t) => !existingTimes.has(t));
-
-  const addTimeRow = (time) => {
-    setSlots((prev) => {
-      const newRow = { time, slots: Array(7).fill(null) };
-      const allSlots = [...prev, newRow];
-      // Sort by time order
-      allSlots.sort((a, b) => {
-        return DEFAULT_TIME_OPTIONS.indexOf(a.time) - DEFAULT_TIME_OPTIONS.indexOf(b.time);
-      });
-      return allSlots;
-    });
-    setShowAddRow(false);
-    setHasChanges(true);
-    setSaved(false);
-  };
-
-  /*  remove a time row (only custom/empty rows)  */
-  const removeTimeRow = (timeIdx) => {
-    const row = slots[timeIdx];
-    // Don't allow removing rows that have booked slots
-    if (row.slots.some((s) => s === "booked")) return;
-    setSlots((prev) => prev.filter((_, i) => i !== timeIdx));
-    setHasChanges(true);
-    setSaved(false);
-  };
 
   /*  clear all availability  */
   const clearAll = () => {
@@ -214,20 +189,28 @@ export default function AvailabilityDetail({
     (sum, row) => sum + row.slots.filter((s) => s === "booked").length, 0
   );
   const totalUnavailable = slots.length * 7 - totalAvailable - totalBooked;
+  const activeDays = weekdays.reduce(
+    (sum, _, dayIdx) => sum + (slots.some((row) => row.slots[dayIdx] === "available") ? 1 : 0),
+    0
+  );
 
   const accentColor = isCoach ? "#F97316" : "#3B82F6";
 
   return (
     <>
       {/*  Summary Stats  */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-4 gap-3">
         <div className="bg-[#0A1020] rounded-xl p-3 text-center">
           <p style={{ color: accentColor }} className="font-bold text-xl">{totalAvailable}</p>
-          <p className="text-gray-500 text-[10px] uppercase tracking-widest mt-0.5">Available</p>
+          <p className="text-gray-500 text-[10px] uppercase tracking-widest mt-0.5">Open Slots</p>
         </div>
         <div className="bg-[#0A1020] rounded-xl p-3 text-center">
           <p className={`font-bold text-xl ${isCoach ? "text-blue-400" : "text-orange-400"}`}>{totalBooked}</p>
           <p className="text-gray-500 text-[10px] uppercase tracking-widest mt-0.5">Booked</p>
+        </div>
+        <div className="bg-[#0A1020] rounded-xl p-3 text-center">
+          <p className="text-white font-bold text-xl">{activeDays}</p>
+          <p className="text-gray-500 text-[10px] uppercase tracking-widest mt-0.5">Active Days</p>
         </div>
         <div className="bg-[#0A1020] rounded-xl p-3 text-center">
           <p className="text-gray-400 font-bold text-xl">{totalUnavailable}</p>
@@ -238,8 +221,9 @@ export default function AvailabilityDetail({
       {/*  Instructions  */}
       <div className="rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3">
         <p className="text-gray-400 text-xs leading-relaxed">
+          This editor saves one-hour availability windows by weekday for the backend routes.
           Click any cell to toggle between <span style={{ color: accentColor }} className="font-medium">available</span> and unavailable.
-          Booked sessions are locked. Click a day name to set or clear the entire column.
+          Booked sessions are locked, and each saved slot is submitted as a `:00` hourly block.
         </p>
       </div>
 
@@ -271,9 +255,8 @@ export default function AvailabilityDetail({
           </p>
         ) : (
           slots.map(({ time, slots: daySlots }, timeIdx) => {
-            const hasBooked = daySlots.some((s) => s === "booked");
             return (
-              <div key={time} className="grid grid-cols-[60px_repeat(7,1fr)_24px] gap-2 mb-2 group">
+              <div key={time} className="grid grid-cols-[60px_repeat(7,1fr)] gap-2 mb-2">
                 <div className="text-xs text-gray-400 flex items-center font-medium">
                   {time}
                 </div>
@@ -287,57 +270,11 @@ export default function AvailabilityDetail({
                     onClick={() => toggleCell(timeIdx, dayIdx)}
                   />
                 ))}
-                {/* Remove row button (hidden for rows with bookings) */}
-                {!hasBooked ? (
-                  <button
-                    onClick={() => removeTimeRow(timeIdx)}
-                    className="flex items-center justify-center text-gray-700 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
-                    title="Remove this time row"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                ) : (
-                  <div />
-                )}
               </div>
             );
           })
         )}
       </div>
-
-      {/*  Add Row  */}
-      {!showAddRow ? (
-        <button
-          onClick={() => setShowAddRow(true)}
-          disabled={availableTimes.length === 0}
-          className="w-full rounded-xl border border-dashed border-white/10 py-3 text-sm text-gray-500 hover:border-white/20 hover:text-gray-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          + Add Time Slot
-        </button>
-      ) : (
-        <div className="rounded-xl border border-white/10 bg-[#0A1020] p-4">
-          <p className="text-xs text-gray-400 mb-3">Select a time to add:</p>
-          <div className="flex flex-wrap gap-2">
-            {availableTimes.map((t) => (
-              <button
-                key={t}
-                onClick={() => addTimeRow(t)}
-                className="px-3 py-1.5 rounded-lg border border-white/10 text-xs text-gray-300 hover:border-blue-500/40 hover:text-blue-400 transition-colors"
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-          <button
-            onClick={() => setShowAddRow(false)}
-            className="mt-3 text-xs text-gray-500 hover:text-gray-300 transition-colors"
-          >
-            Cancel
-          </button>
-        </div>
-      )}
 
       {/*  Legend  */}
       <div className="flex gap-6 justify-center">

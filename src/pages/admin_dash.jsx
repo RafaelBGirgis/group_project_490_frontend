@@ -302,26 +302,6 @@ export default function AdminDash() {
         // Initials are decorative; keep loading the dashboard if this request fails.
       }
 
-<<<<<<< Updated upstream
-      const [s, u, ex, an, requests] = await Promise.all([
-        fetchAdminStats(),
-        fetchAllUsers(),
-        fetchExerciseBank(),
-        fetchAnalytics(),
-        fetchCoachRequests(),
-      ]);
-      const transactions = await fetchTotalTransactions().catch(() => ({ total_transactions: 0 }));
-      setStats(s);
-      setUsers(u);
-      setExercises(ex);
-      setAnalytics(an);
-      setRoleRequests(requests);
-      setTotalTransactions(transactions.total_transactions || 0);
-      setReports([
-        { id: 1, reporter_name: "Aisha Patel",  reported_name: "Coach X", reason: "Inappropriate content", created_at: "1 hr ago" },
-        { id: 2, reporter_name: "Chris Nguyen", reported_name: "Coach Y", reason: "No show",               created_at: "3 hrs ago" },
-      ]);
-=======
       try {
         const [usersResponse, analyticsResponse, requestsResponse, transactionsResponse] = await Promise.all([
           fetchAllUsers({ sortBy: userSortBy, sortDir: userSortDir }).catch(() => []),
@@ -333,7 +313,6 @@ export default function AdminDash() {
           setAdminMessage(error?.message || "Exercise bank is unavailable.");
           return [];
         });
->>>>>>> Stashed changes
 
         setStats({
           total_accounts: usersResponse.length,

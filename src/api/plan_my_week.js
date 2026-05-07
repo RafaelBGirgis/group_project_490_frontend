@@ -1,5 +1,5 @@
-import { apiDelete, apiGet, apiPost, withQuery } from "./api";
 
+import { apiDelete, apiGet, apiPost, apiPut, withQuery } from "./api";
 /* ─── Workout / activity / equipment catalog ────────────────────────────── */
 
 export async function searchWorkouts({
@@ -139,4 +139,116 @@ export async function getMyAvailability() {
     // Swallow — caller can still attempt to schedule and let the server validate.
   }
   return [];
+}
+
+/* ─── New date-range availability (v2 model) ───────────────────────────── */
+
+/**
+ * Get client's availability windows for a date range (with projections)
+ * Returns: [{ id, start_dt, end_dt, repeats_weekly, recurrence_end_dt, occurrences: [...] }, ...]
+ */
+export async function listMyAvailability({ from_dt, to_dt } = {}) {
+  try {
+    const query = new URLSearchParams();
+    if (from_dt) query.append("from_dt", from_dt instanceof Date ? from_dt.toISOString() : from_dt);
+    if (to_dt) query.append("to_dt", to_dt instanceof Date ? to_dt.toISOString() : to_dt);
+    const result = await apiGet(
+      `/roles/client/availability?${query.toString()}`
+    );
+    return Array.isArray(result) ? result : [];
+  } catch (err) {
+    console.error("Failed to list availability:", err);
+    return [];
+  }
+}
+
+/**
+ * Get coach's view of client's availability (for scheduling purposes)
+ */
+export async function listClientAvailabilityAsCoach(clientId, { from_dt, to_dt } = {}) {
+  try {
+    const query = new URLSearchParams();
+    if (from_dt) query.append("from_dt", from_dt instanceof Date ? from_dt.toISOString() : from_dt);
+    if (to_dt) query.append("to_dt", to_dt instanceof Date ? to_dt.toISOString() : to_dt);
+    const result = await apiGet(
+      `/roles/coach/client/${clientId}/availability?${query.toString()}`
+    );
+    return Array.isArray(result) ? result : [];
+  } catch (err) {
+    console.error("Failed to list client availability:", err);
+    return [];
+  }
+}
+
+/**
+ * Create a new availability window (can be recurring weekly)
+ * Payload: { start_dt, end_dt, repeats_weekly?, recurrence_end_dt? }
+ */
+export async function createAvailability(payload) {
+  return apiPost("/roles/client/availability", payload);
+}
+
+
+/**
+ * Update an availability window
+ */
+export async function updateAvailability(availabilityId, payload) {
+  return apiPut(`/roles/client/availability/${availabilityId}`, payload);
+}
+/**
+ * Delete an availability window
+ */
+export async function deleteAvailability(availabilityId) {
+  return apiDelete(`/roles/client/availability/${availabilityId}`);
+}
+
+/**
+ * List client's busy slots (booked/blocked time)
+ */
+export async function listMyBusySlots({ from_dt, to_dt } = {}) {
+  try {
+    const query = new URLSearchParams();
+    if (from_dt) query.append("from_dt", from_dt instanceof Date ? from_dt.toISOString() : from_dt);
+    if (to_dt) query.append("to_dt", to_dt instanceof Date ? to_dt.toISOString() : to_dt);
+    const result = await apiGet(
+      `/roles/client/busy_slots?${query.toString()}`
+    );
+    return Array.isArray(result) ? result : [];
+  } catch (err) {
+    console.error("Failed to list busy slots:", err);
+    return [];
+  }
+}
+
+/**
+ * Create a manual busy slot (block off time)
+ * Payload: { start_dt, end_dt, note? }
+ */
+export async function createManualBusySlot(payload) {
+  return apiPost("/roles/client/busy_slots", payload);
+}
+
+/**
+ * Delete a manual busy slot (rejects deletion of plan-derived busy slots)
+ */
+export async function deleteBusySlot(busySlotId) {
+  return apiDelete(`/roles/client/busy_slots/${busySlotId}`);
+}
+
+/**
+ * Get coach's view of client's busy slots
+ */
+export async function listClientBusySlotsAsCoach(clientId, { from_dt, to_dt } = {}) {
+  try {
+    const query = new URLSearchParams();
+    if (from_dt) query.append("from_dt", from_dt instanceof Date ? from_dt.toISOString() : from_dt);
+    if (to_dt) query.append("to_dt", to_dt instanceof Date ? to_dt.toISOString() : to_dt);
+    const result = await apiGet(
+      `/roles/coach/client/${clientId}/busy_slots?${query.toString()}`
+    );
+    return Array.isArray(result) ? result : [];
+  } catch (err) {
+    console.error("Failed to list client busy slots:", err);
+    return [];
+  }
 }

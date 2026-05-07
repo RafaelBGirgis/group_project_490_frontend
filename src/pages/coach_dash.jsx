@@ -762,7 +762,7 @@ export default function CoachDashboard() {
             title="Workout Plans"
             footer={
               <button
-                onClick={() => navigate("/plan?role=coach")}
+                onClick={() => navigate("/plan-my-week?role=coach")}
                 className="w-full py-2 rounded-xl border border-orange-500/30 text-orange-400 text-xs font-semibold hover:bg-orange-500/10 transition-colors"
               >
                 Prescribe Plans

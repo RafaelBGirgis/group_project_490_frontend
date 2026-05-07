@@ -593,7 +593,7 @@ export default function ClientDash() {
             }}
             footer={
               <button
-                onClick={() => navigate("/plan?role=client")}
+                onClick={() => navigate("/plan-my-week?role=client")}
                 className="w-full py-2 rounded-xl border border-blue-500/30 text-blue-400 text-xs font-semibold hover:bg-blue-500/10 transition-colors"
               >
                 Plan My Week

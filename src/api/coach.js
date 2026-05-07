@@ -1,4 +1,4 @@
-import { apiGet, apiPatch, apiPost } from "./api";
+import { apiGet, apiPatch, apiPost, withQuery } from "./api";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const DEFAULT_TIME_OPTIONS = [
@@ -46,7 +46,7 @@ export async function createLegacyCoachWorkoutPlan(payload) {
 }
 
 export async function deactivateCoachAccount() {
-  return { success: true, message: "Coach deactivation endpoint is not available in the backend yet." };
+  return apiPost("/roles/shared/account/deactivate");
 }
 
 export async function deleteCoachAccount() {
@@ -54,37 +54,61 @@ export async function deleteCoachAccount() {
 }
 
 export async function fetchMyClients(_coachId) {
-  const acceptedClients = readAcceptedCoachClients(_coachId);
   try {
-    const items = await fetchClientRequests();
-    const clients = await Promise.all(items.map(async (item) => {
-      try {
-        const detail = await lookupClient(item.client_id);
-        return {
-          id: item.client_id,
-          request_id: item.request_id,
-          name: detail?.base_account?.name || `Client #${item.client_id}`,
-          goal: detail?.fitness_goals?.[0]?.goal_enum || "Pending request",
-          status: "pending",
-          joined: "",
-          relationship_id: item.relationship_id ?? null,
-          details: detail,
-        };
-      } catch {
-        return {
-          id: item.client_id,
-          request_id: item.request_id,
-          name: `Client #${item.client_id}`,
-          goal: "Pending request",
-          status: "pending",
-          joined: "",
-          relationship_id: item.relationship_id ?? null,
-        };
-      }
+    // Fetch accepted clients from API and enrich with details
+    const acceptedClientsResponse = await apiGet("/roles/coach/clients");
+    const acceptedClients = await Promise.all(
+      (Array.isArray(acceptedClientsResponse) ? acceptedClientsResponse : []).map(async (item) => {
+        try {
+          const detail = await lookupClient(item.client_id);
+          return {
+            id: item.client_id,
+            request_id: item.request_id,
+            name: detail?.base_account?.name || `Client #${item.client_id}`,
+            goal: detail?.fitness_goals?.[0]?.goal_enum || "Active client",
+            status: "active",
+            joined: new Date().toLocaleDateString(),
+            relationship_id: item.relationship_id,
+            details: detail,
+          };
+        } catch {
+          return {
+            id: item.client_id,
+            request_id: item.request_id,
+            name: `Client #${item.client_id}`,
+            goal: "Active client",
+            status: "active",
+            joined: new Date().toLocaleDateString(),
+            relationship_id: item.relationship_id,
+          };
+        }
+      })
+    );
+
+    // Fetch pending requests (API now returns full client details)
+    const pendingRequests = await fetchClientRequests();
+    const pendingClients = pendingRequests.map((request) => ({
+      id: request.client_id,
+      request_id: request.request_id,
+      name: request.name || `Client #${request.client_id}`,
+      goal: request.goal || "Pending request",
+      status: "pending",
+      joined: "",
+      relationship_id: null,
+      // Include basic details object for consistency
+      details: {
+        base_account: {
+          name: request.name,
+          age: request.age,
+          gender: request.gender,
+          pfp_url: request.pfp_url,
+        },
+      },
     }));
-    return mergeClientsById(clients, acceptedClients);
+
+    return mergeClientsById(pendingClients, acceptedClients);
   } catch {
-    return acceptedClients;
+    return [];
   }
 }
 
@@ -124,7 +148,13 @@ export async function fetchCoachAvailability(coachId) {
 
   try {
     const response = await apiGet(`/roles/coach/coach_availability/${coachId}`);
-    const grid = convertBackendAvailabilitiesToGrid(response?.coach_availabilities || []);
+    const availabilities = Array.isArray(response)
+      ? response
+      : response?.coach_availabilities ||
+        response?.availabilities ||
+        response?.availability ||
+        [];
+    const grid = convertBackendAvailabilitiesToGrid(availabilities);
     return grid;
   } catch {
     return [];
@@ -135,7 +165,6 @@ export async function saveCoachAvailability(coachId, slots) {
   if (!coachId) {
     throw new Error("Missing coach id for availability update.");
   }
-  const cacheKey = `coach_profile:${coachId ?? "me"}`;
   const availability = convertFromSlotsFormat(slots);
   const backendAvailabilities = convertTrainingAvailabilityObjectToBackend(availability);
 
@@ -143,17 +172,7 @@ export async function saveCoachAvailability(coachId, slots) {
     availabilities: backendAvailabilities,
   });
 
-  const refreshed = await fetchCoachAvailability(coachId);
-  const existing = readJson(cacheKey) || {};
-  localStorage.setItem(
-    cacheKey,
-    JSON.stringify({
-      ...existing,
-      availability: convertFromSlotsFormat(refreshed),
-    })
-  );
-
-  return refreshed;
+  return fetchCoachAvailability(coachId);
 }
 
 export async function fetchCoachStats(coachId) {
@@ -201,46 +220,111 @@ export async function fetchCoachReviews(coachId) {
 }
 
 export async function fetchCoachWorkoutPlans(coachId) {
-  const cacheKey = `coach_workouts:${coachId ?? "me"}`;
-  const cached = readJson(cacheKey);
-  if (Array.isArray(cached) && cached.length > 0) {
-    return cached.map((workout) => ({
-      id: workout.id,
-      strata_name: workout.name,
-      client_count: 0,
-      last_updated: "recently",
-    }));
-  }
-
+  // TODO: Implement API endpoint to fetch coach workout plans
+  // For now, returning empty array as we migrate away from localStorage caching
   return [];
 }
 
-export function cacheAcceptedClientForCoach(coachId, client) {
-  if (!coachId || !client?.id) return;
-  const key = getAcceptedClientsKey(coachId);
-  const cached = readJson(key);
-  const list = Array.isArray(cached) ? cached : [];
-  const next = [
-    {
-      ...client,
-      status: "active",
-      joined: client.joined || new Date().toLocaleDateString(),
-    },
-    ...list.filter((item) => Number(item.id) !== Number(client.id)),
-  ];
-  localStorage.setItem(key, JSON.stringify(next));
+// ─── Coach-view client telemetry & schedule ──────────────────────────────────
+
+const COACH_CLIENT_TELEMETRY = "/roles/coach/client_telemetry";
+
+async function fetchCoachClientList(clientId, type, { limit = 10, skip = 0 } = {}) {
+  try {
+    const result = await apiGet(withQuery(`${COACH_CLIENT_TELEMETRY}/${clientId}/${type}`, { limit, skip }));
+    return Array.isArray(result) ? result : [];
+  } catch {
+    return [];
+  }
 }
 
-export function removeAcceptedClientForCoach(coachId, clientId) {
-  if (!coachId || !clientId) return;
-  const key = getAcceptedClientsKey(coachId);
-  const cached = readJson(key);
-  if (!Array.isArray(cached)) return;
-  localStorage.setItem(
-    key,
-    JSON.stringify(cached.filter((item) => Number(item.id) !== Number(clientId)))
-  );
+export function fetchClientWeightHistory(clientId, opts) {
+  return fetchCoachClientList(clientId, "weights", opts);
 }
+
+export function fetchClientMoodHistory(clientId, opts) {
+  return fetchCoachClientList(clientId, "moods", opts);
+}
+
+export function fetchClientStepHistory(clientId, opts) {
+  return fetchCoachClientList(clientId, "steps", opts);
+}
+
+export function fetchClientWorkoutHistoryByCoach(clientId, opts) {
+  return fetchCoachClientList(clientId, "workouts", opts);
+}
+
+export async function fetchClientProgressPicturesByCoach(clientId, { limit = 10, skip = 0 } = {}) {
+  try {
+    const result = await apiGet(withQuery(`/roles/coach/client_progress_pictures/${clientId}`, { limit, skip }));
+    return Array.isArray(result) ? result : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchClientMealHistoryByCoach(clientId, { limit = 10, skip = 0 } = {}) {
+  try {
+    const result = await apiGet(withQuery(`/roles/coach/client_meals/${clientId}`, { limit, skip }));
+    return Array.isArray(result) ? result : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchClientWorkoutPlanByCoach(clientId, weekdayIdx) {
+  try {
+    const result = await apiGet(
+      withQuery(`/roles/coach/client_plans/${clientId}`, { skip: 0, limit: 100 })
+    );
+    const plans = Array.isArray(result) ? result : [];
+    if (plans.length > 0) {
+      const matchingPlan = plans[weekdayIdx] ?? plans[0];
+      if (matchingPlan) {
+        const activitiesSource =
+          matchingPlan.activities ??
+          matchingPlan.workout_activities ??
+          matchingPlan.workout_plan_activities ??
+          [];
+        const activities = Array.isArray(activitiesSource)
+          ? activitiesSource.map((a, i) => ({
+              id: a.id ?? i + 1,
+              name: a.name ?? a.activity_name ?? a.workout_activity?.name ?? `Activity ${i + 1}`,
+              suggested_sets: Number(a.planned_sets ?? a.suggested_sets ?? a.sets ?? 0),
+              suggested_reps: Number(a.planned_reps ?? a.suggested_reps ?? a.reps ?? 0),
+              intensity_value: Number(a.intensity_value ?? a.weight ?? 0),
+              intensity_measure: a.intensity_measure ?? "lbs",
+              logged: Boolean(a.logged),
+            }))
+          : [];
+        return {
+          strata_name:
+            matchingPlan.strata_name ??
+            matchingPlan.name ??
+            `Plan #${matchingPlan.id ?? weekdayIdx + 1}`,
+          activities,
+        };
+      }
+    }
+  } catch {
+    // Fall through to rest-day default
+  }
+  return { strata_name: "Rest Day", activities: [] };
+}
+
+export async function fetchClientAvailabilityByCoach(clientId) {
+  try {
+    const result = await apiGet(`/roles/coach/client_availability/${clientId}`);
+    const availabilities = Array.isArray(result)
+      ? result
+      : result?.availabilities ?? result?.client_availabilities ?? [];
+    return convertBackendAvailabilitiesToGrid(availabilities);
+  } catch {
+    return [];
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function buildCoachRequestPayload(form, availability) {
   return {
@@ -369,32 +453,6 @@ function normalizeDate(value) {
   return `${new Date().getFullYear()}-01-01`;
 }
 
-function readJson(key) {
-  const raw = localStorage.getItem(key);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-function getAcceptedClientsKey(coachId) {
-  return `coach_accepted_clients:${coachId ?? "me"}`;
-}
-
-function readAcceptedCoachClients(coachId) {
-  const parsed = readJson(getAcceptedClientsKey(coachId));
-  if (!Array.isArray(parsed)) return [];
-
-  return parsed.filter((client) => {
-    if (!client?.id) return false;
-    const relationshipKey = `client_relationship:${client.id}:${coachId}`;
-    const activeRelationship = localStorage.getItem(relationshipKey);
-    if (!client.relationship_id) return true;
-    return String(activeRelationship || "") === String(client.relationship_id);
-  });
-}
 
 function mergeClientsById(primaryClients, fallbackClients) {
   const merged = [];

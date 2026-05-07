@@ -5,6 +5,7 @@ import AdminDashboard from "./pages/admin_dash";
 import LandingPage from "./pages/landing";
 import LoginPage from "./pages/login";
 import SignupPage from "./pages/signup";
+import DeactivatedPage from "./pages/deactivated";
 import ProfilePage from "./pages/profile";
 import CoachRequestFormPage from "./pages/coach_request_form";
 import OnboardingPage from "./pages/onboarding";
@@ -23,6 +24,7 @@ function App() {
           <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
+          <Route path="/deactivated" element={<DeactivatedPage />} />
           <Route path="/onboarding" element={<OnboardingPage />} />
           <Route path="/profile" element={<ProfilePage role="client" />} />
           <Route path="/coach-request" element={<CoachRequestFormPage />} />
@@ -31,10 +33,10 @@ function App() {
           <Route path="/coach" element={<CoachDashboard />} />
           <Route path="/admin" element={<AdminDashboard />} />
           <Route path="/chat" element={<ChatPage />} />
-          <Route path="/coach-chat" element={<CoachChatPage />} />
-          <Route path="/client-chat" element={<ClientChatPage />} />
-          <Route path="/client/messages" element={<ChatPage />} />
-          <Route path="/coach/messages" element={<ChatPage />} />
+          <Route path="/client/messages" element={<ClientChatPage />} />
+          <Route path="/coach/messages" element={<CoachChatPage />} />
+          <Route path="/client-chat" element={<Navigate to="/client/messages" replace />} />
+          <Route path="/coach-chat" element={<Navigate to="/coach/messages" replace />} />
           <Route path="/find-coach" element={<FindCoachPage />} />
           <Route path="/coaches/:coachId" element={<CoachPublicProfilePage />} />
           <Route path="/workouts" element={<WorkoutsPage />} />

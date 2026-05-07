@@ -1,4 +1,5 @@
 import { apiDelete, apiFetch, apiGet, apiPatch, apiPost, withQuery } from "./api";
+import { clearAuth } from "./auth";
 
 const WEEKDAY_NAMES = [
   "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
@@ -20,8 +21,10 @@ export async function fetchMe() {
     return await apiGet("/me");
   } catch (error) {
     if (error?.status === 401) {
-      localStorage.removeItem("jwt");
-      window.location.href = "/login";
+      clearAuth();
+      if (window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
     }
     throw error;
   }
@@ -35,6 +38,30 @@ export async function fetchUnifiedProfile() {
   return apiGet("/roles/shared/account/me");
 }
 
+export async function fetchMyCoachRequests() {
+  const result = await apiGet("/roles/client/my_coach_requests");
+  const items = Array.isArray(result)
+    ? result
+    : Array.isArray(result?.requests)
+      ? result.requests
+      : Array.isArray(result?.coach_requests)
+        ? result.coach_requests
+        : [];
+  return items.map(normalizeClientCoachRequest).filter(Boolean);
+}
+
+export async function fetchMyCoach() {
+  try {
+    const result = await apiGet("/roles/client/my_coach");
+    return normalizeMyCoach(result);
+  } catch (error) {
+    if (error?.status === 404) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 export async function fetchInvoices() {
   const result = await apiGet("/roles/client/invoices");
   return result?.invoices ?? [];
@@ -43,6 +70,10 @@ export async function fetchInvoices() {
 export async function fetchBillingCycles() {
   const result = await apiGet("/roles/client/current_billing_cycles");
   return result?.cycles ?? [];
+}
+
+export async function payInvoice(invoiceId, amount) {
+  return apiPost(`/roles/client/pay_invoice/${invoiceId}`, { amount });
 }
 
 export async function createClientInitialSurvey(payload) {
@@ -80,11 +111,15 @@ export async function uploadProfilePicture(file) {
 // }
 
 export async function deactivateAccount() {
-  return { success: true, message: "Account deactivation endpoint is not available in the backend yet." };
+  return apiPost("/roles/shared/account/deactivate", {});
+}
+
+export async function activateAccount() {
+  return apiPost("/roles/shared/account/activate", {});
 }
 
 export async function deleteAccount() {
-  return { success: true, message: "Account deletion endpoint is not available in the backend yet." };
+  return apiDelete("/roles/shared/account/delete");
 }
 
 export async function fetchTelemetryToday(_clientId) {
@@ -104,6 +139,9 @@ export async function fetchClientWorkoutPlans({ skip = 0, limit = 100 } = {}) {
 }
 
 export async function fetchWorkoutPlan(_clientId, weekdayIdx) {
+  const cached = adaptCachedWeeklyPlanForDay(_clientId, weekdayIdx);
+  if (cached) return cached;
+
   try {
     const plans = await fetchClientWorkoutPlans();
     const adapted = adaptWorkoutPlansForDay(plans, weekdayIdx);
@@ -121,7 +159,7 @@ export async function logWorkoutActivity(_clientId, _activityId) {
 }
 
 export async function fetchCoachInfo(_clientId) {
-  return null;
+  return fetchMyCoach();
 }
 
 export async function fetchCoachRating(coachId) {
@@ -146,46 +184,38 @@ export async function fetchNextSession(_clientId) {
 }
 
 export async function fetchAvailability(clientId) {
-  const cacheKey = `client_availability_${clientId ?? "me"}`;
-  const cached = localStorage.getItem(cacheKey);
-  if (cached) {
-    try {
-      return JSON.parse(cached);
-    } catch {
-      localStorage.removeItem(cacheKey);
-    }
+  void clientId;
+  try {
+    const profile = await fetchClientProfile().catch(() => null);
+    const unified = profile ? null : await fetchUnifiedProfile().catch(() => null);
+    const clientDetails =
+      profile?.client_account ||
+      profile?.client_details ||
+      unified?.client_details ||
+      unified?.client ||
+      profile ||
+      unified;
+    const availabilities =
+      clientDetails?.availabilities ||
+      clientDetails?.availability ||
+      clientDetails?.client_availabilities ||
+      [];
+    return convertBackendAvailabilitiesToGrid(availabilities);
+  } catch {
+    return [];
   }
-
-  const onboardingAvailability = getOnboardingAvailabilityFromStorage();
-  if (onboardingAvailability.length > 0) {
-    localStorage.setItem(cacheKey, JSON.stringify(onboardingAvailability));
-    return onboardingAvailability;
-  }
-
-  return buildMockAvailability();
 }
 
 export async function saveAvailability(clientId, slots) {
-  const cacheKey = `client_availability_${clientId ?? "me"}`;
-  localStorage.setItem(cacheKey, JSON.stringify(slots));
-
-  try {
-    const availabilities = convertGridToBackendAvailabilities(slots);
-    if (availabilities.length === 0) {
-      return { success: true };
-    }
-    return await updateClientInformation({ availabilities });
-  } catch {
-    return { success: true };
-  }
+  void clientId;
+  const availabilities = convertGridToBackendAvailabilities(slots);
+  await updateClientInformation({ availabilities });
+  return fetchAvailability(clientId);
 }
 
 /**
  * Fetch the meals the client has logged via the daily survey (newest first).
- * Returns raw CompletedMealActivity rows from the backend — each carries
- * ids and timestamps but the backend currently exposes no route to resolve
- * those ids back to meal name / calories, so the consumer must accept a
- * minimal shape.
+ * Returns completed meal activity rows from the backend with meal_name.
  */
 export async function fetchMealsToday(_clientId, { skip = 0, limit = 100 } = {}) {
   try {
@@ -198,10 +228,30 @@ export async function fetchMealsToday(_clientId, { skip = 0, limit = 100 } = {})
       client_prescribed_meal_id: row.client_prescribed_meal_id ?? null,
       on_demand_meal_id: row.on_demand_meal_id ?? null,
       logged_at: row.last_updated || null,
+      meal_name: row.meal_name ?? null,
     }));
   } catch {
     return [];
   }
+}
+
+export async function fetchAvailableOnDemandMeals(_clientId) {
+  const paths = [
+    "/roles/client/fitness/meal/options",
+    "/roles/client/fitness/daily-survey/meal/options",
+  ];
+
+  for (const path of paths) {
+    try {
+      const result = await apiGet(path);
+      if (!Array.isArray(result)) continue;
+      return result.map((meal) => ({ ...meal, id: Number(meal.id) }));
+    } catch (error) {
+      console.warn(`Unable to load available meals from ${path}:`, error);
+    }
+  }
+
+  return [];
 }
 
 /**
@@ -409,6 +459,83 @@ function normalizeCoachItem(coach) {
   };
 }
 
+function normalizeClientCoachRequest(item) {
+  if (!item || typeof item !== "object") return null;
+
+  const coachId =
+    item.coach_id ??
+    item.coachId ??
+    item.coach?.id ??
+    item.target_coach_id;
+  const requestId = item.request_id ?? item.requestId ?? item.id;
+
+  if (!coachId || !requestId) return null;
+
+  return {
+    ...item,
+    coach_id: Number(coachId),
+    request_id: Number(requestId),
+    coach_name: item.coach_name || item.coachName || item.coach?.name || "",
+    coach_email: item.coach_email || item.coachEmail || item.coach?.email || "",
+    status: String(item.status || "pending").toLowerCase(),
+    relationship_id:
+      item.relationship_id != null
+        ? Number(item.relationship_id)
+        : item.relationshipId != null
+          ? Number(item.relationshipId)
+          : null,
+    updated_at: item.updated_at || item.last_updated || item.created_at || null,
+  };
+}
+
+function normalizeMyCoach(payload) {
+  if (!payload || typeof payload !== "object") return null;
+
+  const coachId =
+    payload.coach_id ??
+    payload.coachId ??
+    payload.coach?.id ??
+    payload.coach_account?.id ??
+    payload.id;
+  if (!coachId) return null;
+
+  return {
+    ...payload,
+    coach_id: Number(coachId),
+    relationship_id:
+      payload.relationship_id != null
+        ? Number(payload.relationship_id)
+        : payload.relationshipId != null
+          ? Number(payload.relationshipId)
+          : payload.relationship?.id != null
+            ? Number(payload.relationship.id)
+            : payload.client_coach_relationship?.id != null
+              ? Number(payload.client_coach_relationship.id)
+          : null,
+    account_id:
+      payload.account_id ??
+      payload.accountId ??
+      payload.coach?.account_id ??
+      payload.coach?.accountId ??
+      payload.coach_account?.account_id ??
+      payload.coach_account?.accountId ??
+      null,
+    name:
+      payload.name ||
+      payload.coach_name ||
+      payload.coachName ||
+      payload.coach_account?.name ||
+      payload.coach?.name ||
+      `Coach #${coachId}`,
+    specialty:
+      payload.specialty ||
+      payload.primary_specialty ||
+      payload.coach_account?.specialty ||
+      payload.coach?.specialty ||
+      "Active coach",
+  };
+}
+
 function formatExperienceYear(start, end, fallback) {
   if (fallback) return String(fallback);
   const startYear = String(start || "").slice(0, 4);
@@ -453,6 +580,28 @@ function adaptWorkoutPlansForDay(plans, weekdayIdx) {
   };
 }
 
+function adaptCachedWeeklyPlanForDay(clientId, weekdayIdx) {
+  const dayName = WEEKDAY_NAMES[weekdayIdx];
+  if (!dayName) return null;
+
+  const raw = localStorage.getItem(`client_weekly_plan:${clientId ?? "me"}`);
+  if (!raw) return null;
+
+  try {
+    const weeklyPlan = JSON.parse(raw);
+    const workout = weeklyPlan?.[dayName];
+    if (!workout || typeof workout !== "object") return null;
+
+    const exercises = Array.isArray(workout.exercises) ? workout.exercises : [];
+    return {
+      strata_name: workout.name ?? workout.strata_name ?? "Rest Day",
+      activities: exercises.map((exercise, index) => normalizeWorkoutActivity(exercise, index)),
+    };
+  } catch {
+    return null;
+  }
+}
+
 function normalizeWorkoutActivity(activity, index) {
   return {
     id: activity.id ?? activity.workout_plan_activity_id ?? index + 1,
@@ -467,14 +616,6 @@ function normalizeWorkoutActivity(activity, index) {
     intensity_measure: activity.intensity_measure ?? "lbs",
     logged: Boolean(activity.logged),
   };
-}
-
-function buildMockAvailability() {
-  const times = ["9AM", "10AM", "11AM", "12PM", "1PM", "2PM", "3PM", "4PM"];
-  return times.map((time) => ({
-    time,
-    slots: ["booked", "booked", "available", "booked", "booked", null, null],
-  }));
 }
 
 function normalizeTimeLabel(raw) {
@@ -518,27 +659,6 @@ function convertTrainingAvailabilityToGrid(trainingAvailability) {
   }));
 }
 
-function getOnboardingAvailabilityFromStorage() {
-  const email = (localStorage.getItem("active_user_email") || "").trim().toLowerCase();
-  const keysToTry = email
-    ? [`onboarding:${email}`, "onboarding:current"]
-    : ["onboarding:current"];
-
-  for (const key of keysToTry) {
-    const raw = localStorage.getItem(key);
-    if (!raw) continue;
-    try {
-      const parsed = JSON.parse(raw);
-      const converted = convertTrainingAvailabilityToGrid(parsed?.trainingAvailability);
-      if (converted.length > 0) return converted;
-    } catch {
-      // Ignore malformed storage and continue.
-    }
-  }
-
-  return [];
-}
-
 function convertGridToBackendAvailabilities(slots) {
   const trainingAvailability = {
     Mon: [],
@@ -571,6 +691,44 @@ function convertTrainingAvailabilityObjectToBackend(trainingAvailability) {
       .map((label) => buildAvailabilityWindow(label, longWeekday))
       .filter(Boolean);
   });
+}
+
+function convertBackendAvailabilitiesToGrid(availabilities) {
+  const byDay = { Mon: [], Tue: [], Wed: [], Thu: [], Fri: [], Sat: [], Sun: [] };
+  (availabilities || []).forEach((slot) => {
+    const shortDay = longWeekdayToShort(slot?.weekday);
+    const label = backendTimeToLabel(slot?.start_time);
+    if (shortDay && label) {
+      byDay[shortDay].push(label);
+    }
+  });
+  return convertTrainingAvailabilityToGrid(byDay);
+}
+
+function longWeekdayToShort(weekday) {
+  const normalized = String(weekday || "").trim().toLowerCase();
+  const map = {
+    monday: "Mon",
+    tuesday: "Tue",
+    wednesday: "Wed",
+    thursday: "Thu",
+    friday: "Fri",
+    saturday: "Sat",
+    sunday: "Sun",
+  };
+  return map[normalized] ?? null;
+}
+
+function backendTimeToLabel(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const match = raw.match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return normalizeTimeLabel(raw);
+  let hour = Number(match[1]);
+  if (!Number.isFinite(hour) || hour < 0 || hour > 23) return null;
+  const suffix = hour >= 12 ? "PM" : "AM";
+  hour = hour % 12 || 12;
+  return `${hour}${suffix}`;
 }
 
 function shortToLongWeekday(day) {

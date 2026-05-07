@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Navbar } from "../components/navbar";
 import { fetchMe } from "../api/client";
-import { createCoachRequest } from "../api/coach";
+import { createCoachRequest, fetchCoachProfile } from "../api/coach";
 
 const SPECIALIZATION_OPTIONS = [
   "Strength Training",
@@ -26,7 +26,6 @@ function CoachRequestFormPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [submitMessage, setSubmitMessage] = useState("");
-  const [requestStorageKey, setRequestStorageKey] = useState("");
 
   const [form, setForm] = useState({
     name: "",
@@ -65,33 +64,41 @@ function CoachRequestFormPage() {
     const loadNameFromSession = async () => {
       try {
         const data = await fetchMe();
-        const key = `coachRequest:${data.id || data.email || "current"}`;
-        setRequestStorageKey(key);
-
-        const existingRaw =
-          localStorage.getItem(key) || localStorage.getItem("coachRequestDraft");
-        let existing = null;
-        if (existingRaw) {
-          try {
-            existing = JSON.parse(existingRaw);
-          } catch {
-            existing = null;
-          }
-        }
+        const existingCoachProfile = await fetchCoachProfile().catch(() => null);
+        const existingSpecialties = String(existingCoachProfile?.coach_account?.specialties || "")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean);
 
         setForm((prev) => ({
           ...prev,
           name: data.name || "",
-          requestedDate: existing?.requestedDate || prev.requestedDate,
-          yearsExperience:
-            existing?.yearsExperience != null ? String(existing.yearsExperience) : prev.yearsExperience,
-          reason: existing?.reason || prev.reason,
-          specializations: Array.isArray(existing?.specializations)
-            ? existing.specializations
-            : prev.specializations,
-          certifications: Array.isArray(existing?.certifications) ? existing.certifications : prev.certifications,
-          experiences: Array.isArray(existing?.experiences) ? existing.experiences : prev.experiences,
+          specializations: existingSpecialties.length > 0 ? existingSpecialties : prev.specializations,
+          certifications: Array.isArray(existingCoachProfile?.certifications)
+            ? existingCoachProfile.certifications.map((cert, index) => ({
+                id: cert.id || `cert-${index}`,
+                title: cert.certification_name || "",
+                issuer: cert.certification_organization || "",
+                year: cert.certification_date || "",
+                description: cert.certification_score || "",
+              }))
+            : prev.certifications,
+          experiences: Array.isArray(existingCoachProfile?.experiences)
+            ? existingCoachProfile.experiences.map((exp, index) => ({
+                id: exp.id || `exp-${index}`,
+                title: exp.experience_title || "",
+                organization: exp.experience_name || "",
+                year: exp.experience_start || "",
+                description: exp.experience_description || "",
+              }))
+            : prev.experiences,
         }));
+
+        if ((isViewMode || isEditMode) && !existingCoachProfile?.coach_account) {
+          setSubmitMessage(
+            "Pending coach application details are not available from the backend yet. The frontend needs a read route for the current coach application to support view/edit status without local storage."
+          );
+        }
       } catch (err) {
         setError(err.message || "Failed to load your account session.");
       } finally {
@@ -162,14 +169,6 @@ function CoachRequestFormPage() {
 
     try {
       await createCoachRequest(backendPayload);
-      // Also save locally as a backup
-      const key = requestStorageKey || "coachRequestDraft";
-      localStorage.setItem(key, JSON.stringify({
-        ...form,
-        yearsExperience: Number(form.yearsExperience),
-        status: "submitted",
-        submittedAt: new Date().toISOString(),
-      }));
       setSubmitMessage(isEditMode ? "Coach request updated." : "Coach request submitted successfully! An admin will review your application.");
     } catch (err) {
       setError(err.message || "Failed to submit coach request. Please try again.");

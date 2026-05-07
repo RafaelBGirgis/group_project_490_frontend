@@ -64,23 +64,41 @@ export async function refreshToken(email, password) {
   });
 }
 
+export function clearAuth() {
+  localStorage.removeItem("jwt");
+  localStorage.removeItem("active_client_id");
+  // Delete cookies with and without domain to cover both local and production
+  const cookieConfigs = [
+    "path=/",
+    "path=/; domain=.till-failure.us",
+    "path=/; domain=till-failure.us",
+  ];
+  SESSION_COOKIE_NAMES.forEach((name) => {
+    cookieConfigs.forEach((config) => {
+      document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; ${config}`;
+    });
+  });
+}
+
 export async function getCurrentAccount() {
   try {
     return await apiFetch("/me");
   } catch (error) {
     if (error?.status === 401) {
-      localStorage.removeItem("jwt");
-      window.location.href = "/login";
+      clearAuth();
+      if (window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
     }
     throw error;
   }
 }
 
 export function logout() {
-  localStorage.removeItem("jwt");
-  localStorage.removeItem("active_user_email");
-  localStorage.removeItem("active_client_id");
-  window.location.href = "/login";
+  clearAuth();
+  if (window.location.pathname !== "/login") {
+    window.location.href = "/login";
+  }
 }
 
 export function storeToken(token) {
@@ -118,8 +136,15 @@ export function syncTokenFromCookie() {
   return getToken();
 }
 
-export function initiateGoogleOAuth() {
-  window.location.href = `${import.meta.env.VITE_API_BASE_URL || ""}/auth/google`;
+export async function initiateGoogleOAuth() {
+  try {
+    const data = await apiGet("/auth/google/url");
+    if (data && data.url) {
+      window.location.href = data.url;
+    }
+  } catch (err) {
+    console.error("Failed to initiate Google OAuth:", err);
+  }
 }
 
 export async function handleGoogleOAuthCallback(code, state) {

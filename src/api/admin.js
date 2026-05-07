@@ -5,18 +5,27 @@ export async function fetchCoachRequests({ skip = 0, limit = 100 } = {}) {
   return Array.isArray(result) ? result.map(normalizeCoachRequest) : [];
 }
 
+export async function fetchTotalTransactions() {
+  const result = await apiGet("/roles/admin/total_transactions");
+  return normalizeTransactions(result);
+}
+
 export async function fetchAdminStats() {
   try {
-    const requests = await fetchCoachRequests();
+    const [requests, users, transactions] = await Promise.all([
+      fetchCoachRequests(),
+      fetchAllUsers(),
+      fetchTotalTransactions().catch(() => ({ total_transactions: 0 })),
+    ]);
     return {
-      total_accounts: requests.length,
-      total_clients: 0,
-      total_coaches: requests.filter((item) => item.coach_id != null).length,
+      total_accounts: users.length,
+      total_clients: users.filter((item) => item.role === "client").length,
+      total_coaches: users.filter((item) => item.role === "coach").length,
       pending_role_requests: requests.length,
       active_today: 0,
       active_this_week: 0,
       active_this_month: 0,
-      total_revenue: 0,
+      total_revenue: transactions.total_transactions ?? 0,
       revenue_this_month: 0,
       active_subscriptions: 0,
       revenue_change: 0,
@@ -38,18 +47,15 @@ export async function fetchAdminStats() {
   }
 }
 
-export async function fetchAllUsers() {
+export async function fetchAllUsers({ sortBy = "name", sortDir = "asc", skip = 0, limit = 1000 } = {}) {
   try {
-    const requests = await fetchCoachRequests();
-    return requests.map((item) => ({
-      id: item.base_account?.id || item.coach_id || item.coach_request_id,
-      name: item.base_account?.name || `Coach Applicant #${item.coach_request_id}`,
-      email: item.base_account?.email || "unknown@example.com",
-      role: "coach",
-      status: "pending",
-      created_at: item.base_account?.created_at?.slice(0, 10) || "",
-      last_active: "",
+    const accounts = await apiGet(withQuery("/roles/admin/accounts", {
+      sort_by: sortBy,
+      sort_dir: sortDir,
+      skip,
+      limit,
     }));
+    return Array.isArray(accounts) ? accounts.map(normalizeAdminAccount) : [];
   } catch {
     return [
       { id: 1, name: "Elena Marks", email: "elena@mail.com", role: "client", status: "active", created_at: "2026-04-14", last_active: "2 min ago" },
@@ -139,5 +145,35 @@ function normalizeCoachRequest(item) {
     requested_role: "Coach",
     is_approved: null,
     created_at: item.base_account?.created_at || null,
+  };
+}
+
+function normalizeTransactions(result) {
+  if (typeof result === "number") {
+    return { total_transactions: result };
+  }
+
+  return {
+    total_transactions:
+      Number(
+        result?.total_transactions ??
+        result?.total_amount ??
+        result?.amount ??
+        0
+      ) || 0,
+  };
+}
+
+function normalizeAdminAccount(item) {
+  return {
+    id: item.id,
+    name: item.name || "Unknown Account",
+    email: item.email || "unknown@example.com",
+    role: item.role || item.roles?.[0] || "client",
+    roles: item.roles || [item.role || "client"],
+    status: item.status || (item.is_active ? "active" : "deactivated"),
+    is_active: Boolean(item.is_active),
+    created_at: item.created_at?.slice?.(0, 10) || "",
+    last_active: item.last_active || "",
   };
 }

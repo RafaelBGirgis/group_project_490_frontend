@@ -13,6 +13,7 @@ import {
   SkeletonGreeting,
   SkeletonAvailability,
 } from "../components";
+import ProfileAvatar from "../components/profile_avatar";
 import { fetchMe } from "../api/client";
 import {
   fetchCoachProfile,
@@ -26,12 +27,11 @@ import {
   fetchClientRequests,
   lookupClient,
   acceptClientRequest,
-  cacheAcceptedClientForCoach,
   denyClientRequest,
   createClientReview,
   fetchClientReports,
 } from "../api/coach";
-import { cacheConversationForAccount, createConversation } from "../api/chat";
+import { getConversationWithAccount } from "../api/chat";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { updateClientCoachRequestByRequestId } from "../utils/coachRequests";
 import { resolveRoleState } from "../utils/sessionAuth";
@@ -39,6 +39,7 @@ import ClientsDetail from "../components/overlays/clients_detail";
 import SessionsDetail from "../components/overlays/sessions_detail";
 import ReviewsDetail from "../components/overlays/reviews_detail";
 import AvailabilityDetail from "../components/overlays/availability_detail";
+import ClientProfile from "../components/overlays/client_profile";
 
 const role = "coach";
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -58,8 +59,6 @@ export default function CoachDashboard() {
   /*  auth guard  */
   const [authed, setAuthed] = useState(false);
   useEffect(() => {
-    const token = localStorage.getItem("jwt");
-    if (!token) { navigate("/login"); return; }
     setAuthed(true);
   }, [navigate]);
 
@@ -85,6 +84,8 @@ export default function CoachDashboard() {
   const [clientReports, setClientReports] = useState({});
   const [availabilityError, setAvailabilityError] = useState("");
   const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(false);
+  const [chatActionId, setChatActionId] = useState(null);
+  const [selectedClient, setSelectedClient] = useState(null);
 
   /*  load account  */
   useEffect(() => {
@@ -128,8 +129,14 @@ export default function CoachDashboard() {
       setWorkoutPlans(plans);
 
       try {
-        const requests = await fetchClientRequests();
-      setClientRequests(requests);
+      const requests = await fetchClientRequests();
+      const detailedRequests = await Promise.all(
+        requests.map(async (request) => {
+          const detail = await lookupClient(request.client_id).catch(() => null);
+          return { ...request, detail };
+        })
+      );
+      setClientRequests(detailedRequests);
     } catch {
       setClientRequests([]);
     }
@@ -161,33 +168,13 @@ export default function CoachDashboard() {
         const alreadyActiveClient = clients.some(
           (client) => Number(client.id) === Number(request.client_id) && client.status === "active"
         );
-        localStorage.setItem(
-          `client_relationship:${request.client_id}:${coachId}`,
-          String(accepted.relationship_id)
-        );
         const detail = await loadClientRequestDetails(request.client_id).catch(() => null);
-        const conversation = await createConversation(accepted.relationship_id, {
+        await getConversationWithAccount(detail?.base_account?.id || null, {
           id: request.client_id,
+          account_id: detail?.base_account?.id || null,
           name: detail?.base_account?.name || `Client #${request.client_id}`,
           role: "client",
-        }, {
-          accountId: account?.id || coachId,
-          role: "coach",
         }).catch(() => null);
-        if (conversation) {
-          cacheConversationForAccount(
-            {
-              id: conversation.id,
-              partner_id: coachId,
-              partner_name: account?.name || "Coach",
-              partner_role: "coach",
-              last_message: conversation.last_message || "",
-              last_message_at: conversation.last_message_at || "",
-              unread_count: conversation.unread_count || 0,
-            },
-            { accountId: detail?.base_account?.id || request.client_id, role: "client" }
-          );
-        }
         updateClientCoachRequestByRequestId(request.request_id, {
           status: "approved",
           relationship_id: accepted.relationship_id,
@@ -204,7 +191,6 @@ export default function CoachDashboard() {
           details: detail,
         };
 
-        cacheAcceptedClientForCoach(coachId, acceptedClient);
         setClients((prev) => {
           const next = [
             acceptedClient,
@@ -256,6 +242,38 @@ export default function CoachDashboard() {
     }
   };
 
+  const handleOpenClientChat = async (client) => {
+    const clientId = client?.id ?? client;
+    if (!clientId) return;
+
+    setChatActionId(clientId);
+    try {
+      const detail = client?.details || await loadClientRequestDetails(clientId).catch(() => null);
+      const accountId =
+        detail?.base_account?.id ??
+        client?.details?.base_account?.id ??
+        null;
+
+      const conversation = await getConversationWithAccount(accountId, {
+        id: clientId,
+        account_id: accountId,
+        name: detail?.base_account?.name || client?.name || `Client #${clientId}`,
+        role: "client",
+      });
+
+      closeOverlay();
+      navigate(
+        conversation?.partner_account_id
+          ? `/coach/messages?account=${conversation.partner_account_id}`
+          : `/coach/messages?client=${clientId}`
+      );
+    } catch {
+      navigate(`/coach/messages?client=${clientId}`);
+    } finally {
+      setChatActionId(null);
+    }
+  };
+
   /*  derived  */
   const initials = account?.name
     ? account.name.split(" ").map((n) => n[0]).join("").toUpperCase()
@@ -265,10 +283,6 @@ export default function CoachDashboard() {
   const lastName = nameParts.slice(1).join(" ") || "";
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good Morning" : hour < 17 ? "Good Afternoon" : "Good Evening";
-  const todaySessions = sessions.filter((s) => {
-    const dayNames = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
-    return s.weekday === dayNames[new Date().getDay()];
-  });
 
   /*  loading skeleton  */
   if (loading) {
@@ -310,7 +324,7 @@ export default function CoachDashboard() {
         {/*  OVERVIEW  */}
         <SectionHeader label="OVERVIEW" role={role} />
 
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-3 gap-4">
           <DashboardCard role={role} className="min-h-50">
             <p className="text-xs text-gray-500 uppercase tracking-widest mb-1">{greeting}</p>
             <h2 className="text-4xl font-bold text-white leading-tight">
@@ -330,12 +344,6 @@ export default function CoachDashboard() {
           />
           <StatCard
             role={role}
-            label="SESSIONS THIS WEEK"
-            value={stats?.sessions_this_week ?? "—"}
-            sub={`${todaySessions.length} today`}
-          />
-          <StatCard
-            role={role}
             label="AVG RATING"
             value={stats?.avg_rating ? `★ ${stats.avg_rating}` : "—"}
             sub={stats?.review_count ? `${stats.review_count} reviews` : "no reviews"}
@@ -345,56 +353,65 @@ export default function CoachDashboard() {
         {/*  CLIENTS & SESSIONS  */}
         <SectionHeader label="CLIENTS & SESSIONS" role={role} />
 
-        <div className="grid grid-cols-1 xl:grid-cols-4 gap-4 items-stretch">
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 items-stretch">
           {/* My Clients */}
-          <DashboardCard
-            role={role}
-            title={`My Clients (${clients.length})`}
-            action={{ label: "View all", onClick: () => setOverlay("clients") }}
-          >
-            <div className="space-y-2">
-              {clients.slice(0, 4).map((c) => (
-                <ListRow
-                  key={c.id}
-                  label={c.name}
-                  sub={c.goal}
-                  right={
-                    <StatusBadge
-                      label={c.status}
-                      variant={c.status === "active" ? "success" : "neutral"}
-                      dot
-                    />
-                  }
-                />
-              ))}
-              {clients.length > 4 && (
-                <p className="text-gray-500 text-xs text-center pt-1">+{clients.length - 4} more</p>
-              )}
-            </div>
-          </DashboardCard>
+          {(() => {
+            const activeClients = clients.filter((c) => c.status === "active");
+            return (
+              <DashboardCard
+                role={role}
+                title={`My Clients (${activeClients.length})`}
+                action={{ label: "View all", onClick: () => setOverlay("clients") }}
+              >
+                <div className="space-y-2">
+                  {activeClients.slice(0, 4).map((c) => (
+                    <div
+                      key={c.id}
+                      className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors"
+                    >
+                      <div
+                        className="flex-1 min-w-0 cursor-pointer"
+                        onClick={() => { setSelectedClient(c); setOverlay("client_profile"); }}
+                      >
+                        <div className="flex items-center gap-3">
+                          <ProfileAvatar
+                            src={c.details?.base_account?.pfp_url}
+                            alt={c.name}
+                            name={c.name}
+                            size="md"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white font-medium text-sm truncate">{c.name}</p>
+                            <p className="text-gray-400 text-xs">
+                              {c.goal} · {c.details?.base_account?.age || "—"} · {c.details?.base_account?.gender || "—"}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleOpenClientChat(c)}
+                        disabled={chatActionId === c.id}
+                        className="shrink-0 rounded-lg text-orange-400 hover:text-orange-300 transition-colors p-1.5 hover:bg-orange-500/10 disabled:opacity-50"
+                        title="Message client"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                          <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                  {activeClients.length > 4 && (
+                    <p className="text-gray-500 text-xs text-center pt-1">+{activeClients.length - 4} more</p>
+                  )}
+                  {activeClients.length === 0 && (
+                    <p className="text-gray-500 text-xs text-center py-4">No active clients yet</p>
+                  )}
+                </div>
+              </DashboardCard>
+            );
+          })()}
 
-          {/* Upcoming Sessions */}
-          <DashboardCard
-            role={role}
-            title="Upcoming Sessions"
-            action={{ label: "View all", onClick: () => setOverlay("sessions") }}
-          >
-            <div className="space-y-2">
-              {sessions.slice(0, 4).map((s) => (
-                <ListRow
-                  key={s.id}
-                  label={s.client_name}
-                  sub={`${s.weekday} · ${s.start_time}`}
-                  right={
-                    <span className="text-orange-400/80 text-xs font-medium">{s.type}</span>
-                  }
-                />
-              ))}
-              {sessions.length > 4 && (
-                <p className="text-gray-500 text-xs text-center pt-1">+{sessions.length - 4} more</p>
-              )}
-            </div>
-          </DashboardCard>
+          
 
           {/* Availability */}
           <DashboardCard
@@ -449,12 +466,38 @@ export default function CoachDashboard() {
                 <p className="text-gray-500 text-sm text-center py-6">No pending requests</p>
               ) : (
                 clientRequests.slice(0, 4).map((request) => (
-                  <ListRow
+                  <div
                     key={request.request_id}
-                    label={`Client #${request.client_id}`}
-                    sub={`Request ${request.request_id}`}
-                    right={<StatusBadge label="Pending" variant="warning" dot />}
-                  />
+                    className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
+                    onClick={() => {
+                      setSelectedClient({
+                        id: request.client_id,
+                        name: request.name || `Client #${request.client_id}`,
+                        details: request.detail || clientRequestDetails[request.client_id] || {
+                          base_account: {
+                            name: request.name,
+                            age: request.age,
+                            gender: request.gender,
+                            pfp_url: request.pfp_url,
+                          },
+                        },
+                      });
+                      setOverlay("client_profile");
+                    }}
+                  >
+                    <ProfileAvatar
+                      src={request.pfp_url}
+                      alt={request.name}
+                      name={request.name}
+                      size="md"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-white font-medium text-sm truncate">{request.name}</p>
+                      <p className="text-gray-400 text-xs">
+                        {request.goal} · {request.age || "—"} · {request.gender || "—"}
+                      </p>
+                    </div>
+                  </div>
                 ))
               )}
             </div>
@@ -519,8 +562,9 @@ export default function CoachDashboard() {
 
       <Overlay open={overlay === "clients"} onClose={closeOverlay} title="My Clients" wide>
         <ClientsDetail
-          clients={clients}
-          onMessage={(id) => { closeOverlay(); navigate(`/coach-chat?client=${id}`); }}
+          clients={clients.filter((c) => c.status === "active")}
+          onMessage={handleOpenClientChat}
+          onViewProfile={(c) => { setSelectedClient(c); setOverlay("client_profile"); }}
         />
       </Overlay>
 
@@ -554,6 +598,20 @@ export default function CoachDashboard() {
         />
       </Overlay>
 
+      <Overlay
+        open={overlay === "client_profile"}
+        onClose={() => { closeOverlay(); setSelectedClient(null); }}
+        title={selectedClient?.name || "Client Profile"}
+        wide
+      >
+        {selectedClient ? (
+          <ClientProfile
+            clientId={selectedClient.id ?? selectedClient.client_id}
+            detail={selectedClient.details || selectedClient.detail}
+          />
+        ) : null}
+      </Overlay>
+
       <Overlay open={overlay === "requests"} onClose={closeOverlay} title="Client Requests" wide>
         <div className="space-y-4">
           {clientRequests.length === 0 ? (
@@ -565,32 +623,54 @@ export default function CoachDashboard() {
               return (
                 <div key={request.request_id} className="rounded-2xl border border-white/8 bg-[#0B1120] p-4 space-y-3">
                   <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-white font-semibold">
-                        {detail?.base_account?.name || `Client #${request.client_id}`}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        Request #{request.request_id} · Goal {detail?.fitness_goals?.[0]?.goal_enum || "not loaded"}
-                      </p>
+                    <div className="flex items-start gap-4 flex-1">
+                      <ProfileAvatar
+                        src={request.pfp_url}
+                        alt={request.name}
+                        name={request.name}
+                        size="lg"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white font-semibold">
+                          {request.name || `Client #${request.client_id}`}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          Goal: {request.goal} · Age: {request.age || "—"} · Gender: {request.gender || "—"}
+                        </p>
+                        <button
+                          onClick={() => {
+                            setSelectedClient({
+                              id: request.client_id,
+                              name: request.name || `Client #${request.client_id}`,
+                              details: request.detail || clientRequestDetails[request.client_id] || {
+                                base_account: {
+                                  name: request.name,
+                                  age: request.age,
+                                  gender: request.gender,
+                                  pfp_url: request.pfp_url,
+                                },
+                              },
+                            });
+                            setOverlay("client_profile");
+                          }}
+                          className="mt-1.5 text-xs text-orange-400/70 hover:text-orange-300 transition-colors"
+                        >
+                          View Profile →
+                        </button>
+                      </div>
                     </div>
                     <div className="flex gap-2">
                       <button
-                        onClick={() => loadClientRequestDetails(request.client_id)}
-                        className="rounded-lg border border-white/10 px-3 py-2 text-xs text-gray-300 hover:bg-white/5"
-                      >
-                        Load Details
-                      </button>
-                      <button
                         onClick={() => handleAcceptRequest(request)}
                         disabled={requestActionId === request.request_id}
-                        className="rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2 text-xs font-semibold text-green-300 disabled:opacity-60"
+                        className="rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2 text-xs font-semibold text-green-300 disabled:opacity-60 whitespace-nowrap"
                       >
                         {requestActionId === request.request_id ? "Accepting..." : "Accept"}
                       </button>
                       <button
                         onClick={() => handleDenyRequest(request.request_id)}
                         disabled={requestActionId === request.request_id}
-                        className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300 disabled:opacity-60"
+                        className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300 disabled:opacity-60 whitespace-nowrap"
                       >
                         {requestActionId === request.request_id ? "Denying..." : "Deny"}
                       </button>
@@ -600,11 +680,9 @@ export default function CoachDashboard() {
                   {detail ? (
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="rounded-xl bg-[#101827] p-3">
-                        <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Client Info</p>
+                        <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Additional Info</p>
                         <div className="space-y-1 text-xs text-gray-300">
                           <p>Email: {detail.base_account?.email || "—"}</p>
-                          <p>Age: {detail.base_account?.age ?? "—"}</p>
-                          <p>Gender: {detail.base_account?.gender || "—"}</p>
                           <p>Bio: {detail.base_account?.bio || "—"}</p>
                         </div>
                       </div>

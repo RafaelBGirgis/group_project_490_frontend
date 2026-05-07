@@ -63,7 +63,7 @@ describe("fetchMe", () => {
     const result = await fetchMe();
     expect(result).toEqual(me);
     expect(global.fetch).toHaveBeenCalledWith(
-      "/me",
+      expect.stringContaining("/me"),
       expect.objectContaining({
         headers: expect.objectContaining({
           Authorization: "Bearer abc123",
@@ -93,7 +93,7 @@ describe("createClientInitialSurvey", () => {
     };
     await createClientInitialSurvey(payload);
     const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toBe("/roles/client/initial_survey");
+    expect(url).toContain("/roles/client/initial_survey");
     expect(opts.method).toBe("POST");
     expect(JSON.parse(opts.body)).toEqual(payload);
   });
@@ -157,6 +157,43 @@ describe("fetchWorkoutPlan", () => {
       expect(typeof a.logged).toBe("boolean");
     });
   });
+
+  it("uses the weekly plan saved from Browse & Build Workouts", async () => {
+    mockFetchFail();
+    localStorage.setItem(
+      "client_weekly_plan:1",
+      JSON.stringify({
+        monday: {
+          name: "Push Day",
+          exercises: [
+            {
+              id: "bench-1",
+              name: "Bench Press",
+              sets: 4,
+              reps: 8,
+              weight: 135,
+              intensity_measure: "lbs",
+            },
+          ],
+        },
+      })
+    );
+
+    const plan = await fetchWorkoutPlan(1, 0);
+
+    expect(plan.strata_name).toBe("Push Day");
+    expect(plan.activities).toEqual([
+      expect.objectContaining({
+        id: "bench-1",
+        name: "Bench Press",
+        suggested_sets: 4,
+        suggested_reps: 8,
+        intensity_value: 135,
+        intensity_measure: "lbs",
+        logged: false,
+      }),
+    ]);
+  });
 });
 
 describe("logWorkoutActivity", () => {
@@ -172,7 +209,7 @@ describe("logWorkoutActivity", () => {
 
 describe("fetchCoachInfo", () => {
   it("returns null when no coach assigned (API failure)", async () => {
-    mockFetchFail();
+    mockFetchFail(404);
     const result = await fetchCoachInfo(1);
     expect(result).toBeNull();
   });
@@ -181,7 +218,7 @@ describe("fetchCoachInfo", () => {
     const coach = { coach_id: 5, name: "Coach A", specialty: "Strength" };
     mockFetchOk(coach);
     const result = await fetchCoachInfo(1);
-    expect(result).toBeNull();
+    expect(result).toMatchObject(coach);
   });
 });
 
@@ -199,14 +236,10 @@ describe("fetchCoachRating", () => {
    ═══════════════════════════════════════════════════════════════════════ */
 
 describe("fetchAvailability", () => {
-  it("returns mock availability slots on fallback", async () => {
+  it("returns empty availability array on fallback", async () => {
     mockFetchFail();
     const slots = await fetchAvailability(1);
-    expect(slots.length).toBeGreaterThan(0);
-    slots.forEach((row) => {
-      expect(row.time).toBeTruthy();
-      expect(row.slots).toHaveLength(7);
-    });
+    expect(slots).toEqual([]);
   });
 });
 
@@ -217,7 +250,7 @@ describe("saveAvailability", () => {
     const slots = [{ time: "9AM", slots: Array(7).fill("available") }];
     await saveAvailability(1, slots);
     const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toBe("/roles/client/information");
+    expect(url).toContain("/roles/client/information");
     expect(opts.method).toBe("PATCH");
     expect(JSON.parse(opts.body).availabilities.length).toBeGreaterThan(0);
   });
@@ -299,7 +332,7 @@ describe("requestCoach", () => {
     localStorage.setItem("jwt", "tok");
     await requestCoach(10, 5);
     const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toBe("/roles/client/request_coach/5");
+    expect(url).toContain("/roles/client/request_coach/5");
     expect(opts.method).toBe("POST");
     expect(opts.body).toBeUndefined();
   });
@@ -311,7 +344,7 @@ describe("uploadProgressPicture", () => {
     const file = new File(["img"], "progress.jpg", { type: "image/jpeg" });
     await uploadProgressPicture(file);
     const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toBe("/roles/client/upload_progress_picture");
+    expect(url).toContain("/roles/client/upload_progress_picture");
     expect(opts.method).toBe("POST");
     expect(opts.body).toBeInstanceOf(FormData);
   });

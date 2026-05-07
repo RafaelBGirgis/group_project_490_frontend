@@ -1,16 +1,5 @@
 import { useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
-import {
-  Bell,
-  BellDot,
-  CircleX,
-  CreditCard,
-  Dumbbell,
-  Handshake,
-  Unlink,
-  UserMinus,
-  UserPlus,
-} from "lucide-react";
 import { ROLE_THEMES } from "./theme";
 import clientLogo from "../assets/Client Logo.svg";
 import coachLogo from "../assets/Coach Logo.svg";
@@ -29,7 +18,101 @@ const NOTIFICATION_ICONS = {
   relationship_request_deletion: UserMinus,
   relationship_request_denied: CircleX,
   relationship_termination: Unlink,
+  chat_message: MessageCircle,
 };
+
+function Bell(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
+      <path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 0 0-4-5.7V5a2 2 0 1 0-4 0v.3A6 6 0 0 0 6 11v3.2c0 .5-.2 1-.6 1.4L4 17h5" />
+      <path d="M9 17a3 3 0 0 0 6 0" />
+    </svg>
+  );
+}
+
+function BellDot(props) {
+  return (
+    <span className="relative inline-flex" aria-hidden="true">
+      <Bell {...props} />
+      <span className="absolute right-0 top-0 h-2 w-2 rounded-full bg-current" />
+    </span>
+  );
+}
+
+function CircleX(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="m9 9 6 6M15 9l-6 6" />
+    </svg>
+  );
+}
+
+function CreditCard(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
+      <rect x="3" y="6" width="18" height="12" rx="2" />
+      <path d="M3 10h18M7 14h3" />
+    </svg>
+  );
+}
+
+function Dumbbell(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
+      <path d="M2 10v4M5 9v6M19 9v6M22 10v4M7 12h10" />
+      <path d="M5 12h2M17 12h2" />
+    </svg>
+  );
+}
+
+function Handshake(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
+      <path d="m11 12 2 2a2 2 0 0 0 2.8 0l3.4-3.4a2 2 0 0 0 0-2.8L17.4 6a2 2 0 0 0-2.8 0L12 8.6 9.4 6A2 2 0 0 0 6.6 6L4.8 7.8a2 2 0 0 0 0 2.8L8 13.8" />
+      <path d="m8 13 1.5 1.5a2 2 0 0 0 2.8 0l.7-.7" />
+    </svg>
+  );
+}
+
+function Unlink(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
+      <path d="M10 14 8 16a3 3 0 1 1-4-4l2-2" />
+      <path d="m14 10 2-2a3 3 0 1 1 4 4l-2 2" />
+      <path d="M9 15 15 9" />
+    </svg>
+  );
+}
+
+function UserMinus(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
+      <path d="M16 21a4 4 0 0 0-8 0" />
+      <circle cx="12" cy="8" r="4" />
+      <path d="M17 11h5" />
+    </svg>
+  );
+}
+
+function UserPlus(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
+      <path d="M16 21a4 4 0 0 0-8 0" />
+      <circle cx="12" cy="8" r="4" />
+      <path d="M19 8v6M16 11h6" />
+    </svg>
+  );
+}
+
+function MessageCircle(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
+      <path d="M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 0 1-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8Z" />
+      <path d="M8 12h.01M12 12h.01M16 12h.01" />
+    </svg>
+  );
+}
 
 const NOTIFICATION_POLL_MS = 3000;
 
@@ -76,13 +159,12 @@ export function Navbar({
 
   useEffect(() => {
     if (externalNotifs) return;
-    if (!localStorage.getItem("jwt")) return;
 
     let isMounted = true;
     let isFetching = false;
 
     const loadNotifications = async ({ initial = false } = {}) => {
-      if (isFetching || !localStorage.getItem("jwt")) return;
+      if (isFetching) return;
       isFetching = true;
       if (initial) {
         setNotificationsLoading(true);
@@ -136,7 +218,7 @@ export function Navbar({
     setNotifs((prev) => prev.map((notification) => ({ ...notification, read: true })));
 
     try {
-      if (!externalNotifs && localStorage.getItem("jwt")) {
+      if (!externalNotifs) {
         await readAllNotifications();
       }
     } catch {
@@ -156,7 +238,7 @@ export function Navbar({
     );
 
     try {
-      if (!externalNotifs && localStorage.getItem("jwt")) {
+      if (!externalNotifs) {
         const updated = await readNotification(id);
         if (updated) {
           setNotifs((prev) =>
@@ -266,7 +348,7 @@ export function Navbar({
 
           {/* Message Button */}
           <button
-            onClick={onMessage || (() => navigate(`/${role}-chat`))}
+            onClick={onMessage || (() => navigate(`/${role}/messages`))}
             className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] text-slate-400 transition-colors hover:bg-[rgba(255,255,255,0.06)] hover:text-white"
             aria-label="Messages"
           >

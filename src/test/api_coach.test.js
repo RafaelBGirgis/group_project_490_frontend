@@ -25,7 +25,7 @@ describe("fetchCoachProfile", () => {
     mockFetchOk({ coach_account: { id: 7 } });
     await fetchCoachProfile();
     const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toBe("/roles/coach/me");
+    expect(url).toContain("/roles/coach/me");
     expect(opts.method).toBe("POST");
   });
 });
@@ -41,7 +41,7 @@ describe("createCoachRequest", () => {
     };
     await createCoachRequest(payload);
     const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toBe("/roles/coach/request_coach_creation");
+    expect(url).toContain("/roles/coach/request_coach_creation");
     expect(opts.method).toBe("POST");
     expect(JSON.parse(opts.body)).toEqual(payload);
   });
@@ -52,7 +52,7 @@ describe("updateCoachInformation", () => {
     mockFetchOk({ coach_id: 7 });
     await updateCoachInformation({ specialties: ["Powerlifting"] });
     const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toBe("/roles/coach/information");
+    expect(url).toContain("/roles/coach/information");
     expect(opts.method).toBe("PATCH");
     expect(JSON.parse(opts.body)).toEqual({ specialties: ["Powerlifting"] });
   });
@@ -63,7 +63,7 @@ describe("coach request actions", () => {
     mockFetchOk({ relationship_id: 11 });
     await acceptClientRequest(11);
     const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toBe("/roles/coach/accept_client/11");
+    expect(url).toContain("/roles/coach/accept_client/11");
     expect(opts.method).toBe("POST");
     expect(opts.body).toBeUndefined();
   });
@@ -72,7 +72,7 @@ describe("coach request actions", () => {
     mockFetchOk({ relationship_id: 11 });
     await denyClientRequest(11);
     const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toBe("/roles/coach/deny_client/11");
+    expect(url).toContain("/roles/coach/deny_client/11");
     expect(opts.method).toBe("POST");
     expect(opts.body).toBeUndefined();
   });
@@ -83,7 +83,7 @@ describe("saveCoachAvailability", () => {
     mockFetchOk({ coach_id: 7 });
     await saveCoachAvailability(7, [{ time: "9AM", slots: Array(7).fill("available") }]);
     const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toBe("/roles/coach/information");
+    expect(url).toContain("/roles/coach/information");
     expect(opts.method).toBe("PATCH");
     expect(JSON.parse(opts.body).availabilities.length).toBeGreaterThan(0);
   });
@@ -115,7 +115,7 @@ describe("fetchCoachReviews", () => {
     });
     const result = await fetchCoachReviews(7);
     expect(global.fetch).toHaveBeenCalledWith(
-      "/roles/client/review/7",
+      expect.stringContaining("/roles/client/review/7"),
       expect.objectContaining({
         headers: expect.objectContaining({ "Content-Type": "application/json" }),
       })

@@ -23,11 +23,11 @@ import {
   deleteExercise,
   fetchAnalytics,
   fetchCoachRequests,
+  fetchTotalTransactions,
   resolveCoachRequest,
 } from "../api/admin";
 import RoleRequestsDetail from "../components/overlays/role_requests_detail";
 import ReportsDetail from "../components/overlays/reports_detail";
-import { saveCoachRequestResolution } from "../utils/coachRequests";
 
 const role = "admin";
 const MUSCLE_GROUPS = ["Chest", "Back", "Shoulders", "Legs", "Arms", "Core", "Cardio"];
@@ -239,8 +239,6 @@ export default function AdminDash() {
   /*  auth guard  */
   const [authed, setAuthed] = useState(false);
   useEffect(() => {
-    const token = localStorage.getItem("jwt");
-    if (!token) { navigate("/login"); return; }
     setAuthed(true);
   }, [navigate]);
 
@@ -253,6 +251,7 @@ export default function AdminDash() {
   const [analytics, setAnalytics] = useState(null);
   const [roleRequests, setRoleRequests] = useState([]);
   const [reports, setReports] = useState([]);
+  const [totalTransactions, setTotalTransactions] = useState(0);
 
   /*  overlay state  */
   const [overlay, setOverlay] = useState(null);
@@ -263,6 +262,8 @@ export default function AdminDash() {
   const [userRoleFilter, setUserRoleFilter] = useState("all");
   const [userStatusFilter, setUserStatusFilter] = useState("all");
   const [userPage, setUserPage] = useState(1);
+  const [userSortBy, setUserSortBy] = useState("name");
+  const [userSortDir, setUserSortDir] = useState("asc");
 
   /*  exercise bank state  */
   const [exSearch, setExSearch] = useState("");
@@ -297,16 +298,18 @@ export default function AdminDash() {
 
       const [s, u, ex, an, requests] = await Promise.all([
         fetchAdminStats(),
-        fetchAllUsers(),
+        fetchAllUsers({ sortBy: userSortBy, sortDir: userSortDir }),
         fetchExerciseBank(),
         fetchAnalytics(),
         fetchCoachRequests(),
       ]);
+      const transactions = await fetchTotalTransactions().catch(() => ({ total_transactions: 0 }));
       setStats(s);
       setUsers(u);
       setExercises(ex);
       setAnalytics(an);
       setRoleRequests(requests);
+      setTotalTransactions(transactions.total_transactions || 0);
       setReports([
         { id: 1, reporter_name: "Aisha Patel",  reported_name: "Coach X", reason: "Inappropriate content", created_at: "1 hr ago" },
         { id: 2, reporter_name: "Chris Nguyen", reported_name: "Coach Y", reason: "No show",               created_at: "3 hrs ago" },
@@ -314,18 +317,16 @@ export default function AdminDash() {
 
       setLoading(false);
     })();
-  }, [authed]);
+  }, [authed, userSortBy, userSortDir]);
 
   /*  handlers  */
   const handleApprove = async (id) => {
     await resolveCoachRequest(id, true);
-    saveCoachRequestResolution(id, "approved");
     setRoleRequests((p) => p.map((r) => r.id === id ? { ...r, is_approved: true } : r));
   };
 
   const handleReject = async (id) => {
     await resolveCoachRequest(id, false);
-    saveCoachRequestResolution(id, "rejected");
     setRoleRequests((p) => p.map((r) => r.id === id ? { ...r, is_approved: false } : r));
   };
   const handleDismissReport = (id) => setReports((p) => p.filter((r) => r.id !== id));
@@ -333,6 +334,11 @@ export default function AdminDash() {
   const handleUserStatusChange = async (userId, newStatus) => {
     await updateUserStatus(userId, newStatus);
     setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, status: newStatus } : u));
+  };
+
+  const handleUserSort = (sortBy) => {
+    setUserSortBy(sortBy);
+    setUserSortDir((prev) => userSortBy === sortBy && prev === "asc" ? "desc" : "asc");
   };
 
   const handleDeleteUser = async (userId) => {
@@ -687,8 +693,20 @@ export default function AdminDash() {
           <div className="divide-y divide-white/5">
             {/* Header row */}
             <div className="grid grid-cols-12 gap-4 px-5 py-2.5 text-[10px] text-gray-500 uppercase tracking-widest">
-              <span className="col-span-3">User</span>
-              <span className="col-span-3">Email</span>
+              <button
+                type="button"
+                onClick={() => handleUserSort("name")}
+                className="col-span-3 text-left hover:text-gray-300 transition-colors"
+              >
+                User {userSortBy === "name" ? (userSortDir === "asc" ? "↑" : "↓") : ""}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleUserSort("email")}
+                className="col-span-3 text-left hover:text-gray-300 transition-colors"
+              >
+                Email {userSortBy === "email" ? (userSortDir === "asc" ? "↑" : "↓") : ""}
+              </button>
               <span className="col-span-1">Role</span>
               <span className="col-span-1">Status</span>
               <span className="col-span-2">Last Active</span>

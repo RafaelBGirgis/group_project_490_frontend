@@ -89,7 +89,9 @@ export async function apiFetch(path, opts = {}) {
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(normalizeErrorDetail(body?.detail) || `API ${res.status}`);
+    const error = new Error(normalizeErrorDetail(body?.detail) || `API ${res.status}`);
+    error.status = res.status;
+    throw error;
   }
 
   if (res.status === 204) {

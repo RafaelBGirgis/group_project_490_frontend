@@ -227,7 +227,6 @@ def test_signup():
 
             print("Saved availability schedule")
 
-            time.sleep(2)
 
         except TimeoutException:
             raise AssertionError(

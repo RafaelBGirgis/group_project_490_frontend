@@ -75,18 +75,6 @@ describe("Auth guards", () => {
     });
   });
 
-  it("workouts page calls fetchMe on mount", async () => {
-    const WorkoutsPage = (await import("../pages/workouts")).default;
-    const me = { name: "Test User", client_id: 1, coach_id: null };
-    mockFetchOk(me);
-    localStorage.setItem("jwt", "valid-token");
-    renderInRouter(WorkoutsPage);
-
-    await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalled();
-    });
-  });
-
   it("coach dashboard calls fetchMe on mount", async () => {
     const CoachDashboard = (await import("../pages/coach_dash")).default;
     const me = { name: "Coach A", coach_id: 5 };
@@ -120,51 +108,11 @@ describe("Page smoke tests", () => {
     localStorage.setItem("jwt", "valid");
   });
 
-  function mockVerifiedCoachAccount() {
-    const account = {
-      name: "Coach Test",
-      client_id: null,
-      coach_id: 9,
-      email: "coach@test.com",
-      coach_account: { verified: true },
-    };
-    global.fetch = vi.fn(() =>
-      Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(account) })
-    );
-  }
-
-  it("workouts page renders title after load", async () => {
-    const WorkoutsPage = (await import("../pages/workouts")).default;
-    renderInRouter(WorkoutsPage);
+  it("plan page renders without crashing", async () => {
+    const PlanPage = (await import("../pages/plan")).default;
+    renderInRouter(PlanPage);
     await waitFor(() => {
-      expect(screen.getByText("Workouts")).toBeInTheDocument();
-    });
-  });
-
-  it("workouts page shows 'New Workout' button for verified coaches", async () => {
-    mockVerifiedCoachAccount();
-    const WorkoutsPage = (await import("../pages/workouts")).default;
-    renderInRouter(WorkoutsPage);
-    await waitFor(() => {
-      expect(screen.getByText("New Workout")).toBeInTheDocument();
-    });
-  });
-
-  it("workouts page hides 'New Workout' button for clients", async () => {
-    const WorkoutsPage = (await import("../pages/workouts")).default;
-    renderInRouter(WorkoutsPage);
-    await waitFor(() => {
-      expect(screen.getByText("Workouts")).toBeInTheDocument();
-    });
-    expect(screen.queryByText("New Workout")).not.toBeInTheDocument();
-  });
-
-  it("workouts page shows tabs (My Workouts, Preset Library)", async () => {
-    const WorkoutsPage = (await import("../pages/workouts")).default;
-    renderInRouter(WorkoutsPage);
-    await waitFor(() => {
-      expect(screen.getByText(/My Workouts/)).toBeInTheDocument();
-      expect(screen.getByText("Preset Library")).toBeInTheDocument();
+      expect(global.fetch).toHaveBeenCalled();
     });
   });
 

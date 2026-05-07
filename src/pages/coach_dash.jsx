@@ -18,6 +18,7 @@ import { fetchMe } from "../api/client";
 import {
   fetchCoachProfile,
   fetchCoachStats,
+  fetchCoachEarnings,
   fetchMyClients,
   fetchUpcomingSessions,
   fetchCoachAvailability,
@@ -28,14 +29,10 @@ import {
   lookupClient,
   acceptClientRequest,
   denyClientRequest,
-  createClientReview,
-  fetchClientReports,
 } from "../api/coach";
 import { getConversationWithAccount } from "../api/chat";
 import { getCoachAccessState } from "../utils/roleAccess";
-import { updateClientCoachRequestByRequestId } from "../utils/coachRequests";
 import { resolveRoleState } from "../utils/sessionAuth";
-import ClientsDetail from "../components/overlays/clients_detail";
 import SessionsDetail from "../components/overlays/sessions_detail";
 import ReviewsDetail from "../components/overlays/reviews_detail";
 import AvailabilityDetail from "../components/overlays/availability_detail";
@@ -43,6 +40,131 @@ import ClientProfile from "../components/overlays/client_profile";
 
 const role = "coach";
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+function summarizeAvailability(rows) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const openSlots = safeRows.reduce(
+    (sum, row) => sum + (Array.isArray(row.slots) ? row.slots.filter((slot) => slot === "available").length : 0),
+    0
+  );
+  const bookedSlots = safeRows.reduce(
+    (sum, row) => sum + (Array.isArray(row.slots) ? row.slots.filter((slot) => slot === "booked").length : 0),
+    0
+  );
+  const activeDays = WEEKDAYS.reduce(
+    (sum, _, dayIdx) => sum + (safeRows.some((row) => row.slots?.[dayIdx] === "available") ? 1 : 0),
+    0
+  );
+  return { openSlots, bookedSlots, activeDays };
+}
+
+function resolveClientName(source, fallbackId) {
+  return (
+    source?.base_account?.name ||
+    source?.name ||
+    source?.client_name ||
+    source?.client?.name ||
+    `Client #${fallbackId}`
+  );
+}
+
+function mergeClientDetail(primary, fallback) {
+  if (!primary && !fallback) return null;
+
+  const fallbackBase = fallback?.base_account || {};
+  const primaryBase = primary?.base_account || {};
+
+  return {
+    ...(fallback || {}),
+    ...(primary || {}),
+    base_account: {
+      ...fallbackBase,
+      ...primaryBase,
+      name:
+        primaryBase.name ||
+        fallbackBase.name ||
+        fallback?.name ||
+        primary?.name ||
+        "",
+      age:
+        primaryBase.age ??
+        fallbackBase.age ??
+        fallback?.age ??
+        primary?.age ??
+        null,
+      gender:
+        primaryBase.gender ||
+        fallbackBase.gender ||
+        fallback?.gender ||
+        primary?.gender ||
+        "",
+      pfp_url:
+        primaryBase.pfp_url ||
+        fallbackBase.pfp_url ||
+        fallback?.pfp_url ||
+        primary?.pfp_url ||
+        "",
+      email:
+        primaryBase.email ||
+        fallbackBase.email ||
+        fallback?.email ||
+        primary?.email ||
+        "",
+      bio:
+        primaryBase.bio ||
+        fallbackBase.bio ||
+        fallback?.bio ||
+        primary?.bio ||
+        "",
+    },
+    fitness_goals:
+      Array.isArray(primary?.fitness_goals) && primary.fitness_goals.length
+        ? primary.fitness_goals
+        : Array.isArray(fallback?.fitness_goals)
+          ? fallback.fitness_goals
+          : [],
+  };
+}
+
+function hydrateClientRows(rows, detailSources = {}, previousRows = []) {
+  return (Array.isArray(rows) ? rows : []).map((row) => {
+    const previousRow = previousRows.find((item) => Number(item?.id) === Number(row?.id));
+    const sourceDetail =
+      row?.details ||
+      detailSources?.[row?.id] ||
+      previousRow?.details ||
+      null;
+    const mergedDetail = mergeClientDetail(sourceDetail, row);
+    const resolvedName = resolveClientName(
+      mergedDetail || previousRow || row,
+      row?.id
+    );
+    const resolvedGoal =
+      mergedDetail?.fitness_goals?.[0]?.goal_enum ||
+      previousRow?.goal ||
+      row?.goal ||
+      "Active client";
+
+    return {
+      ...row,
+      name: resolvedName,
+      goal: resolvedGoal,
+      details: mergedDetail || row?.details || previousRow?.details || null,
+    };
+  });
+}
+
+function formatCoachEarnings(value) {
+  const amount =
+    Number(
+      value?.total_earnings ??
+      value?.amount_paid ??
+      value?.earnings ??
+      value?.amount ??
+      0
+    ) || 0;
+  return amount.toFixed(2);
+}
 
 const SlotCell = ({ status, time }) => {
   const base = "rounded py-1 text-center text-[10px] font-medium transition-colors";
@@ -72,6 +194,7 @@ export default function CoachDashboard() {
   const [coachId, setCoachId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
+  const [earnings, setEarnings] = useState(null);
   const [clients, setClients] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [availability, setAvailability] = useState([]);
@@ -80,12 +203,12 @@ export default function CoachDashboard() {
   const [clientRequests, setClientRequests] = useState([]);
   const [clientRequestDetails, setClientRequestDetails] = useState({});
   const [requestActionId, setRequestActionId] = useState(null);
-  const [clientReportDrafts, setClientReportDrafts] = useState({});
-  const [clientReports, setClientReports] = useState({});
   const [availabilityError, setAvailabilityError] = useState("");
+  const [availabilityMessage, setAvailabilityMessage] = useState("");
   const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(false);
   const [chatActionId, setChatActionId] = useState(null);
   const [selectedClient, setSelectedClient] = useState(null);
+  const [clientSearchTerm, setClientSearchTerm] = useState("");
 
   /*  load account  */
   useEffect(() => {
@@ -111,51 +234,132 @@ export default function CoachDashboard() {
   useEffect(() => {
     if (!coachId) return;
     (async () => {
-      const [profile, s, c, sess, avail, rev, plans] = await Promise.all([
-        fetchCoachProfile().catch(() => null),
-        fetchCoachStats(coachId),
-        fetchMyClients(coachId),
-        fetchUpcomingSessions(coachId),
-        fetchCoachAvailability(coachId),
-        fetchCoachReviews(coachId),
-        fetchCoachWorkoutPlans(coachId),
-      ]);
-      setCoachProfile(profile);
-      setStats(s);
-      setClients(c);
-      setSessions(sess);
-      setAvailability(avail);
-      setReviews(rev);
-      setWorkoutPlans(plans);
-
       try {
-      const requests = await fetchClientRequests();
-      const detailedRequests = await Promise.all(
-        requests.map(async (request) => {
-          const detail = await lookupClient(request.client_id).catch(() => null);
-          return { ...request, detail };
-        })
-      );
-      setClientRequests(detailedRequests);
-    } catch {
-      setClientRequests([]);
-    }
-  })();
-}, [coachId]);
+        const [profile, s, c, sess, avail, rev, plans, earningsResponse] = await Promise.all([
+          fetchCoachProfile().catch(() => null),
+          fetchCoachStats(coachId).catch(() => null),
+          fetchMyClients(coachId).catch(() => []),
+          fetchUpcomingSessions(coachId).catch(() => []),
+          fetchCoachAvailability(coachId).catch(() => []),
+          fetchCoachReviews(coachId).catch(() => []),
+          fetchCoachWorkoutPlans(coachId).catch(() => []),
+          fetchCoachEarnings().catch(() => null),
+        ]);
+        const requests = await fetchClientRequests().catch(() => []);
+        const detailedRequests = await Promise.all(
+          requests.map(async (request) => {
+            const detail = await lookupClient(request.client_id).catch(() => null);
+            const mergedDetail = mergeClientDetail(detail, request.detail || request);
+            return {
+              ...request,
+              detail: mergedDetail,
+              name: resolveClientName(mergedDetail, request.client_id),
+              age: mergedDetail?.base_account?.age ?? request.age,
+              gender: mergedDetail?.base_account?.gender || request.gender,
+              pfp_url: mergedDetail?.base_account?.pfp_url || request.pfp_url,
+              goal: mergedDetail?.fitness_goals?.[0]?.goal_enum || request.goal || "Pending request"
+            };
+          })
+        );
+        const requestDetailsByClientId = Object.fromEntries(
+          detailedRequests
+            .filter((request) => request?.client_id)
+            .map((request) => [request.client_id, request.detail || request.details || null])
+        );
+
+        setCoachProfile(profile);
+        setStats(s);
+        setClients((prev) =>
+          hydrateClientRows(
+            c,
+            requestDetailsByClientId,
+            prev
+          )
+        );
+        setSessions(sess);
+        setAvailability(Array.isArray(avail) ? avail : []);
+        setReviews(rev);
+        setWorkoutPlans(plans);
+        setEarnings(earningsResponse);
+        setClientRequests(detailedRequests);
+        setClientRequestDetails(requestDetailsByClientId);
+      } catch {
+        setClientRequests([]);
+      }
+    })();
+  }, [coachId]);
+
+  const refreshRelationshipData = useCallback(async () => {
+    if (!coachId) return;
+
+    const [clientsResponse, statsResponse, requests] = await Promise.all([
+      fetchMyClients(coachId).catch(() => []),
+      fetchCoachStats(coachId).catch(() => null),
+      fetchClientRequests().catch(() => []),
+    ]);
+
+    const detailedRequests = await Promise.all(
+      requests.map(async (request) => {
+        const detail = await lookupClient(request.client_id).catch(() => null);
+        const mergedDetail = mergeClientDetail(detail, request.detail || request);
+        return {
+          ...request,
+          detail: mergedDetail,
+          name: resolveClientName(mergedDetail, request.client_id),
+          age: mergedDetail?.base_account?.age ?? request.age,
+          gender: mergedDetail?.base_account?.gender || request.gender,
+          pfp_url: mergedDetail?.base_account?.pfp_url || request.pfp_url,
+          goal: mergedDetail?.fitness_goals?.[0]?.goal_enum || request.goal || "Pending request"
+        };
+      })
+    );
+
+    setClients((prev) =>
+      hydrateClientRows(
+        clientsResponse,
+        {
+          ...clientRequestDetails,
+          ...Object.fromEntries(
+            detailedRequests
+              .filter((request) => request?.client_id)
+              .map((request) => [request.client_id, request.detail || request.details || null])
+          ),
+        },
+        prev
+      )
+    );
+    setStats(statsResponse);
+    setClientRequests(detailedRequests);
+    setClientRequestDetails((prev) => ({
+      ...prev,
+      ...Object.fromEntries(
+        detailedRequests
+          .filter((request) => request?.client_id)
+          .map((request) => [request.client_id, request.detail || request.details || null])
+      ),
+    }));
+  }, [coachId]);
+
+  useEffect(() => {
+    if (!coachId) return undefined;
+
+    const refreshOnFocus = () => {
+      void refreshRelationshipData();
+    };
+
+    window.addEventListener("focus", refreshOnFocus);
+    const intervalId = window.setInterval(refreshRelationshipData, 15000);
+
+    return () => {
+      window.removeEventListener("focus", refreshOnFocus);
+      window.clearInterval(intervalId);
+    };
+  }, [coachId, refreshRelationshipData]);
 
   const loadClientRequestDetails = useCallback(async (clientId) => {
     if (clientRequestDetails[clientId]) return clientRequestDetails[clientId];
     const detail = await lookupClient(clientId);
     setClientRequestDetails((prev) => ({ ...prev, [clientId]: detail }));
-    try {
-      const reportsResponse = await fetchClientReports(clientId);
-      setClientReports((prev) => ({
-        ...prev,
-        [clientId]: Array.isArray(reportsResponse?.reports) ? reportsResponse.reports : [],
-      }));
-    } catch {
-      setClientReports((prev) => ({ ...prev, [clientId]: [] }));
-    }
     return detail;
   }, [clientRequestDetails]);
 
@@ -169,26 +373,25 @@ export default function CoachDashboard() {
           (client) => Number(client.id) === Number(request.client_id) && client.status === "active"
         );
         const detail = await loadClientRequestDetails(request.client_id).catch(() => null);
-        await getConversationWithAccount(detail?.base_account?.id || null, {
+        const mergedDetail = mergeClientDetail(detail, request.detail || request.details || request);
+        await getConversationWithAccount(mergedDetail?.base_account?.id || null, {
           id: request.client_id,
-          account_id: detail?.base_account?.id || null,
-          name: detail?.base_account?.name || `Client #${request.client_id}`,
+          account_id: mergedDetail?.base_account?.id || null,
+          name: resolveClientName(mergedDetail || request, request.client_id),
           role: "client",
         }).catch(() => null);
-        updateClientCoachRequestByRequestId(request.request_id, {
-          status: "approved",
-          relationship_id: accepted.relationship_id,
-        });
-
         const acceptedClient = {
           id: request.client_id,
           request_id: request.request_id,
-          name: detail?.base_account?.name || `Client #${request.client_id}`,
-          goal: detail?.fitness_goals?.[0]?.goal_enum || "Active client",
+          name: resolveClientName(mergedDetail || request, request.client_id),
+          goal:
+            mergedDetail?.fitness_goals?.[0]?.goal_enum ||
+            request.goal ||
+            "Active client",
           status: "active",
           joined: new Date().toLocaleDateString(),
           relationship_id: accepted.relationship_id,
-          details: detail,
+          details: mergedDetail,
         };
 
         setClients((prev) => {
@@ -208,7 +411,7 @@ export default function CoachDashboard() {
             : prev
         );
       }
-      setClientRequests((prev) => prev.filter((item) => item.request_id !== request.request_id));
+      await refreshRelationshipData();
     } finally {
       setRequestActionId(null);
     }
@@ -218,25 +421,7 @@ export default function CoachDashboard() {
     setRequestActionId(requestId);
     try {
       await denyClientRequest(requestId);
-      updateClientCoachRequestByRequestId(requestId, { status: "rejected" });
-      setClientRequests((prev) => prev.filter((item) => item.request_id !== requestId));
-    } finally {
-      setRequestActionId(null);
-    }
-  };
-
-  const handleSubmitClientReport = async (clientId) => {
-    const draft = clientReportDrafts[clientId];
-    if (!draft?.trim()) return;
-    setRequestActionId(clientId);
-    try {
-      await createClientReview(clientId, draft.trim());
-      const reportsResponse = await fetchClientReports(clientId);
-      setClientReports((prev) => ({
-        ...prev,
-        [clientId]: Array.isArray(reportsResponse?.reports) ? reportsResponse.reports : [],
-      }));
-      setClientReportDrafts((prev) => ({ ...prev, [clientId]: "" }));
+      await refreshRelationshipData();
     } finally {
       setRequestActionId(null);
     }
@@ -283,6 +468,7 @@ export default function CoachDashboard() {
   const lastName = nameParts.slice(1).join(" ") || "";
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good Morning" : hour < 17 ? "Good Afternoon" : "Good Evening";
+  const availabilitySummary = summarizeAvailability(availability);
 
   /*  loading skeleton  */
   if (loading) {
@@ -324,7 +510,7 @@ export default function CoachDashboard() {
         {/*  OVERVIEW  */}
         <SectionHeader label="OVERVIEW" role={role} />
 
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-4 gap-4">
           <DashboardCard role={role} className="min-h-50">
             <p className="text-xs text-gray-500 uppercase tracking-widest mb-1">{greeting}</p>
             <h2 className="text-4xl font-bold text-white leading-tight">
@@ -348,6 +534,12 @@ export default function CoachDashboard() {
             value={stats?.avg_rating ? `★ ${stats.avg_rating}` : "—"}
             sub={stats?.review_count ? `${stats.review_count} reviews` : "no reviews"}
           />
+          <StatCard
+            role={role}
+            label="EARNINGS"
+            value={`$${formatCoachEarnings(earnings)}`}
+            sub="from paid invoices"
+          />
         </div>
 
         {/*  CLIENTS & SESSIONS  */}
@@ -360,11 +552,25 @@ export default function CoachDashboard() {
             return (
               <DashboardCard
                 role={role}
-                title={`My Clients (${activeClients.length})`}
-                action={{ label: "View all", onClick: () => setOverlay("clients") }}
               >
-                <div className="space-y-2">
-                  {activeClients.slice(0, 4).map((c) => (
+                <div className="flex items-center justify-between w-full">
+                  <h3 className="text-white font-semibold text-base group-hover:translate-x-1 transition-transform duration-300">
+                    My Clients ({activeClients.length})
+                  </h3>
+                  <div className="w-48">
+                    <input
+                      type="text"
+                      placeholder="Search by name..."
+                      value={clientSearchTerm}
+                      onChange={(e) => setClientSearchTerm(e.target.value)}
+                      className="w-full rounded-lg border border-white/10 bg-[#0A1020] px-3 py-1.5 text-xs text-white outline-none placeholder:text-gray-600 focus:border-orange-500/50"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                  {activeClients
+                    .filter(c => c.name?.toLowerCase().includes(clientSearchTerm.toLowerCase()))
+                    .map((c) => (
                     <div
                       key={c.id}
                       className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors"
@@ -400,9 +606,6 @@ export default function CoachDashboard() {
                       </button>
                     </div>
                   ))}
-                  {activeClients.length > 4 && (
-                    <p className="text-gray-500 text-xs text-center pt-1">+{activeClients.length - 4} more</p>
-                  )}
                   {activeClients.length === 0 && (
                     <p className="text-gray-500 text-xs text-center py-4">No active clients yet</p>
                   )}
@@ -419,11 +622,33 @@ export default function CoachDashboard() {
             title="My Availability"
             action={{ label: "Edit", onClick: () => setOverlay("availability") }}
           >
+            {availabilityMessage ? (
+              <div className="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">
+                {availabilityMessage}
+              </div>
+            ) : null}
             {availabilityError ? (
               <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
                 {availabilityError}
               </div>
             ) : null}
+            <div className="mb-3 grid grid-cols-3 gap-2">
+              <div className="rounded-lg bg-[#0A1020] px-3 py-2 text-center">
+                <p className="text-lg font-bold text-orange-300">{availabilitySummary.openSlots}</p>
+                <p className="text-[10px] uppercase tracking-widest text-gray-500">Open Slots</p>
+              </div>
+              <div className="rounded-lg bg-[#0A1020] px-3 py-2 text-center">
+                <p className="text-lg font-bold text-white">{availabilitySummary.activeDays}</p>
+                <p className="text-[10px] uppercase tracking-widest text-gray-500">Active Days</p>
+              </div>
+              <div className="rounded-lg bg-[#0A1020] px-3 py-2 text-center">
+                <p className="text-lg font-bold text-blue-300">{availabilitySummary.bookedSlots}</p>
+                <p className="text-[10px] uppercase tracking-widest text-gray-500">Booked</p>
+              </div>
+            </div>
+            <p className="mb-3 text-xs text-gray-500">
+              Saved as one-hour windows through your coach information route.
+            </p>
             <div className="grid grid-cols-8 gap-1 mb-2">
               <div />
               {WEEKDAYS.map((d) => (
@@ -459,16 +684,15 @@ export default function CoachDashboard() {
           <DashboardCard
             role={role}
             title={`Client Requests (${clientRequests.length})`}
-            action={{ label: "Manage", onClick: () => setOverlay("requests") }}
           >
-            <div className="space-y-2">
+            <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
               {clientRequests.length === 0 ? (
                 <p className="text-gray-500 text-sm text-center py-6">No pending requests</p>
               ) : (
-                clientRequests.slice(0, 4).map((request) => (
+                clientRequests.map((request) => (
                   <div
                     key={request.request_id}
-                    className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
+                    className="flex items-center justify-between p-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer group"
                     onClick={() => {
                       setSelectedClient({
                         id: request.client_id,
@@ -485,17 +709,41 @@ export default function CoachDashboard() {
                       setOverlay("client_profile");
                     }}
                   >
-                    <ProfileAvatar
-                      src={request.pfp_url}
-                      alt={request.name}
-                      name={request.name}
-                      size="md"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-white font-medium text-sm truncate">{request.name}</p>
-                      <p className="text-gray-400 text-xs">
-                        {request.goal} · {request.age || "—"} · {request.gender || "—"}
-                      </p>
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <ProfileAvatar
+                        src={request.pfp_url}
+                        alt={request.name}
+                        name={request.name}
+                        size="md"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white font-medium text-sm truncate">{request.name}</p>
+                        <p className="text-gray-400 text-xs">
+                          {request.goal} · {request.age || "—"} · {request.gender || "—"}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 transition-opacity">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleAcceptRequest(request); }}
+                        disabled={requestActionId === request.request_id}
+                        className="p-1.5 rounded-lg text-green-400 hover:bg-green-500/10 disabled:opacity-50 transition-colors"
+                        title="Accept"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDenyRequest(request.request_id); }}
+                        disabled={requestActionId === request.request_id}
+                        className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/10 disabled:opacity-50 transition-colors"
+                        title="Decline"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
                     </div>
                   </div>
                 ))
@@ -514,10 +762,10 @@ export default function CoachDashboard() {
             title="Workout Plans"
             footer={
               <button
-                onClick={() => navigate("/workouts?role=coach")}
+                onClick={() => navigate("/plan?role=coach")}
                 className="w-full py-2 rounded-xl border border-orange-500/30 text-orange-400 text-xs font-semibold hover:bg-orange-500/10 transition-colors"
               >
-                Manage & Assign Workouts
+                Prescribe Plans
               </button>
             }
           >
@@ -560,14 +808,6 @@ export default function CoachDashboard() {
           OVERLAYS
           ═══════════════════════════════════════════════════════════════ */}
 
-      <Overlay open={overlay === "clients"} onClose={closeOverlay} title="My Clients" wide>
-        <ClientsDetail
-          clients={clients.filter((c) => c.status === "active")}
-          onMessage={handleOpenClientChat}
-          onViewProfile={(c) => { setSelectedClient(c); setOverlay("client_profile"); }}
-        />
-      </Overlay>
-
       <Overlay open={overlay === "sessions"} onClose={closeOverlay} title="Upcoming Sessions" wide>
         <SessionsDetail sessions={sessions} />
       </Overlay>
@@ -577,11 +817,14 @@ export default function CoachDashboard() {
           slots={availability}
           weekdays={WEEKDAYS}
           role="coach"
+          showDefaultRows={false}
           onSave={async (updatedSlots) => {
             setAvailabilityError("");
+            setAvailabilityMessage("");
             try {
               const refreshedAvailability = await saveCoachAvailability(coachId, updatedSlots);
-              setAvailability(refreshedAvailability);
+              setAvailability(Array.isArray(refreshedAvailability) ? refreshedAvailability : []);
+              setAvailabilityMessage("Availability saved to your coach profile.");
             } catch (error) {
               setAvailabilityError(error.message || "Unable to save coach availability.");
               throw error;
@@ -612,125 +855,6 @@ export default function CoachDashboard() {
         ) : null}
       </Overlay>
 
-      <Overlay open={overlay === "requests"} onClose={closeOverlay} title="Client Requests" wide>
-        <div className="space-y-4">
-          {clientRequests.length === 0 ? (
-            <p className="text-gray-500 text-sm text-center py-8">No pending client requests.</p>
-          ) : (
-            clientRequests.map((request) => {
-              const detail = clientRequestDetails[request.client_id];
-              const reports = clientReports[request.client_id] || [];
-              return (
-                <div key={request.request_id} className="rounded-2xl border border-white/8 bg-[#0B1120] p-4 space-y-3">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-start gap-4 flex-1">
-                      <ProfileAvatar
-                        src={request.pfp_url}
-                        alt={request.name}
-                        name={request.name}
-                        size="lg"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-white font-semibold">
-                          {request.name || `Client #${request.client_id}`}
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          Goal: {request.goal} · Age: {request.age || "—"} · Gender: {request.gender || "—"}
-                        </p>
-                        <button
-                          onClick={() => {
-                            setSelectedClient({
-                              id: request.client_id,
-                              name: request.name || `Client #${request.client_id}`,
-                              details: request.detail || clientRequestDetails[request.client_id] || {
-                                base_account: {
-                                  name: request.name,
-                                  age: request.age,
-                                  gender: request.gender,
-                                  pfp_url: request.pfp_url,
-                                },
-                              },
-                            });
-                            setOverlay("client_profile");
-                          }}
-                          className="mt-1.5 text-xs text-orange-400/70 hover:text-orange-300 transition-colors"
-                        >
-                          View Profile →
-                        </button>
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => handleAcceptRequest(request)}
-                        disabled={requestActionId === request.request_id}
-                        className="rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2 text-xs font-semibold text-green-300 disabled:opacity-60 whitespace-nowrap"
-                      >
-                        {requestActionId === request.request_id ? "Accepting..." : "Accept"}
-                      </button>
-                      <button
-                        onClick={() => handleDenyRequest(request.request_id)}
-                        disabled={requestActionId === request.request_id}
-                        className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300 disabled:opacity-60 whitespace-nowrap"
-                      >
-                        {requestActionId === request.request_id ? "Denying..." : "Deny"}
-                      </button>
-                    </div>
-                  </div>
-
-                  {detail ? (
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="rounded-xl bg-[#101827] p-3">
-                        <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Additional Info</p>
-                        <div className="space-y-1 text-xs text-gray-300">
-                          <p>Email: {detail.base_account?.email || "—"}</p>
-                          <p>Bio: {detail.base_account?.bio || "—"}</p>
-                        </div>
-                      </div>
-                      <div className="rounded-xl bg-[#101827] p-3">
-                        <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Client Reports</p>
-                        {reports.length === 0 ? (
-                          <p className="text-xs text-gray-500">No client reports yet.</p>
-                        ) : (
-                          <div className="space-y-2">
-                            {reports.slice(0, 3).map((report) => (
-                              <div key={report.id} className="rounded-lg bg-[#0A1020] px-3 py-2 text-xs text-gray-300">
-                                {report.report_summary}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div className="rounded-xl bg-[#101827] p-3">
-                    <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-2">Create Client Report</p>
-                    <textarea
-                      value={clientReportDrafts[request.client_id] || ""}
-                      onChange={(event) =>
-                        setClientReportDrafts((prev) => ({
-                          ...prev,
-                          [request.client_id]: event.target.value,
-                        }))
-                      }
-                      rows={3}
-                      placeholder="Add notes about this client."
-                      className="w-full rounded-lg border border-white/10 bg-[#080D19] px-3 py-2 text-xs text-white outline-none placeholder:text-gray-600"
-                    />
-                    <button
-                      onClick={() => handleSubmitClientReport(request.client_id)}
-                      disabled={requestActionId === request.client_id}
-                      className="mt-2 rounded-lg border border-orange-500/30 bg-orange-500/10 px-3 py-2 text-xs font-semibold text-orange-300 disabled:opacity-60"
-                    >
-                      {requestActionId === request.client_id ? "Submitting..." : "Submit Report"}
-                    </button>
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-      </Overlay>
     </div>
   );
 }

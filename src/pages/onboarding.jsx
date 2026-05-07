@@ -9,6 +9,11 @@ import {
   updateAccount,
   updateClientInformation,
 } from "../api/client";
+import {
+  convertGridToTrainingAvailability,
+  convertTrainingAvailabilityToGrid,
+  EMPTY_TRAINING_AVAILABILITY,
+} from "../utils/availabilityModel";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
 
@@ -17,16 +22,6 @@ const PRIMARY_GOALS = [
   "Maintenance",
   "Muscle Gain",
 ];
-
-const EMPTY_TRAINING_AVAILABILITY = {
-  Mon: [],
-  Tue: [],
-  Wed: [],
-  Thu: [],
-  Fri: [],
-  Sat: [],
-  Sun: [],
-};
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -74,37 +69,6 @@ const normalizeTrainingAvailability = (value, fallbackDays = []) => {
   });
 
   return base;
-};
-
-// Convert from { Mon: ["9AM", "10AM"], ... } to [{ time, slots: [...] }, ...]
-const convertToSlotsFormat = (trainingAvailability) => {
-  const allTimes = new Set();
-  Object.values(trainingAvailability).forEach(slots => {
-    slots.forEach(time => allTimes.add(time));
-  });
-
-  const sortedTimes = Array.from(allTimes).sort((a, b) => {
-    const timeOrder = ["5AM","6AM","7AM","8AM","9AM","10AM","11AM","12PM","1PM","2PM","3PM","4PM","5PM","6PM","7PM","8PM","9PM"];
-    return timeOrder.indexOf(a) - timeOrder.indexOf(b);
-  });
-
-  return sortedTimes.map(time => ({
-    time,
-    slots: WEEKDAYS.map(day => trainingAvailability[day].includes(time) ? "available" : null)
-  }));
-};
-
-// Convert from [{ time, slots: [...] }, ...] to { Mon: ["9AM", "10AM"], ... }
-const convertFromSlotsFormat = (slots) => {
-  const result = { ...EMPTY_TRAINING_AVAILABILITY };
-  slots.forEach(({ time, slots: daySlots }) => {
-    daySlots.forEach((status, dayIndex) => {
-      if (status === "available") {
-        result[WEEKDAYS[dayIndex]].push(time);
-      }
-    });
-  });
-  return result;
 };
 
 function OnboardingPage() {
@@ -355,12 +319,12 @@ function OnboardingPage() {
               </h2>
               <p className="text-xs text-slate-500">Set your available training time slots</p>
               <AvailabilityDetail
-                slots={convertToSlotsFormat(form.trainingAvailability)}
+                slots={convertTrainingAvailabilityToGrid(form.trainingAvailability)}
                 weekdays={WEEKDAYS}
                 onSave={(updatedSlots) => {
                   setForm((prev) => ({
                     ...prev,
-                    trainingAvailability: convertFromSlotsFormat(updatedSlots)
+                    trainingAvailability: convertGridToTrainingAvailability(updatedSlots),
                   }));
                 }}
                 role="client"

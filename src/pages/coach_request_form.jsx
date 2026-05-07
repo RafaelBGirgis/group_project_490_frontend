@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Navbar } from "../components/navbar";
 import { fetchMe } from "../api/client";
-import { createCoachRequest, fetchCoachProfile } from "../api/coach";
+import { buildCoachRequestPayload, createCoachRequest, fetchCoachProfile } from "../api/coach";
+import { EMPTY_TRAINING_AVAILABILITY } from "../utils/availabilityModel";
 
 const SPECIALIZATION_OPTIONS = [
   "Strength Training",
@@ -15,6 +16,11 @@ const SPECIALIZATION_OPTIONS = [
   "Powerlifting",
   "CrossFit",
   "Rehabilitation",
+];
+const AVAILABILITY_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const AVAILABILITY_TIMES = [
+  "6AM", "7AM", "8AM", "9AM", "10AM", "11AM",
+  "12PM", "1PM", "2PM", "3PM", "4PM", "5PM", "6PM", "7PM", "8PM",
 ];
 
 function CoachRequestFormPage() {
@@ -52,6 +58,7 @@ function CoachRequestFormPage() {
   const [editingExperience, setEditingExperience] = useState(null);
   const [showCertForm, setShowCertForm] = useState(false);
   const [showExpForm, setShowExpForm] = useState(false);
+  const [availability, setAvailability] = useState(EMPTY_TRAINING_AVAILABILITY);
 
   const initials = useMemo(() => {
     const parts = form.name.trim().split(/\s+/).filter(Boolean);
@@ -93,6 +100,7 @@ function CoachRequestFormPage() {
               }))
             : prev.experiences,
         }));
+        setAvailability({ ...EMPTY_TRAINING_AVAILABILITY });
 
         if ((isViewMode || isEditMode) && !existingCoachProfile?.coach_account) {
           setSubmitMessage(
@@ -145,27 +153,15 @@ function CoachRequestFormPage() {
       setError("Please explain why you want to be a coach.");
       return;
     }
+    if (!Object.values(availability).some((slots) => slots.length > 0)) {
+      setError("Add at least one availability slot.");
+      return;
+    }
 
     setError("");
     setSubmitting(true);
 
-    // Build backend-compatible payload
-    const backendPayload = {
-      availabilities: [],  // User can fill in availability later
-      experiences: form.experiences.map((exp) => ({
-        title: exp.title,
-        organization: exp.organization,
-        description: exp.description || "",
-      })),
-      certifications: form.certifications.map((cert) => ({
-        name: cert.title,
-        issuer: cert.issuer,
-        description: cert.description || "",
-      })),
-      payment_interval: "monthly",   // Default, can be made configurable
-      price_cents: 0,                // Default, admin can adjust later
-      specialties: form.specializations,
-    };
+    const backendPayload = buildCoachRequestPayload(form, availability);
 
     try {
       await createCoachRequest(backendPayload);
@@ -255,6 +251,16 @@ function CoachRequestFormPage() {
       description: exp.description || "",
     });
     setShowExpForm(true);
+  };
+
+  const toggleAvailability = (day, time) => {
+    if (isViewMode) return;
+    setAvailability((prev) => ({
+      ...prev,
+      [day]: prev[day].includes(time)
+        ? prev[day].filter((slot) => slot !== time)
+        : [...prev[day], time],
+    }));
   };
 
   return (
@@ -361,6 +367,47 @@ function CoachRequestFormPage() {
                     </button>
                   );
                 })}
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                Availability
+              </label>
+              <div className="rounded-xl border border-white/6 bg-[#101827] p-4">
+                <div className="mb-3 grid grid-cols-[70px_repeat(7,minmax(0,1fr))] gap-2 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                  <div>Time</div>
+                  {AVAILABILITY_DAYS.map((day) => (
+                    <div key={day} className="text-center">{day}</div>
+                  ))}
+                </div>
+                <div className="space-y-2">
+                  {AVAILABILITY_TIMES.map((time) => (
+                    <div key={time} className="grid grid-cols-[70px_repeat(7,minmax(0,1fr))] gap-2">
+                      <div className="flex items-center text-xs text-slate-400">{time}</div>
+                      {AVAILABILITY_DAYS.map((day) => {
+                        const selected = availability[day].includes(time);
+                        return (
+                          <button
+                            key={`${day}-${time}`}
+                            type="button"
+                            onClick={() => toggleAvailability(day, time)}
+                            disabled={isViewMode}
+                            className="rounded-lg border px-2 py-2 text-[10px] font-semibold transition"
+                            style={{
+                              borderColor: selected ? "#F59E0B" : "rgba(255,255,255,0.08)",
+                              backgroundColor: selected ? "rgba(245,158,11,0.18)" : "rgba(255,255,255,0.03)",
+                              color: selected ? "#FBBF24" : "#64748B",
+                              cursor: isViewMode ? "default" : "pointer",
+                            }}
+                          >
+                            {selected ? "Open" : ""}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
 

@@ -1,10 +1,142 @@
-import { apiGet, apiPatch, apiPost, withQuery } from "./api";
+import { apiDelete, apiGet, apiPatch, apiPost, withQuery } from "./api";
+import { fetchUnifiedProfile } from "./client";
+import {
+  convertBackendAvailabilitiesToGrid,
+  convertGridToTrainingAvailability,
+  convertTrainingAvailabilityObjectToBackend,
+  extractBackendAvailabilities,
+  sanitizeBackendAvailabilities,
+} from "../utils/availabilityModel";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const DEFAULT_TIME_OPTIONS = [
-  "5AM", "6AM", "7AM", "8AM", "9AM", "10AM", "11AM",
-  "12PM", "1PM", "2PM", "3PM", "4PM", "5PM", "6PM", "7PM", "8PM", "9PM",
-];
+
+function resolveClientName(source, fallbackId) {
+  return (
+    source?.base_account?.name ||
+    source?.account?.name ||
+    source?.name ||
+    source?.client_name ||
+    source?.clientName ||
+    source?.client_account?.name ||
+    source?.client_account?.base_account?.name ||
+    source?.client?.name ||
+    source?.client?.base_account?.name ||
+    `Client #${fallbackId}`
+  );
+}
+
+function normalizeAcceptedClientItem(item) {
+  if (!item || typeof item !== "object") return null;
+
+  const clientId =
+    item.client_id ??
+    item.clientId ??
+    item.client?.id ??
+    item.client_account?.id ??
+    item.client_account?.client_id ??
+    item.base_account?.client_id ??
+    item.id;
+  const relationshipId =
+    item.relationship_id ??
+    item.relationshipId ??
+    item.relationship?.id ??
+    item.client_coach_relationship?.id ??
+    item.client_coach_relationship?.relationship_id;
+  const requestId =
+    item.request_id ??
+    item.requestId ??
+    item.client_coach_request_id ??
+    null;
+
+  if (!clientId) return null;
+
+  return {
+    ...item,
+    client_id: Number(clientId),
+    relationship_id:
+      relationshipId != null ? Number(relationshipId) : null,
+    request_id:
+      requestId != null ? Number(requestId) : null,
+  };
+}
+
+function normalizeClientRequestItem(item) {
+  if (!item || typeof item !== "object") return null;
+
+  const clientId =
+    item.client_id ??
+    item.clientId ??
+    item.client?.id ??
+    item.base_account?.client_id;
+  const requestId = item.request_id ?? item.requestId ?? item.id;
+
+  if (!clientId || !requestId) return null;
+
+  return {
+    ...item,
+    client_id: Number(clientId),
+    request_id: Number(requestId),
+    name: resolveClientName(item, clientId),
+    age:
+      item.age ??
+      item.base_account?.age ??
+      item.client?.age ??
+      null,
+    gender:
+      item.gender ||
+      item.base_account?.gender ||
+      item.client?.gender ||
+      "",
+    pfp_url:
+      item.pfp_url ||
+      item.base_account?.pfp_url ||
+      item.client?.pfp_url ||
+      "",
+    goal:
+      item.goal ||
+      item.fitness_goals?.[0]?.goal_enum ||
+      item.client?.fitness_goals?.[0]?.goal_enum ||
+      "Pending request",
+    detail:
+      item.detail ||
+      {
+        base_account: {
+          id:
+            item.base_account?.id ??
+            item.account_id ??
+            item.client?.account_id ??
+            null,
+          name: resolveClientName(item, clientId),
+          age:
+            item.age ??
+            item.base_account?.age ??
+            item.client?.age ??
+            null,
+          gender:
+            item.gender ||
+            item.base_account?.gender ||
+            item.client?.gender ||
+            "",
+          pfp_url:
+            item.pfp_url ||
+            item.base_account?.pfp_url ||
+            item.client?.pfp_url ||
+            "",
+          email:
+            item.email ||
+            item.base_account?.email ||
+            item.client?.email ||
+            "",
+          bio:
+            item.bio ||
+            item.base_account?.bio ||
+            item.client?.bio ||
+            "",
+        },
+        fitness_goals: Array.isArray(item.fitness_goals) ? item.fitness_goals : [],
+      },
+  };
+}
 
 /*  coach profile  */
 
@@ -50,7 +182,7 @@ export async function deactivateCoachAccount() {
 }
 
 export async function deleteCoachAccount() {
-  return { success: true, message: "Coach deletion endpoint is not available in the backend yet." };
+  return apiDelete("/roles/shared/account/delete");
 }
 
 export async function fetchMyClients(_coachId) {
@@ -58,28 +190,39 @@ export async function fetchMyClients(_coachId) {
     // Fetch accepted clients from API and enrich with details
     const acceptedClientsResponse = await apiGet("/roles/coach/clients");
     const acceptedClients = await Promise.all(
-      (Array.isArray(acceptedClientsResponse) ? acceptedClientsResponse : []).map(async (item) => {
+      (Array.isArray(acceptedClientsResponse) ? acceptedClientsResponse : [])
+        .map(normalizeAcceptedClientItem)
+        .filter(Boolean)
+        .map(async (item) => {
         try {
           const detail = await lookupClient(item.client_id);
           return {
             id: item.client_id,
             request_id: item.request_id,
-            name: detail?.base_account?.name || `Client #${item.client_id}`,
-            goal: detail?.fitness_goals?.[0]?.goal_enum || "Active client",
+            name: resolveClientName(detail, item.client_id),
+            goal:
+              detail?.fitness_goals?.[0]?.goal_enum ||
+              item.goal ||
+              item.fitness_goals?.[0]?.goal_enum ||
+              "Active client",
             status: "active",
             joined: new Date().toLocaleDateString(),
             relationship_id: item.relationship_id,
-            details: detail,
+            details: detail || item.detail || item.details || item,
           };
         } catch {
           return {
             id: item.client_id,
             request_id: item.request_id,
-            name: `Client #${item.client_id}`,
-            goal: "Active client",
+            name: resolveClientName(item, item.client_id),
+            goal:
+              item.goal ||
+              item.fitness_goals?.[0]?.goal_enum ||
+              "Active client",
             status: "active",
             joined: new Date().toLocaleDateString(),
             relationship_id: item.relationship_id,
+            details: item.detail || item.details || item,
           };
         }
       })
@@ -118,7 +261,9 @@ export async function fetchUpcomingSessions(_coachId) {
 
 export async function fetchClientRequests() {
   const response = await apiGet("/roles/coach/client_requests");
-  return Array.isArray(response) ? response : [];
+  return Array.isArray(response)
+    ? response.map(normalizeClientRequestItem).filter(Boolean)
+    : [];
 }
 
 export async function lookupClient(clientId) {
@@ -130,7 +275,30 @@ export async function acceptClientRequest(requestId) {
 }
 
 export async function denyClientRequest(requestId) {
-  return apiPost(`/roles/coach/deny_client/${requestId}`);
+  try {
+    return await apiPost(`/roles/coach/deny_client/${requestId}`);
+  } catch (error) {
+    if (error?.status === 404 || error?.status === 405) {
+      return apiDelete(`/roles/shared/client_coach_relationship/delete_coach_request/${requestId}`);
+    }
+    throw error;
+  }
+}
+
+export async function terminateRelationship(relationshipId) {
+  return apiPost(
+    `/roles/shared/client_coach_relationship/terminate_relationship/${relationshipId}`,
+    {}
+  );
+}
+
+export async function prescribeWorkoutPlan(clientId, workoutPlanId, startDt, endDt) {
+  return apiPost("/roles/coach/prescribe_plan", {
+    client_id: Number(clientId),
+    workout_plan_id: Number(workoutPlanId),
+    start_dt: startDt,
+    end_dt: endDt,
+  });
 }
 
 export async function createClientReview(clientId, reportSummary) {
@@ -147,15 +315,31 @@ export async function fetchCoachAvailability(coachId) {
   if (!coachId) return [];
 
   try {
+    const unified = await fetchUnifiedProfile().catch(() => null);
+    const availabilities = extractRoleAvailabilities(
+      unified?.coach_details || unified
+    ) || [];
+    if (availabilities.length > 0) {
+      return convertBackendAvailabilitiesToGrid(availabilities);
+    }
+  } catch {
+    // Fall through to route/profile-based fallback below.
+  }
+
+  try {
     const response = await apiGet(`/roles/coach/coach_availability/${coachId}`);
-    const availabilities = Array.isArray(response)
-      ? response
-      : response?.coach_availabilities ||
-        response?.availabilities ||
-        response?.availability ||
-        [];
-    const grid = convertBackendAvailabilitiesToGrid(availabilities);
-    return grid;
+    const availabilities = extractRoleAvailabilities(response) || [];
+    if (availabilities.length > 0) {
+      return convertBackendAvailabilitiesToGrid(availabilities);
+    }
+  } catch {
+    // Fall through to profile-based fallback below.
+  }
+
+  try {
+    const profile = await fetchCoachProfile();
+    const availabilities = extractRoleAvailabilities(profile) || [];
+    return convertBackendAvailabilitiesToGrid(availabilities);
   } catch {
     return [];
   }
@@ -165,13 +349,17 @@ export async function saveCoachAvailability(coachId, slots) {
   if (!coachId) {
     throw new Error("Missing coach id for availability update.");
   }
-  const availability = convertFromSlotsFormat(slots);
-  const backendAvailabilities = convertTrainingAvailabilityObjectToBackend(availability);
+  const backendAvailabilities = convertTrainingAvailabilityObjectToBackend(
+    convertGridToTrainingAvailability(slots)
+  );
 
-  await updateCoachInformation({
-    availabilities: backendAvailabilities,
+  const result = await updateCoachInformation({
+    availabilities: sanitizeBackendAvailabilities(backendAvailabilities),
   });
-
+  const updatedAvailabilities = extractRoleAvailabilities(result);
+  if (Array.isArray(updatedAvailabilities)) {
+    return convertBackendAvailabilitiesToGrid(updatedAvailabilities);
+  }
   return fetchCoachAvailability(coachId);
 }
 
@@ -301,23 +489,21 @@ export async function fetchClientWorkoutPlanByCoach(clientId, weekdayIdx) {
           strata_name:
             matchingPlan.strata_name ??
             matchingPlan.name ??
-            `Plan #${matchingPlan.id ?? weekdayIdx + 1}`,
+            "",
           activities,
         };
       }
     }
   } catch {
-    // Fall through to rest-day default
+    // Fall through to empty-state plan below.
   }
-  return { strata_name: "Rest Day", activities: [] };
+  return { strata_name: "", activities: [] };
 }
 
 export async function fetchClientAvailabilityByCoach(clientId) {
   try {
     const result = await apiGet(`/roles/coach/client_availability/${clientId}`);
-    const availabilities = Array.isArray(result)
-      ? result
-      : result?.availabilities ?? result?.client_availabilities ?? [];
+    const availabilities = extractBackendAvailabilities(result) || [];
     return convertBackendAvailabilitiesToGrid(availabilities);
   } catch {
     return [];
@@ -328,7 +514,9 @@ export async function fetchClientAvailabilityByCoach(clientId) {
 
 export function buildCoachRequestPayload(form, availability) {
   return {
-    availabilities: convertTrainingAvailabilityObjectToBackend(availability),
+    availabilities: sanitizeBackendAvailabilities(
+      convertTrainingAvailabilityObjectToBackend(availability)
+    ),
     experiences: (form.experiences || []).map(mapExperienceToBackend),
     certifications: (form.certifications || []).map(mapCertificationToBackend),
     specialties: form.specializations || [],
@@ -345,9 +533,9 @@ export function buildCoachInformationPayload({
 }) {
   const payload = {};
 
-  const mappedAvailability = convertTrainingAvailabilityObjectToBackend(availability);
-  if (mappedAvailability.length > 0) {
-    payload.availabilities = mappedAvailability;
+  if (availability && typeof availability === "object") {
+    const mappedAvailability = convertTrainingAvailabilityObjectToBackend(availability);
+    payload.availabilities = sanitizeBackendAvailabilities(mappedAvailability);
   }
   if (Array.isArray(certifications) && certifications.length > 0) {
     payload.certifications = certifications.map(mapCertificationToBackend);
@@ -467,144 +655,6 @@ function mergeClientsById(primaryClients, fallbackClients) {
   return merged;
 }
 
-function normalizeTimeLabel(raw) {
-  const value = String(raw || "").trim().toUpperCase().replace(/\s+/g, "");
-  if (!value) return "";
-  return value
-    .replace("A.M.", "AM")
-    .replace("P.M.", "PM")
-    .replace("A.M", "AM")
-    .replace("P.M", "PM");
-}
-
-function sortTimes(times) {
-  return [...times].sort((a, b) => {
-    const ai = DEFAULT_TIME_OPTIONS.indexOf(a);
-    const bi = DEFAULT_TIME_OPTIONS.indexOf(b);
-    if (ai === -1 && bi === -1) return a.localeCompare(b);
-    if (ai === -1) return 1;
-    if (bi === -1) return -1;
-    return ai - bi;
-  });
-}
-
-function convertTrainingAvailabilityToGrid(trainingAvailability) {
-  if (!trainingAvailability || typeof trainingAvailability !== "object") return [];
-
-  const allTimes = new Set();
-  const normalizedByDay = WEEKDAYS.map((day) => {
-    const slots = Array.isArray(trainingAvailability[day]) ? trainingAvailability[day] : [];
-    const normalizedSlots = slots.map((slot) => normalizeTimeLabel(slot)).filter(Boolean);
-    normalizedSlots.forEach((slot) => allTimes.add(slot));
-    return new Set(normalizedSlots);
-  });
-
-  const sortedTimes = sortTimes([...allTimes]);
-  return sortedTimes.map((time) => ({
-    time,
-    slots: normalizedByDay.map((daySet) => (daySet.has(time) ? "available" : null)),
-  }));
-}
-
-function convertBackendAvailabilitiesToGrid(availabilities) {
-  const byDay = { Mon: [], Tue: [], Wed: [], Thu: [], Fri: [], Sat: [], Sun: [] };
-  (availabilities || []).forEach((slot) => {
-    const shortDay = longWeekdayToShort(slot?.weekday);
-    const label = backendTimeToLabel(slot?.start_time);
-    if (shortDay && label) {
-      byDay[shortDay].push(label);
-    }
-  });
-  return convertTrainingAvailabilityToGrid(byDay);
-}
-
-function longWeekdayToShort(weekday) {
-  const normalized = String(weekday || "").trim().toLowerCase();
-  const map = {
-    monday: "Mon",
-    tuesday: "Tue",
-    wednesday: "Wed",
-    thursday: "Thu",
-    friday: "Fri",
-    saturday: "Sat",
-    sunday: "Sun",
-  };
-  return map[normalized] ?? null;
-}
-
-function backendTimeToLabel(value) {
-  const raw = String(value || "").trim();
-  if (!raw) return null;
-  const match = raw.match(/^(\d{1,2}):(\d{2})/);
-  if (!match) return normalizeTimeLabel(raw);
-  // The availability grid is keyed on whole-hour buckets, and the frontend
-  // always writes :00:00 minutes. Any stray non-zero minutes in the backend
-  // (seed data, older clients) get floored to the hour so they merge into
-  // the matching bucket instead of producing an off-grid row like "10:49PM".
-  let hour = Number(match[1]);
-  if (!Number.isFinite(hour) || hour < 0 || hour > 23) return null;
-  const suffix = hour >= 12 ? "PM" : "AM";
-  hour = hour % 12 || 12;
-  return `${hour}${suffix}`;
-}
-
-function convertFromSlotsFormat(slots) {
-  const result = { Mon: [], Tue: [], Wed: [], Thu: [], Fri: [], Sat: [], Sun: [] };
-  (slots || []).forEach(({ time, slots: daySlots }) => {
-    daySlots.forEach((status, dayIndex) => {
-      if (status === "available") {
-        result[WEEKDAYS[dayIndex]].push(time);
-      }
-    });
-  });
-  return result;
-}
-
-function convertTrainingAvailabilityObjectToBackend(trainingAvailability) {
-  if (!trainingAvailability || typeof trainingAvailability !== "object") return [];
-
-  return WEEKDAYS.flatMap((shortDay) => {
-    const weekday = shortToLongWeekday(shortDay);
-    const entries = Array.isArray(trainingAvailability[shortDay]) ? trainingAvailability[shortDay] : [];
-    return entries
-      .map((label) => buildAvailabilityWindow(label, weekday))
-      .filter(Boolean);
-  });
-}
-
-function shortToLongWeekday(day) {
-  const map = {
-    Mon: "monday",
-    Tue: "tuesday",
-    Wed: "wednesday",
-    Thu: "thursday",
-    Fri: "friday",
-    Sat: "saturday",
-    Sun: "sunday",
-  };
-  return map[day];
-}
-
-function buildAvailabilityWindow(label, weekday) {
-  const startHour = labelToHour(label);
-  if (startHour == null || !weekday) return null;
-  const endHour = Math.min(startHour + 1, 23);
-  return {
-    weekday,
-    start_time: `${String(startHour).padStart(2, "0")}:00:00`,
-    end_time: `${String(endHour).padStart(2, "0")}:00:00`,
-    max_time_commitment_seconds: 3600,
-  };
-}
-
-function labelToHour(label) {
-  const normalized = normalizeTimeLabel(label);
-  if (!normalized) return null;
-  const match = normalized.match(/^(\d{1,2})(?::(\d{2}))?(AM|PM)$/);
-  if (!match) return null;
-  let hour = Number(match[1]);
-  const meridiem = match[3];
-  if (meridiem === "AM" && hour === 12) hour = 0;
-  if (meridiem === "PM" && hour !== 12) hour += 12;
-  return hour;
+function extractRoleAvailabilities(payload) {
+  return extractBackendAvailabilities(payload);
 }

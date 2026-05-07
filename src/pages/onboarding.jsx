@@ -93,7 +93,6 @@ function OnboardingPage() {
     email: "",
     primaryGoal: "",
     weight: "",
-    height: "",
     age: "",
     gender: "",
     bio: "",
@@ -107,7 +106,6 @@ function OnboardingPage() {
     return Boolean(
       form.primaryGoal &&
         form.weight &&
-        form.height &&
         form.age &&
         form.gender &&
         form.cardNumber &&
@@ -293,13 +291,6 @@ function OnboardingPage() {
                   onChange={(e) => setForm((prev) => ({ ...prev, weight: e.target.value }))}
                   className="rounded-lg border border-white/10 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
                   placeholder="Weight (e.g. 165 lbs)"
-                  required
-                />
-                <input
-                  value={form.height}
-                  onChange={(e) => setForm((prev) => ({ ...prev, height: e.target.value }))}
-                  className="rounded-lg border border-white/10 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
-                  placeholder="Height (e.g. 5 ft 10 in)"
                   required
                 />
                 <select

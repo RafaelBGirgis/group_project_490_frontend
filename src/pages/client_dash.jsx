@@ -26,6 +26,7 @@ import {
   fetchClientProfile,
   fetchTelemetryToday,
   fetchWorkoutPlan,
+  logWorkoutActivity,
   fetchMyCoach,
   fetchCoachRating,
   fetchAvailability,
@@ -146,7 +147,7 @@ export default function ClientDash() {
   const [stepCount, setStepCount]       = useState(null);
   const [caloriesBurned, setCaloriesBurned] = useState(null);
   const [caloriesConsumed, setCaloriesConsumed] = useState(null);
-  const [caloriesGoal, setCaloriesGoal] = useState(null);
+  const [caloriesGoal, setCaloriesGoal] = useState(2000);
   const [workoutPlan, setWorkoutPlan]   = useState(null);
   const [workoutActivities, setWorkoutActivities] = useState([]);
   const [coach, setCoach]               = useState(null);
@@ -253,7 +254,7 @@ export default function ClientDash() {
 
     (async () => {
       try {
-        const [telemetry, coachInfo, session, availability, meals, mealOptions] =
+        const [telemetry, availability, meals, mealOptions] =
           await Promise.all([
             fetchTelemetryToday(clientId).catch(() => ({
               step_count: 0,
@@ -289,7 +290,7 @@ export default function ClientDash() {
     fetchCoachRating(coach.coach_id).then(setCoachRating);
   }, [coach]);
 
-  /*  load workout activity history for the selected weekday  */
+  /*  load workout plan when day changes  */
   const loadWorkouts = useCallback(async () => {
     if (!clientId) return;
     const data = await fetchWorkoutPlan(clientId, activeDay);
@@ -298,6 +299,20 @@ export default function ClientDash() {
   }, [clientId, activeDay]);
 
   useEffect(() => { loadWorkouts(); }, [loadWorkouts]);
+
+  /*  log a workout activity  */
+  const handleLogActivity = async (activityId) => {
+    setWorkoutActivities((prev) =>
+      prev.map((a) => (a.id === activityId ? { ...a, logged: true } : a))
+    );
+    try {
+      await logWorkoutActivity(clientId, activityId);
+    } catch {
+      setWorkoutActivities((prev) =>
+        prev.map((a) => (a.id === activityId ? { ...a, logged: false } : a))
+      );
+    }
+  };
 
   /*  log a meal  */
   const handleLogMeal = async (mealPayload) => {
@@ -376,7 +391,7 @@ export default function ClientDash() {
   const completedCount = workoutActivities.filter((a) => a.logged).length;
   const totalCount     = workoutActivities.length;
   const stepsPercent   = pct(stepCount ?? 0, 10000);
-  const calPercent     = caloriesGoal ? pct(caloriesConsumed ?? 0, caloriesGoal) : 0;
+  const calPercent     = pct(caloriesConsumed ?? 0, caloriesGoal);
   const workoutPercent = pct(completedCount, totalCount || 1);
   const availabilitySummary = summarizeAvailability(availabilitySlots);
   const hasActiveCoach = Boolean(coach?.coach_id && relationshipId);
@@ -501,7 +516,7 @@ export default function ClientDash() {
                 label={
                   caloriesConsumed !== null ? caloriesConsumed.toString() : "—"
                 }
-                sublabel={caloriesGoal ? `of ${caloriesGoal} kcal` : "kcal"}
+                sublabel={`of ${caloriesGoal} kcal`}
               />
             </div>
           </DashboardCard>
@@ -604,14 +619,21 @@ export default function ClientDash() {
               ) : (
                 workoutActivities.map((activity) => (
                   <ListRow
-                    key={activity._key ?? activity.id ?? activity.name}
+                    key={activity.id}
                     label={activity.name}
-                    sub={
-                      activity.intensity_value
-                        ? `${activity.intensity_value} ${activity.intensity_measure}`
-                        : ""
+                    sub={`${activity.suggested_sets} sets · ${activity.suggested_reps} reps · ${activity.intensity_value} ${activity.intensity_measure}`}
+                    right={
+                      activity.logged ? (
+                        <StatusBadge label="Logged ✓" variant="success" />
+                      ) : (
+                        <button
+                          className="text-blue-400 text-xs border border-blue-500/50 rounded-full px-3 py-1 hover:bg-blue-500/10 transition-colors"
+                          onClick={() => handleLogActivity(activity.id)}
+                        >
+                          Log →
+                        </button>
+                      )
                     }
-                    right={<StatusBadge label="Logged ✓" variant="success" />}
                   />
                 ))
               )}
@@ -842,6 +864,7 @@ export default function ClientDash() {
           weekdays={WEEKDAYS}
           activeDay={activeDay}
           onDayChange={setActiveDay}
+          onLog={handleLogActivity}
         />
       </Overlay>
 

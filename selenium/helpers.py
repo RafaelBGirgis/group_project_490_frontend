@@ -12,6 +12,9 @@ from selenium.common.exceptions import TimeoutException
 FRONTEND_URL = "http://localhost:5173"
 CLIENT_EMAIL = "rat8@njit.edu"
 CLIENT_PASSWORD = "password"
+DEFAULT_PFP_URL = "https://upload.wikimedia.org/wikipedia/en/e/e9/New_Jersey_IT_seal.svg"
+DEFAULT_SIGNUP_BIO = "This is a Selenium test account."
+DEFAULT_ONBOARDING_BIO = "This is a Selenium onboarding test account, onboarding bio."
 
 
 def wait_for_page_to_fully_load(driver, timeout=10):
@@ -148,7 +151,15 @@ def login(driver):
     finally:
         print("Finished Logging In")
 
-def signup(driver):
+def signup(
+    driver,
+    name="John Doe",
+    email=None,
+    age="25",
+    signup_gender="Male",
+    onboarding_gender="male",
+    password="password",
+):
     """Creates a brand new user, execution stops after reaching '/client'"""
 
     try:
@@ -199,28 +210,31 @@ def signup(driver):
             EC.presence_of_element_located((By.CSS_SELECTOR, "textarea[name='bio']"))
         )
 
+        if email is None:
+            email = f"johndoe_{int(time.time())}@email.com"
+
         name_input.clear()
-        name_input.send_keys("John Doe")
+        name_input.send_keys(name)
 
         email_input.clear()
-        email_input.send_keys(f"johndoe_{int(time.time())}@email.com")
+        email_input.send_keys(email)
 
         age_input.clear()
-        age_input.send_keys("25")
+        age_input.send_keys(str(age))
 
-        gender_select.select_by_visible_text("Male")
+        gender_select.select_by_visible_text(signup_gender)
         
         password_input.clear()
-        password_input.send_keys("password")
+        password_input.send_keys(password)
 
         confirm_password_input.clear()
-        confirm_password_input.send_keys("password")
+        confirm_password_input.send_keys(password)
 
         pfp_input.clear()
-        pfp_input.send_keys("https://upload.wikimedia.org/wikipedia/en/e/e9/New_Jersey_IT_seal.svg")
+        pfp_input.send_keys(DEFAULT_PFP_URL)
 
         bio_input.clear()
-        bio_input.send_keys("This is a Selenium test account.")
+        bio_input.send_keys(DEFAULT_SIGNUP_BIO)
 
         # Submit signup form
         submit_button = wait.until(
@@ -271,7 +285,7 @@ def signup(driver):
                 )
             )
         )
-        gender_select.select_by_value("male")
+        gender_select.select_by_value(onboarding_gender)
 
         # Optional bio
         bio_input = wait.until(
@@ -280,7 +294,7 @@ def signup(driver):
             )
         )
         bio_input.clear()
-        bio_input.send_keys("This is a Selenium onboarding test account, onboarding bio.")
+        bio_input.send_keys(DEFAULT_ONBOARDING_BIO)
 
         # --------------------------------------AVAILABILITY--------------------------------------
         try:

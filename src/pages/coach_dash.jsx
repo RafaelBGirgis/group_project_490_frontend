@@ -27,45 +27,15 @@ import {
   lookupClient,
   acceptClientRequest,
   denyClientRequest,
-  listSelfAvailability,
-  createSelfAvailability,
-  deleteSelfAvailability,
-  listSelfBusySlots,
 } from "../api/coach";
 import { getConversationWithAccount } from "../api/chat";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
 import SessionsDetail from "../components/overlays/sessions_detail";
 import ReviewsDetail from "../components/overlays/reviews_detail";
-import AvailabilityCalendar from "../components/availability/AvailabilityCalendar";
 import ClientProfile from "../components/overlays/client_profile";
 
 const role = "coach";
-
-function summarizeAvailabilityWindows(rows, busySlots) {
-  const safeRows = Array.isArray(rows) ? rows : [];
-  const safeBusy = Array.isArray(busySlots) ? busySlots : [];
-  const totalHours = safeRows.reduce((sum, row) => {
-    const occurrences = Array.isArray(row?.occurrences) ? row.occurrences : [];
-    return sum + occurrences.reduce((acc, occ) => {
-      const a = new Date(occ.start_dt).getTime();
-      const b = new Date(occ.end_dt).getTime();
-      return acc + Math.max(0, (b - a) / 3_600_000);
-    }, 0);
-  }, 0);
-  const days = new Set();
-  safeRows.forEach((row) => {
-    (row?.occurrences || []).forEach((occ) => {
-      const d = new Date(occ.start_dt);
-      days.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
-    });
-  });
-  return {
-    openHours: Math.round(totalHours),
-    bookedSlots: safeBusy.length,
-    activeDays: days.size,
-  };
-}
 
 function resolveClientName(source, fallbackId) {
   return (
@@ -197,16 +167,11 @@ export default function CoachDashboard() {
   const [earnings, setEarnings] = useState(null);
   const [clients, setClients] = useState([]);
   const [sessions, setSessions] = useState([]);
-  const [availabilityRows, setAvailabilityRows] = useState([]);
-  const [availabilityBusy, setAvailabilityBusy] = useState([]);
-  const [availabilityRange, setAvailabilityRange] = useState({ from: null, to: null });
   const [reviews, setReviews] = useState([]);
   const [workoutPlans, setWorkoutPlans] = useState([]);
   const [clientRequests, setClientRequests] = useState([]);
   const [clientRequestDetails, setClientRequestDetails] = useState({});
   const [requestActionId, setRequestActionId] = useState(null);
-  const [availabilityError, setAvailabilityError] = useState("");
-  const [availabilityMessage, setAvailabilityMessage] = useState("");
   const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(false);
   const [chatActionId, setChatActionId] = useState(null);
   const [selectedClient, setSelectedClient] = useState(null);
@@ -288,23 +253,6 @@ export default function CoachDashboard() {
       }
     })();
   }, [coachId]);
-
-  const refreshAvailability = useCallback(async (fromIso, toIso) => {
-    if (!fromIso || !toIso) return;
-    const [rows, busy] = await Promise.all([
-      listSelfAvailability(fromIso, toIso).catch(() => []),
-      listSelfBusySlots(fromIso, toIso).catch(() => []),
-    ]);
-    setAvailabilityRows(Array.isArray(rows) ? rows : []);
-    setAvailabilityBusy(Array.isArray(busy) ? busy : []);
-  }, []);
-
-  useEffect(() => {
-    if (!coachId) return;
-    if (availabilityRange.from && availabilityRange.to) {
-      refreshAvailability(availabilityRange.from, availabilityRange.to);
-    }
-  }, [coachId, availabilityRange, refreshAvailability]);
 
   const refreshRelationshipData = useCallback(async () => {
     if (!coachId) return;
@@ -485,7 +433,6 @@ export default function CoachDashboard() {
   const lastName = nameParts.slice(1).join(" ") || "";
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good Morning" : hour < 17 ? "Good Afternoon" : "Good Evening";
-  const availabilitySummary = summarizeAvailabilityWindows(availabilityRows, availabilityBusy);
 
   /*  loading skeleton  */
   if (loading) {
@@ -562,7 +509,7 @@ export default function CoachDashboard() {
         {/*  CLIENTS & SESSIONS  */}
         <SectionHeader label="CLIENTS & SESSIONS" role={role} />
 
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 items-stretch">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-stretch">
           {/* My Clients */}
           {(() => {
             const activeClients = clients.filter((c) => c.status === "active");
@@ -630,47 +577,6 @@ export default function CoachDashboard() {
               </DashboardCard>
             );
           })()}
-
-          
-
-          {/* Availability */}
-          <DashboardCard
-            role={role}
-            title="My Availability"
-            action={{ label: "Edit", onClick: () => setOverlay("availability") }}
-          >
-            {availabilityMessage ? (
-              <div className="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">
-                {availabilityMessage}
-              </div>
-            ) : null}
-            {availabilityError ? (
-              <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
-                {availabilityError}
-              </div>
-            ) : null}
-            <div className="mb-3 grid grid-cols-3 gap-2">
-              <div className="rounded-lg bg-[#0A1020] px-3 py-2 text-center">
-                <p className="text-lg font-bold text-orange-300">{availabilitySummary.openHours}</p>
-                <p className="text-[10px] uppercase tracking-widest text-gray-500">Open Hours</p>
-              </div>
-              <div className="rounded-lg bg-[#0A1020] px-3 py-2 text-center">
-                <p className="text-lg font-bold text-white">{availabilitySummary.activeDays}</p>
-                <p className="text-[10px] uppercase tracking-widest text-gray-500">Active Days</p>
-              </div>
-              <div className="rounded-lg bg-[#0A1020] px-3 py-2 text-center">
-                <p className="text-lg font-bold text-blue-300">{availabilitySummary.bookedSlots}</p>
-                <p className="text-[10px] uppercase tracking-widest text-gray-500">Booked</p>
-              </div>
-            </div>
-            <AvailabilityCalendar
-              availabilities={availabilityRows}
-              busySlots={availabilityBusy}
-              role="coach"
-              mode="view"
-              onRangeChange={(from, to) => setAvailabilityRange({ from, to })}
-            />
-          </DashboardCard>
 
           <DashboardCard
             role={role}
@@ -801,40 +707,6 @@ export default function CoachDashboard() {
 
       <Overlay open={overlay === "sessions"} onClose={closeOverlay} title="Upcoming Sessions" wide>
         <SessionsDetail sessions={sessions} />
-      </Overlay>
-
-      <Overlay open={overlay === "availability"} onClose={closeOverlay} title="My Availability" wide>
-        <AvailabilityCalendar
-          availabilities={availabilityRows}
-          busySlots={availabilityBusy}
-          role="coach"
-          mode="edit"
-          onRangeChange={(from, to) => setAvailabilityRange({ from, to })}
-          onCreate={async (payload) => {
-            setAvailabilityError("");
-            setAvailabilityMessage("");
-            try {
-              await createSelfAvailability(payload);
-              await refreshAvailability(availabilityRange.from, availabilityRange.to);
-              setAvailabilityMessage("Availability saved.");
-            } catch (error) {
-              setAvailabilityError(error.message || "Unable to save coach availability.");
-              throw error;
-            }
-          }}
-          onDelete={async (id) => {
-            setAvailabilityError("");
-            setAvailabilityMessage("");
-            try {
-              await deleteSelfAvailability(id);
-              await refreshAvailability(availabilityRange.from, availabilityRange.to);
-              setAvailabilityMessage("Availability removed.");
-            } catch (error) {
-              setAvailabilityError(error.message || "Unable to remove availability.");
-              throw error;
-            }
-          }}
-        />
       </Overlay>
 
       <Overlay open={overlay === "reviews"} onClose={closeOverlay} title="Client Reviews">

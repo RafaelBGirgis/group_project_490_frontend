@@ -17,7 +17,6 @@ import {
   SkeletonAvailability,
 } from "../components";
 import WorkoutDetail from "../components/overlays/workout_detail";
-import AvailabilityCalendar from "../components/availability/AvailabilityCalendar";
 import MealDetail from "../components/overlays/meal_detail";
 import DailySurvey from "../components/overlays/daily_survey";
 import StepsLog from "../components/overlays/steps_log";
@@ -35,10 +34,6 @@ import {
   logMeal,
   deleteCoachRequest,
   terminateRelationship,
-  listClientAvailability,
-  createClientAvailability,
-  deleteClientAvailability,
-  listClientBusySlots,
 } from "../api/client";
 import {
   fetchAllDailySurveys,
@@ -59,31 +54,6 @@ const role = "client";
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const TODAY_IDX = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
 const pct = (val, max) => Math.min(100, Math.round((val / max) * 100));
-
-function summarizeAvailabilityWindows(rows, busySlots) {
-  const safeRows = Array.isArray(rows) ? rows : [];
-  const safeBusy = Array.isArray(busySlots) ? busySlots : [];
-  const totalHours = safeRows.reduce((sum, row) => {
-    const occurrences = Array.isArray(row?.occurrences) ? row.occurrences : [];
-    return sum + occurrences.reduce((acc, occ) => {
-      const a = new Date(occ.start_dt).getTime();
-      const b = new Date(occ.end_dt).getTime();
-      return acc + Math.max(0, (b - a) / 3_600_000);
-    }, 0);
-  }, 0);
-  const days = new Set();
-  safeRows.forEach((row) => {
-    (row?.occurrences || []).forEach((occ) => {
-      const d = new Date(occ.start_dt);
-      days.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
-    });
-  });
-  return {
-    openHours: Math.round(totalHours),
-    bookedSlots: safeBusy.length,
-    activeDays: days.size,
-  };
-}
 
 export default function ClientDash() {
   const navigate = useNavigate();
@@ -150,9 +120,6 @@ export default function ClientDash() {
   const [workoutActivities, setWorkoutActivities] = useState([]);
   const [coach, setCoach]               = useState(null);
   const [coachRating, setCoachRating]   = useState(null);
-  const [availabilityRows, setAvailabilityRows] = useState([]);
-  const [availabilityBusy, setAvailabilityBusy] = useState([]);
-  const [availabilityRange, setAvailabilityRange] = useState({ from: null, to: null });
   const [prescribedMeals, setPrescribedMeals] = useState([]);
   const [availableMeals, setAvailableMeals] = useState([]);
   const [loading, setLoading]           = useState(true);
@@ -165,7 +132,6 @@ export default function ClientDash() {
   const [requestStatusMessage, setRequestStatusMessage] = useState("");
   const [openingCoachChat, setOpeningCoachChat] = useState(false);
   const [terminatingRelationship, setTerminatingRelationship] = useState(false);
-  const [availabilityMessage, setAvailabilityMessage] = useState("");
 
   const refreshCoachRelationshipState = useCallback(async () => {
     const [requestList, myCoach] = await Promise.all([
@@ -282,23 +248,6 @@ export default function ClientDash() {
     refreshSurveyStatus,
   ]);
 
-  const refreshAvailability = useCallback(async (fromIso, toIso) => {
-    if (!fromIso || !toIso) return;
-    const [rows, busy] = await Promise.all([
-      listClientAvailability(fromIso, toIso).catch(() => []),
-      listClientBusySlots(fromIso, toIso).catch(() => []),
-    ]);
-    setAvailabilityRows(Array.isArray(rows) ? rows : []);
-    setAvailabilityBusy(Array.isArray(busy) ? busy : []);
-  }, []);
-
-  useEffect(() => {
-    if (!clientId) return;
-    if (availabilityRange.from && availabilityRange.to) {
-      refreshAvailability(availabilityRange.from, availabilityRange.to);
-    }
-  }, [clientId, availabilityRange, refreshAvailability]);
-
   /*  load coach rating when coach is known  */
   useEffect(() => {
     if (!coach?.coach_id) return;
@@ -408,7 +357,6 @@ export default function ClientDash() {
   const stepsPercent   = pct(stepCount ?? 0, 10000);
   const calPercent     = pct(caloriesConsumed ?? 0, caloriesGoal);
   const workoutPercent = pct(completedCount, totalCount || 1);
-  const availabilitySummary = summarizeAvailabilityWindows(availabilityRows, availabilityBusy);
   const hasActiveCoach = Boolean(coach?.coach_id && relationshipId);
 
   /*  greeting based on time of day  */
@@ -597,7 +545,7 @@ export default function ClientDash() {
           </DashboardCard>
         ) : null}
 
-        <div className="grid grid-cols-3 gap-4 items-stretch">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
           {/* Today's Workout */}
           <DashboardCard
             role={role}
@@ -732,42 +680,6 @@ export default function ClientDash() {
             </DashboardCard>
           )}
 
-          {/* Availability */}
-          <DashboardCard
-            role={role}
-            title="Availability"
-            action={{
-              label: "Edit Schedule",
-              onClick: () => setOverlay("availability"),
-            }}
-          >
-            {availabilityMessage ? (
-              <div className="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">
-                {availabilityMessage}
-              </div>
-            ) : null}
-            <div className="mb-3 grid grid-cols-3 gap-2">
-              <div className="rounded-lg bg-[#0A1020] px-3 py-2 text-center">
-                <p className="text-lg font-bold text-blue-300">{availabilitySummary.openHours}</p>
-                <p className="text-[10px] uppercase tracking-widest text-gray-500">Open Hours</p>
-              </div>
-              <div className="rounded-lg bg-[#0A1020] px-3 py-2 text-center">
-                <p className="text-lg font-bold text-white">{availabilitySummary.activeDays}</p>
-                <p className="text-[10px] uppercase tracking-widest text-gray-500">Active Days</p>
-              </div>
-              <div className="rounded-lg bg-[#0A1020] px-3 py-2 text-center">
-                <p className="text-lg font-bold text-orange-300">{availabilitySummary.bookedSlots}</p>
-                <p className="text-[10px] uppercase tracking-widest text-gray-500">Booked</p>
-              </div>
-            </div>
-            <AvailabilityCalendar
-              availabilities={availabilityRows}
-              busySlots={availabilityBusy}
-              role="client"
-              mode="view"
-              onRangeChange={(from, to) => setAvailabilityRange({ from, to })}
-            />
-          </DashboardCard>
         </div>
 
         {/*  NUTRITION DETAIL  */}
@@ -836,34 +748,6 @@ export default function ClientDash() {
           activeDay={activeDay}
           onDayChange={setActiveDay}
           onLog={handleLogActivity}
-        />
-      </Overlay>
-
-      {/* Availability editor */}
-      <Overlay
-        open={overlay === "availability"}
-        onClose={closeOverlay}
-        title="Your Availability"
-        wide
-      >
-        <AvailabilityCalendar
-          availabilities={availabilityRows}
-          busySlots={availabilityBusy}
-          role="client"
-          mode="edit"
-          onRangeChange={(from, to) => setAvailabilityRange({ from, to })}
-          onCreate={async (payload) => {
-            setAvailabilityMessage("");
-            await createClientAvailability(payload);
-            await refreshAvailability(availabilityRange.from, availabilityRange.to);
-            setAvailabilityMessage("Availability saved.");
-          }}
-          onDelete={async (id) => {
-            setAvailabilityMessage("");
-            await deleteClientAvailability(id);
-            await refreshAvailability(availabilityRange.from, availabilityRange.to);
-            setAvailabilityMessage("Availability removed.");
-          }}
         />
       </Overlay>
 

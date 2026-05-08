@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const HOUR_HEIGHT = 40; // px per hour
@@ -413,9 +413,22 @@ export default function AvailabilityCalendar({
 
   const weekEnd = useMemo(() => addDays(weekStart, 7), [weekStart]);
 
+  // Keep a ref to the latest onRangeChange so re-renders don't refire the
+  // effect when the parent passes an inline arrow function each render.
+  const onRangeChangeRef = useRef(onRangeChange);
+  useEffect(() => { onRangeChangeRef.current = onRangeChange; }, [onRangeChange]);
+
+  // Only fire when the visible window actually changes.
+  const lastFiredRange = useRef({ from: null, to: null });
   useEffect(() => {
-    onRangeChange?.(weekStart.toISOString(), weekEnd.toISOString());
-  }, [weekStart, weekEnd, onRangeChange]);
+    const fromIso = weekStart.toISOString();
+    const toIso = weekEnd.toISOString();
+    if (lastFiredRange.current.from === fromIso && lastFiredRange.current.to === toIso) {
+      return;
+    }
+    lastFiredRange.current = { from: fromIso, to: toIso };
+    onRangeChangeRef.current?.(fromIso, toIso);
+  }, [weekStart, weekEnd]);
 
   const availabilitySegments = useMemo(() => {
     const expanded = availabilities.flatMap((row) => expandRow(row, weekStart, weekEnd));

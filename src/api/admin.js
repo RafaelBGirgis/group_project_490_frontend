@@ -11,59 +11,6 @@ export async function fetchTotalTransactions() {
 }
 
 export async function fetchAdminStats() {
-<<<<<<< HEAD
-<<<<<<< HEAD
-  try {
-    const [requests, users, transactions] = await Promise.all([
-      fetchCoachRequests(),
-      fetchAllUsers(),
-      fetchTotalTransactions().catch(() => ({ total_transactions: 0 })),
-    ]);
-    return {
-      total_accounts: users.length,
-      total_clients: users.filter((item) => item.role === "client").length,
-      total_coaches: users.filter((item) => item.role === "coach").length,
-      pending_role_requests: requests.length,
-      active_today: 0,
-      active_this_week: 0,
-      active_this_month: 0,
-      total_revenue: transactions.total_transactions ?? 0,
-      revenue_this_month: 0,
-      active_subscriptions: 0,
-      revenue_change: 0,
-    };
-  } catch {
-    return {
-      total_accounts: 142,
-      total_clients: 98,
-      total_coaches: 21,
-      pending_role_requests: 5,
-      active_today: 67,
-      active_this_week: 112,
-      active_this_month: 138,
-      total_revenue: 18420,
-      revenue_this_month: 4250,
-      active_subscriptions: 64,
-      revenue_change: 12,
-    };
-  }
-}
-
-export async function fetchAllUsers({ sortBy = "name", sortDir = "asc", skip = 0, limit = 1000 } = {}) {
-  try {
-    const accounts = await apiGet(withQuery("/roles/admin/accounts", {
-      sort_by: sortBy,
-      sort_dir: sortDir,
-      skip,
-      limit,
-    }));
-    return Array.isArray(accounts) ? accounts.map(normalizeAdminAccount) : [];
-  } catch {
-    return [
-      { id: 1, name: "Elena Marks", email: "elena@mail.com", role: "client", status: "active", created_at: "2026-04-14", last_active: "2 min ago" },
-    ];
-  }
-=======
   const [requests, users, transactions] = await Promise.all([
     fetchCoachRequests(),
     fetchAllUsers(),
@@ -86,30 +33,6 @@ export async function fetchAllUsers({ sortBy = "name", sortDir = "asc", skip = 0
 }
 
 export async function fetchAllUsers({ sortBy = "name", sortDir = "asc", skip = 0, limit = 1000 } = {}) {
-=======
-  const [requests, users, transactions] = await Promise.all([
-    fetchCoachRequests(),
-    fetchAllUsers(),
-    fetchTotalTransactions().catch(() => ({ total_transactions: 0 })),
-  ]);
-
-  return {
-    total_accounts: users.length,
-    total_clients: users.filter((item) => item.role === "client").length,
-    total_coaches: users.filter((item) => item.role === "coach").length,
-    pending_role_requests: requests.length,
-    active_today: 0,
-    active_this_week: 0,
-    active_this_month: 0,
-    total_revenue: transactions.total_transactions ?? 0,
-    revenue_this_month: 0,
-    active_subscriptions: 0,
-    revenue_change: 0,
-  };
-}
-
-export async function fetchAllUsers({ sortBy = "name", sortDir = "asc", skip = 0, limit = 1000 } = {}) {
->>>>>>> 30980fb4de99751b26ace972f6b40cc2bdc44b92
   const accounts = await apiGet(withQuery("/roles/admin/accounts", {
     sort_by: sortBy,
     sort_dir: sortDir,
@@ -117,10 +40,6 @@ export async function fetchAllUsers({ sortBy = "name", sortDir = "asc", skip = 0
     limit,
   }));
   return Array.isArray(accounts) ? accounts.map(normalizeAdminAccount) : [];
-<<<<<<< HEAD
->>>>>>> 1107c76343c40bcd02fffd17b03604608ca60b2e
-=======
->>>>>>> 30980fb4de99751b26ace972f6b40cc2bdc44b92
 }
 
 export async function updateUserStatus(userId, newStatus) {
@@ -198,6 +117,7 @@ function normalizeAdminAccount(item) {
     name: item.name || "Unknown User",
     email: item.email || "",
     role: item.role || (Array.isArray(item.roles) && item.roles[0]) || "client",
+    roles: item.roles || [item.role || "client"],
     status: item.status || (item.is_active === false ? "deactivated" : "active"),
     is_active: item.is_active !== false,
     created_at: item.created_at ? String(item.created_at).slice(0, 10) : "",
@@ -219,19 +139,5 @@ function normalizeTransactions(result) {
         result?.amount ??
         0
       ) || 0,
-  };
-}
-
-function normalizeAdminAccount(item) {
-  return {
-    id: item.id,
-    name: item.name || "Unknown Account",
-    email: item.email || "unknown@example.com",
-    role: item.role || item.roles?.[0] || "client",
-    roles: item.roles || [item.role || "client"],
-    status: item.status || (item.is_active ? "active" : "deactivated"),
-    is_active: Boolean(item.is_active),
-    created_at: item.created_at?.slice?.(0, 10) || "",
-    last_active: item.last_active || "",
   };
 }

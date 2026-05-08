@@ -1,13 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Navbar } from "../components/navbar";
 import {
   buildClientInformationPayload,
+  createClientAvailability,
   deactivateAccount,
   deleteAccount,
+  deleteClientAvailability,
   extractUploadedAssetUrl,
   fetchMe,
   fetchUnifiedProfile,
+  listClientAvailability,
+  listClientBusySlots,
   updateAccount,
   updateClientInformation,
   uploadProfilePicture,
@@ -16,12 +20,18 @@ import {
 import TelemetryCharts from "../components/overlays/telemetry_charts";
 import {
   buildCoachInformationPayload,
+  createSelfAvailability,
   deactivateCoachAccount,
   deleteCoachAccount,
+  deleteSelfAvailability,
   fetchCoachProfile,
+  listSelfAvailability,
+  listSelfBusySlots,
   updateCoachInformation,
 } from "../api/coach";
+import AvailabilityCalendar from "../components/availability/AvailabilityCalendar";
 import { getCoachAccessState } from "../utils/roleAccess";
+import { resolveRoleState } from "../utils/sessionAuth";
 import { clearAuth } from "../api/auth";
 
 const PRIMARY_GOALS = [
@@ -145,7 +155,9 @@ function ProfilePage({ role = "client" }) {
   const [loadError, setLoadError] = useState("");
   const [saveMessage, setSaveMessage] = useState("");
   const [saveError, setSaveError] = useState("");
-  const [savingProfile, setSavingProfile] = useState(false);
+  const [savingSection, setSavingSection] = useState(null);
+  const savingProfile = savingSection !== null;
+  const [sectionStatus, setSectionStatus] = useState({});
   const [coachProfileData, setCoachProfileData] = useState(null);
 
   const [profile, setProfile] = useState({
@@ -210,6 +222,8 @@ function ProfilePage({ role = "client" }) {
   });
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
+  const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(false);
+  const [hasCoachStatus, setHasCoachStatus] = useState(false);
   const [progressPicPage, setProgressPicPage] = useState(0);
   const PICS_PER_PAGE = 6;
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
@@ -217,6 +231,55 @@ function ProfilePage({ role = "client" }) {
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentLoading, setPaymentLoading] = useState(false);
   const profileInputsDisabled = loadingProfile || savingProfile;
+
+  // Active paid subscription guard — block payment-method removal when a non-free
+  // plan is in force, so the user can't be left with no payment method on a
+  // billable plan.
+  const subsForGuard = unifiedData?.client_details?.subscriptions || [];
+  const activeSubForGuard = subsForGuard.find((s) => s.status === "active");
+  const hasActivePaidSub = !!activeSubForGuard && Number(activeSubForGuard.price_cents ?? 0) > 0;
+
+  // ── Section open/closed state (default open) ────────────────────────────────
+  const [openSections, setOpenSections] = useState({});
+  const isOpen = (id) => openSections[id] !== false; // default true
+  const toggleSection = (id) =>
+    setOpenSections((prev) => ({ ...prev, [id]: prev[id] === false }));
+  const panelProps = (id) => ({ open: isOpen(id), onToggle: () => toggleSection(id) });
+  const handleJump = (id) => {
+    setOpenSections((prev) => ({ ...prev, [id]: true }));
+    requestAnimationFrame(() => {
+      const el = document.getElementById(id);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+
+  // ── Availability calendar state ─────────────────────────────────────────────
+  const [availabilityRows, setAvailabilityRows] = useState([]);
+  const [availabilityBusy, setAvailabilityBusy] = useState([]);
+  const [availabilityRange, setAvailabilityRange] = useState({ from: null, to: null });
+  const [availabilityMessage, setAvailabilityMessage] = useState("");
+  const [availabilityError, setAvailabilityError] = useState("");
+
+  const availabilityListFn = isCoach ? listSelfAvailability : listClientAvailability;
+  const availabilityBusyFn = isCoach ? listSelfBusySlots : listClientBusySlots;
+  const availabilityCreateFn = isCoach ? createSelfAvailability : createClientAvailability;
+  const availabilityDeleteFn = isCoach ? deleteSelfAvailability : deleteClientAvailability;
+
+  const refreshAvailability = useCallback(async (fromIso, toIso) => {
+    if (!fromIso || !toIso) return;
+    const [rows, busy] = await Promise.all([
+      availabilityListFn(fromIso, toIso).catch(() => []),
+      availabilityBusyFn(fromIso, toIso).catch(() => []),
+    ]);
+    setAvailabilityRows(Array.isArray(rows) ? rows : []);
+    setAvailabilityBusy(Array.isArray(busy) ? busy : []);
+  }, [availabilityListFn, availabilityBusyFn]);
+
+  useEffect(() => {
+    if (availabilityRange.from && availabilityRange.to) {
+      refreshAvailability(availabilityRange.from, availabilityRange.to);
+    }
+  }, [availabilityRange, refreshAvailability]);
 
   const fullName = useMemo(
     () => `${profile.firstName} ${profile.lastName}`.trim(),
@@ -245,6 +308,15 @@ function ProfilePage({ role = "client" }) {
     setSaveMessage(location.state.successMessage || "Application successfully sent.");
     navigate(location.pathname, { replace: true, state: {} });
   }, [location.pathname, location.state, navigate]);
+
+  // Scroll to a section anchor (e.g. #availability) on mount or hash change.
+  useEffect(() => {
+    if (loadingProfile) return;
+    const hash = location.hash?.replace(/^#/, "");
+    if (!hash) return;
+    const el = document.getElementById(hash);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [location.hash, loadingProfile]);
 
   useEffect(() => {
     if (!(profile.profilePicture instanceof File) || !profilePicturePreviewUrl) {
@@ -279,13 +351,16 @@ function ProfilePage({ role = "client" }) {
 
       try {
         // Single unified API call for all profile data
-        const [meData, unified] = await Promise.all([
+        const [meData, unified, roleState] = await Promise.all([
           fetchMe(),
           fetchUnifiedProfile().catch(() => null),
+          resolveRoleState().catch(() => null),
         ]);
         const data = meData;
         const coachAccess = await getCoachAccessState(data);
+        setCanSwitchToAdmin(Boolean(roleState?.hasAdminRole));
         setCanSwitchToCoach(coachAccess.canAccessCoach);
+        setHasCoachStatus(coachAccess.hasCoachRecord);
         if (isCoach && !coachAccess.canAccessCoach) {
           navigate("/profile");
           return;
@@ -358,23 +433,23 @@ function ProfilePage({ role = "client" }) {
 
           nextCertifications = Array.isArray(coachDetails.certifications)
             ? coachDetails.certifications.map((c, i) => ({
-                  id: c.id || `cert-${i}`,
-                  title: c.certification_name || "",
-                  issuer: c.certification_organization || "",
-                  year: c.certification_date || "",
-                  description: c.certification_score || "",
-                }))
+              id: c.id || `cert-${i}`,
+              title: c.certification_name || "",
+              issuer: c.certification_organization || "",
+              year: c.certification_date || "",
+              description: c.certification_score || "",
+            }))
             : [];
           setCertifications(nextCertifications);
 
           nextExperiences = Array.isArray(coachDetails.experiences)
             ? coachDetails.experiences.map((e, i) => ({
-                  id: e.id || `exp-${i}`,
-                  title: e.experience_title || "",
-                  issuer: e.experience_name || "",
-                  year: e.experience_start || "",
-                  description: e.experience_description || "",
-                }))
+              id: e.id || `exp-${i}`,
+              title: e.experience_title || "",
+              issuer: e.experience_name || "",
+              year: e.experience_start || "",
+              description: e.experience_description || "",
+            }))
             : [];
           setExperiences(nextExperiences);
 
@@ -393,9 +468,9 @@ function ProfilePage({ role = "client" }) {
             nextCoachProfileData = coachProfile;
             setCoachProfileData(coachProfile);
             nextSpecializations = String(coachProfile?.coach_account?.specialties || "")
-                .split(",")
-                .map((item) => item.trim())
-                .filter(Boolean);
+              .split(",")
+              .map((item) => item.trim())
+              .filter(Boolean);
             setSpecializations(nextSpecializations);
           } catch {
             setCoachProfileData(null);
@@ -447,16 +522,28 @@ function ProfilePage({ role = "client" }) {
     );
   };
 
-  const handleSaveClientProfile = async () => {
-    if (loadingProfile) return;
-    setSaveMessage("");
-    setSaveError("");
-    setSavingProfile(true);
+  const setSectionResult = (id, type, text) => {
+    setSectionStatus((prev) => ({ ...prev, [id]: { type, text } }));
+  };
 
+  const runSectionSave = async (id, fn, successText = "Saved.") => {
+    if (loadingProfile || savingSection) return;
+    setSavingSection(id);
+    setSectionStatus((prev) => ({ ...prev, [id]: null }));
     try {
+      await fn();
+      setSectionResult(id, "success", successText);
+    } catch (error) {
+      setSectionResult(id, "error", error?.message || "Save failed.");
+    } finally {
+      setSavingSection(null);
+    }
+  };
+
+  const savePersonal = () =>
+    runSectionSave("personal", async () => {
       let profilePictureUrl =
         typeof profile.profilePicture === "string" ? profile.profilePicture : null;
-
       if (profile.profilePicture instanceof File) {
         const upload = await uploadProfilePicture(profile.profilePicture);
         profilePictureUrl = extractUploadedAssetUrl(upload) || profilePictureUrl;
@@ -465,26 +552,6 @@ function ProfilePage({ role = "client" }) {
           profilePicture: profilePictureUrl || prev.profilePicture,
         }));
       }
-
-      const latestPayment = paymentMethod
-        ? {
-            ccnum: paymentMethod.ccnum || "",
-            cv: paymentMethod.cv || "",
-            exp_date:
-              paymentMethod.exp_date ||
-              `${paymentMethod.expiryYear}-${paymentMethod.expiryMonth}-01`,
-          }
-        : null;
-
-      const payload = buildClientInformationPayload({
-        primaryGoal: profile.primaryGoal,
-        paymentMethod: latestPayment,
-      });
-
-      if (Object.keys(payload).length > 0) {
-        await updateClientInformation(payload);
-      }
-
       const accountPayload = buildAccountUpdatePayload({
         name: `${profile.firstName} ${profile.lastName}`.trim(),
         age: profile.age,
@@ -496,74 +563,74 @@ function ProfilePage({ role = "client" }) {
       if (Object.keys(accountPayload).length > 0) {
         await updateAccount(accountPayload);
       }
-
+      if (!isCoach && profile.primaryGoal) {
+        const payload = buildClientInformationPayload({ primaryGoal: profile.primaryGoal });
+        if (Object.keys(payload).length > 0) {
+          await updateClientInformation(payload);
+        }
+      }
       persistCurrentProfileCache({ ...profile, profilePicture: profilePictureUrl });
-      setSaveMessage("Client profile changes saved.");
-    } catch (error) {
-      setSaveError(error.message || "Unable to save your client profile.");
-    } finally {
-      setSavingProfile(false);
-    }
-  };
+    }, "Personal info saved.");
 
-  const handleSaveCoachProfile = async () => {
-    if (loadingProfile) return;
-    setSaveMessage("");
-    setSaveError("");
-    setSavingProfile(true);
-
-    try {
-      let profilePictureUrl =
-        typeof profile.profilePicture === "string" ? profile.profilePicture : null;
-
-      if (profile.profilePicture instanceof File) {
-        const upload = await uploadProfilePicture(profile.profilePicture);
-        profilePictureUrl = extractUploadedAssetUrl(upload) || profilePictureUrl;
-        setProfile((prev) => ({
-          ...prev,
-          profilePicture: profilePictureUrl || prev.profilePicture,
-        }));
+  const savePayment = () =>
+    runSectionSave("subscription", async () => {
+      const latestPayment = paymentMethod
+        ? {
+          ccnum: paymentMethod.ccnum || "",
+          cv: paymentMethod.cv || "",
+          exp_date:
+            paymentMethod.exp_date ||
+            `${paymentMethod.expiryYear}-${paymentMethod.expiryMonth}-01`,
+        }
+        : null;
+      const payload = buildClientInformationPayload({ paymentMethod: latestPayment });
+      if (Object.keys(payload).length === 0) {
+        throw new Error("Add a payment method before saving.");
       }
+      await updateClientInformation(payload);
+      persistCurrentProfileCache(profile);
+    }, "Payment method saved.");
 
-      const payload = buildCoachInformationPayload({
-        availability: null,
-        certifications,
-        experiences,
-        specializations,
-      });
-
-      // Add pricing plan to payload if set
-      if (profile.pricingInterval && profile.amount) {
-        payload.pricing_plan = {
-          payment_interval: profile.pricingInterval,
-          price_cents: Math.round(Number(profile.amount) * 100),
-        };
-      }
-
+  const saveSpecializations = () =>
+    runSectionSave("specializations", async () => {
+      const payload = buildCoachInformationPayload({ specializations });
       if (Object.keys(payload).length > 0) {
         await updateCoachInformation(payload);
       }
+      persistCurrentProfileCache(profile);
+    }, "Specializations saved.");
 
-      const accountPayload = buildAccountUpdatePayload({
-        name: `${profile.firstName} ${profile.lastName}`.trim(),
-        age: profile.age,
-        email: profile.email,
-        bio: profile.bio,
-        pfp_url: profilePictureUrl,
-        gender: profile.gender,
-      });
-      if (Object.keys(accountPayload).length > 0) {
-        await updateAccount(accountPayload);
+  const savePricing = () =>
+    runSectionSave("pricing", async () => {
+      if (!profile.pricingInterval || !profile.amount) {
+        throw new Error("Set both interval and amount before saving.");
       }
+      await updateCoachInformation({
+        pricing_plan: {
+          payment_interval: profile.pricingInterval,
+          price_cents: Math.round(Number(profile.amount) * 100),
+        },
+      });
+      persistCurrentProfileCache(profile);
+    }, "Pricing plan saved.");
 
-      persistCurrentProfileCache({ ...profile, profilePicture: profilePictureUrl });
-      setSaveMessage("Coach profile changes saved.");
-    } catch (error) {
-      setSaveError(error.message || "Unable to save your coach profile.");
-    } finally {
-      setSavingProfile(false);
-    }
-  };
+  const saveCertifications = () =>
+    runSectionSave("certifications", async () => {
+      const payload = buildCoachInformationPayload({ certifications });
+      if (Object.keys(payload).length > 0) {
+        await updateCoachInformation(payload);
+      }
+      persistCurrentProfileCache(profile);
+    }, "Certifications saved.");
+
+  const saveExperience = () =>
+    runSectionSave("experience", async () => {
+      const payload = buildCoachInformationPayload({ experiences });
+      if (Object.keys(payload).length > 0) {
+        await updateCoachInformation(payload);
+      }
+      persistCurrentProfileCache(profile);
+    }, "Experience saved.");
 
   const handleDeleteAccountRequest = async () => {
     if (window.confirm("Are you sure you want to request deletion of your account? This action cannot be undone.")) {
@@ -740,8 +807,11 @@ function ProfilePage({ role = "client" }) {
         role={role}
         userName={initials}
         userAvatar={profilePicturePreviewUrl}
-        canSwitchToCoach={!isCoach && canSwitchToCoach}
-        onSwitch={() => navigate(role === "coach" ? "/profile" : "/coach-profile")}
+        switchOptions={[
+          ...(!isCoach && canSwitchToCoach ? [{ label: "Coach", to: "/coach" }] : []),
+          ...(isCoach ? [{ label: "Client", to: "/profile" }] : []),
+          ...(canSwitchToAdmin ? [{ label: "Admin", to: "/admin" }] : []),
+        ]}
       />
 
       <div className="max-w-7xl mx-auto px-4 md:px-6 py-6 space-y-6">
@@ -801,16 +871,16 @@ function ProfilePage({ role = "client" }) {
                 </p>
 
                 <label className={`mt-5 w-full rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] px-4 py-3 text-sm font-medium text-slate-200 hover:bg-[rgba(255,255,255,0.05)] ${profileInputsDisabled ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
-                    Upload / Change Profile Picture
-                    <input
+                  Upload / Change Profile Picture
+                  <input
                     type="file"
                     className="hidden"
                     accept="image/*"
                     disabled={profileInputsDisabled}
                     onChange={(e) =>
-                        handleProfileChange("profilePicture", e.target.files?.[0] || null)
+                      handleProfileChange("profilePicture", e.target.files?.[0] || null)
                     }
-                    />
+                  />
                 </label>
               </div>
             </SidebarCard>
@@ -838,14 +908,14 @@ function ProfilePage({ role = "client" }) {
                     onClick={handleDeleteCoachAccount}
                     className="w-full rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-300"
                   >
-                    Delete Coach Account
+                    Delete Account
                   </button>
 
                   <button
                     onClick={handleDeactivateCoachAccount}
                     className="w-full rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm font-semibold text-orange-300"
                   >
-                    Deactivate Coach Account
+                    Deactivate Account
                   </button>
 
                   <button
@@ -863,13 +933,15 @@ function ProfilePage({ role = "client" }) {
               <>
                 <SidebarCard title="Account Actions">
                   <div className="space-y-3">
-                    <button
-                      onClick={() => navigate("/coach-request")}
-                      className="w-full rounded-xl px-4 py-3 text-sm font-semibold text-white"
-                      style={{ backgroundColor: "#F59E0B" }}
-                    >
-                      Become Coach
-                    </button>
+                    {!hasCoachStatus && (
+                      <button
+                        onClick={() => navigate("/coach-request")}
+                        className="w-full rounded-xl px-4 py-3 text-sm font-semibold text-white"
+                        style={{ backgroundColor: "#F59E0B" }}
+                      >
+                        Become Coach
+                      </button>
+                    )}
 
                     <button
                       onClick={handleDeactivateAccount}
@@ -899,7 +971,275 @@ function ProfilePage({ role = "client" }) {
           </div>
 
           <div className="xl:col-span-3 space-y-4">
-            <Panel title={isCoach ? "Personal Information" : "Edit Profile Information"} accent={accent}>
+            <SectionIndex
+              accent={accent}
+              onJump={handleJump}
+              sections={isCoach ? [
+                { id: "personal", label: "Personal" },
+                { id: "availability", label: "Availability" },
+                { id: "specializations", label: "Specializations" },
+                { id: "pricing", label: "Pricing" },
+                { id: "certifications", label: "Certifications" },
+                { id: "experience", label: "Experience" },
+              ] : [
+                { id: "subscription", label: "Subscription & Payment" },
+                { id: "personal", label: "Personal" },
+                { id: "telemetry", label: "Progress" },
+                { id: "availability", label: "Availability" },
+              ]}
+            />
+
+            {!isCoach && (
+              <Panel id="subscription" title="Subscription & Payment" accent={accent} {...panelProps("subscription")}>
+                {(() => {
+                  const subs = unifiedData?.client_details?.subscriptions || [];
+                  const invoices = unifiedData?.client_details?.invoices || [];
+                  const cycles = unifiedData?.client_details?.billing_cycles || [];
+                  const activeSub = subs.find((s) => s.status === "active");
+                  const activeCoachId =
+                    activeSub?.coach_id ?? activeSub?.coachId ?? activeSub?.coach?.id ?? activeSub?.cid;
+                  const cycle = cycles[0];
+                  const outstandingInvoiceForCycle = cycle
+                    ? invoices.find(inv => inv.coach_name === cycle.coach_name && inv.outstanding_balance > 0)
+                    : null;
+                  const amountDue = outstandingInvoiceForCycle?.outstanding_balance ?? 0;
+                  const nextInvoiceAmount = activeSub?.price_cents != null
+                    ? activeSub.price_cents / 100
+                    : (cycle?.price_cents != null ? cycle.price_cents / 100 : null);
+
+                  return (
+                    <div className="space-y-4">
+                      {/* Next billing notice */}
+                      {cycle ? (
+                        amountDue > 0 ? (
+                          <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3">
+                            <p className="text-xs font-semibold text-red-300">
+                              ${amountDue.toFixed(2)} is due by {new Date(cycle.end_date).toLocaleDateString()} by 12am
+                            </p>
+                          </div>
+                        ) : nextInvoiceAmount === 0 ? (
+                          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
+                            <p className="text-xs font-semibold text-emerald-300">
+                              You're on a free plan, enjoy!
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
+                            <p className="text-xs font-semibold text-emerald-300">
+                              Balance paid.{nextInvoiceAmount != null
+                                ? ` $${nextInvoiceAmount.toFixed(2)} will be invoiced for the next billing period starting ${new Date(cycle.end_date).toLocaleDateString()}.`
+                                : ""}
+                            </p>
+                          </div>
+                        )
+                      ) : null}
+
+                      {/* Active subscription */}
+                      {activeSub ? (
+                        <div className="rounded-xl border border-white/6 bg-[#101827] px-4 py-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex-1">
+                              <p className="text-sm font-semibold text-white">{activeSub.coach_name}</p>
+                              <p className="text-xs text-slate-400 mt-0.5">
+                                {activeSub.payment_interval} &middot; ${(activeSub.price_cents / 100).toFixed(2)}
+                              </p>
+                              <p className="text-[10px] text-slate-500 mt-0.5">Since {activeSub.start_date}</p>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <span className="rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-green-500/15 text-green-400">
+                                Active
+                              </span>
+                              {(() => {
+                                const outstandingInvoice = invoices.find(
+                                  inv => inv.coach_name === activeSub.coach_name && inv.outstanding_balance > 0
+                                );
+                                return outstandingInvoice ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedInvoiceForPayment(outstandingInvoice);
+                                      setPaymentAmount("");
+                                      setShowPaymentDialog(true);
+                                    }}
+                                    className="rounded-lg bg-blue-600 hover:bg-blue-700 px-3 py-2 text-xs font-medium text-white transition"
+                                  >
+                                    Pay
+                                  </button>
+                                ) : null;
+                              })()}
+                              {activeCoachId && (
+                                <button
+                                  type="button"
+                                  onClick={() => navigate(`/coaches/${activeCoachId}`)}
+                                  className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs font-medium text-slate-300 transition hover:bg-[rgba(255,255,255,0.06)] hover:text-white"
+                                >
+                                  View Coach
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-500">No active subscription.</p>
+                      )}
+
+                      {/* Invoices */}
+                      {invoices.length > 0 && (
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-2">Invoices</p>
+                          <div className="space-y-2 max-h-48 overflow-y-auto">
+                            {invoices.map((inv) => (
+                              <div key={inv.invoice_id} className="flex items-center justify-between rounded-lg bg-[#101827] px-3 py-2">
+                                <div>
+                                  <p className="text-xs text-white">{inv.coach_name}</p>
+                                  <p className="text-[10px] text-slate-500">{inv.entry_date} - {inv.end_date}</p>
+                                </div>
+                                <p className="text-xs font-semibold text-white">${inv.amount.toFixed(2)}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Payment method */}
+                      <div className="pt-2 border-t border-white/5">
+                        <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-2">Payment Method</p>
+                        {paymentMethod && (
+                          <div
+                            key={paymentMethod.id}
+                            className="rounded-xl border border-white/6 bg-[#101827] px-4 py-3"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-3">
+                                <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">
+                                  Card
+                                </div>
+                                <div>
+                                  <h3 className="text-sm font-semibold text-white">
+                                    {paymentMethod.type.charAt(0).toUpperCase() + paymentMethod.type.slice(1)} Card
+                                  </h3>
+                                  <p className="text-xs text-slate-400">
+                                    **** **** **** {paymentMethod.lastFour}
+                                  </p>
+                                  <p className="text-xs text-slate-500">
+                                    Expires {paymentMethod.expiryMonth}/{paymentMethod.expiryYear}
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => {
+                                  if (profileInputsDisabled) return;
+                                  if (hasActivePaidSub) {
+                                    setSectionResult(
+                                      "subscription",
+                                      "error",
+                                      "You have an active paid subscription — replace your payment method instead of removing it."
+                                    );
+                                    return;
+                                  }
+                                  setPaymentMethod(null);
+                                  setShowPaymentForm(false);
+                                }}
+                                disabled={profileInputsDisabled || hasActivePaidSub}
+                                title={hasActivePaidSub ? "Cannot remove payment method while on a paid subscription" : undefined}
+                                className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {!paymentMethod && !showPaymentForm ? (
+                          <button
+                            onClick={() => !profileInputsDisabled && setShowPaymentForm(true)}
+                            disabled={profileInputsDisabled}
+                            className="w-full rounded-xl border border-dashed px-4 py-3 text-sm font-semibold transition"
+                            style={{ borderColor: `${accent}55`, color: accent, backgroundColor: `${accent}08` }}
+                          >
+                            + Add Payment Method
+                          </button>
+                        ) : !paymentMethod && showPaymentForm ? (
+                          <div className="rounded-xl border border-white/6 bg-[#101827] p-4 space-y-3">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <div>
+                                <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                                  Card Type
+                                </label>
+                                <select
+                                  value={newPaymentMethod.type}
+                                  onChange={(e) => !profileInputsDisabled && setNewPaymentMethod((prev) => ({ ...prev, type: e.target.value }))}
+                                  disabled={profileInputsDisabled}
+                                  className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  <option value="">Select card type</option>
+                                  <option value="credit">Credit Card</option>
+                                  <option value="debit">Debit Card</option>
+                                </select>
+                              </div>
+                              <Input
+                                label="Card Number"
+                                value={newPaymentMethod.ccnum}
+                                onChange={(v) => !profileInputsDisabled && setNewPaymentMethod((prev) => ({ ...prev, ccnum: v }))}
+                                placeholder="4111111111111111"
+                                disabled={profileInputsDisabled}
+                              />
+                              <Input
+                                label="CVV"
+                                value={newPaymentMethod.cv}
+                                onChange={(v) => !profileInputsDisabled && setNewPaymentMethod((prev) => ({ ...prev, cv: v }))}
+                                placeholder="123"
+                                disabled={profileInputsDisabled}
+                              />
+                              <Input
+                                label="Expiry Date"
+                                value={newPaymentMethod.exp_date}
+                                onChange={(v) => !profileInputsDisabled && setNewPaymentMethod((prev) => ({ ...prev, exp_date: v }))}
+                                placeholder="2027-12-01"
+                                disabled={profileInputsDisabled}
+                              />
+                            </div>
+
+                            <div className="flex justify-end gap-2">
+                              <button
+                                onClick={() => !profileInputsDisabled && setShowPaymentForm(false)}
+                                disabled={profileInputsDisabled}
+                                className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs font-medium text-slate-300"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                onClick={addPaymentMethod}
+                                disabled={profileInputsDisabled}
+                                className="rounded-lg px-3 py-2 text-xs font-semibold text-white"
+                                style={{ backgroundColor: accent }}
+                              >
+                                Add Payment Method
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+
+                      {subs.length === 0 && invoices.length === 0 && cycles.length === 0 && !paymentMethod && (
+                        <p className="text-xs text-slate-500">No subscription or billing history yet. Hire a coach to get started.</p>
+                      )}
+                    </div>
+                  );
+                })()}
+                <SectionSaveBar
+                  id="subscription"
+                  accent={accent}
+                  status={sectionStatus.subscription}
+                  onSave={savePayment}
+                  saving={savingSection === "subscription"}
+                  disabled={profileInputsDisabled}
+                  label="Save payment method"
+                />
+              </Panel>
+            )}
+
+            <Panel id="personal" title={isCoach ? "Personal Information" : "Edit Profile Information"} accent={accent} {...panelProps("personal")}>
               {isCoach ? (
                 <>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1003,10 +1343,18 @@ function ProfilePage({ role = "client" }) {
 
                 </>
               )}
+              <SectionSaveBar
+                id="personal"
+                accent={accent}
+                status={sectionStatus.personal}
+                onSave={savePersonal}
+                saving={savingSection === "personal"}
+                disabled={profileInputsDisabled}
+              />
             </Panel>
 
             {!isCoach && (
-              <Panel title="Progress &amp; Telemetry" accent={accent}>
+              <Panel id="telemetry" title="Progress &amp; Telemetry" accent={accent} {...panelProps("telemetry")}>
                 <TelemetryCharts accent={accent} />
 
                 {/* Progress Pictures */}
@@ -1060,230 +1408,54 @@ function ProfilePage({ role = "client" }) {
               </Panel>
             )}
 
-            {!isCoach && (
-              <Panel title="Payment Method" accent={accent}>
-                <div className="space-y-3">
-                  {paymentMethod && (
-                    <div
-                      key={paymentMethod.id}
-                      className="rounded-xl border border-white/6 bg-[#101827] px-4 py-3"
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-3">
-                          <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">
-                            Card
-                          </div>
-                          <div>
-                            <h3 className="text-sm font-semibold text-white">
-                              {paymentMethod.type.charAt(0).toUpperCase() + paymentMethod.type.slice(1)} Card
-                            </h3>
-                            <p className="text-xs text-slate-400">
-                              **** **** **** {paymentMethod.lastFour}
-                            </p>
-                            <p className="text-xs text-slate-500">
-                              Expires {paymentMethod.expiryMonth}/{paymentMethod.expiryYear}
-                            </p>
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => {
-                            if (profileInputsDisabled) return;
-                            setPaymentMethod(null);
-                            setShowPaymentForm(false);
-                          }}
-                          disabled={profileInputsDisabled}
-                          className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {!paymentMethod && !showPaymentForm ? (
-                    <button
-                      onClick={() => !profileInputsDisabled && setShowPaymentForm(true)}
-                      disabled={profileInputsDisabled}
-                      className="w-full rounded-xl border border-dashed px-4 py-3 text-sm font-semibold transition"
-                      style={{ borderColor: `${accent}55`, color: accent, backgroundColor: `${accent}08` }}
-                    >
-                      + Add Payment Method
-                    </button>
-                  ) : !paymentMethod && showPaymentForm ? (
-                    <div className="rounded-xl border border-white/6 bg-[#101827] p-4 space-y-3">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div>
-                          <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
-                            Card Type
-                          </label>
-                          <select
-                            value={newPaymentMethod.type}
-                            onChange={(e) => !profileInputsDisabled && setNewPaymentMethod((prev) => ({ ...prev, type: e.target.value }))}
-                            disabled={profileInputsDisabled}
-                            className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            <option value="">Select card type</option>
-                            <option value="credit">Credit Card</option>
-                            <option value="debit">Debit Card</option>
-                          </select>
-                        </div>
-                        <Input
-                          label="Card Number"
-                          value={newPaymentMethod.ccnum}
-                          onChange={(v) => !profileInputsDisabled && setNewPaymentMethod((prev) => ({ ...prev, ccnum: v }))}
-                          placeholder="4111111111111111"
-                          disabled={profileInputsDisabled}
-                        />
-                        <Input
-                          label="CVV"
-                          value={newPaymentMethod.cv}
-                          onChange={(v) => !profileInputsDisabled && setNewPaymentMethod((prev) => ({ ...prev, cv: v }))}
-                          placeholder="123"
-                          disabled={profileInputsDisabled}
-                        />
-                        <Input
-                          label="Expiry Date"
-                          value={newPaymentMethod.exp_date}
-                          onChange={(v) => !profileInputsDisabled && setNewPaymentMethod((prev) => ({ ...prev, exp_date: v }))}
-                          placeholder="2027-12-01"
-                          disabled={profileInputsDisabled}
-                        />
-                      </div>
-
-                      <div className="flex justify-end gap-2">
-                        <button
-                          onClick={() => !profileInputsDisabled && setShowPaymentForm(false)}
-                          disabled={profileInputsDisabled}
-                          className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs font-medium text-slate-300"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          onClick={addPaymentMethod}
-                          disabled={profileInputsDisabled}
-                          className="rounded-lg px-3 py-2 text-xs font-semibold text-white"
-                          style={{ backgroundColor: accent }}
-                        >
-                          Add Payment Method
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
+            <Panel id="availability" title="Availability" accent={accent} {...panelProps("availability")}>
+              {availabilityMessage ? (
+                <div className="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">
+                  {availabilityMessage}
                 </div>
-              </Panel>
-            )}
+              ) : null}
+              {availabilityError ? (
+                <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                  {availabilityError}
+                </div>
+              ) : null}
+              <AvailabilityCalendar
+                availabilities={availabilityRows}
+                busySlots={availabilityBusy}
+                role={isCoach ? "coach" : "client"}
+                mode="edit"
+                onRangeChange={(from, to) => setAvailabilityRange({ from, to })}
+                onCreate={async (payload) => {
+                  setAvailabilityError("");
+                  setAvailabilityMessage("");
+                  try {
+                    await availabilityCreateFn(payload);
+                    await refreshAvailability(availabilityRange.from, availabilityRange.to);
+                    setAvailabilityMessage("Availability saved.");
+                  } catch (error) {
+                    setAvailabilityError(error.message || "Unable to save availability.");
+                    throw error;
+                  }
+                }}
+                onDelete={async (id) => {
+                  setAvailabilityError("");
+                  setAvailabilityMessage("");
+                  try {
+                    await availabilityDeleteFn(id);
+                    await refreshAvailability(availabilityRange.from, availabilityRange.to);
+                    setAvailabilityMessage("Availability removed.");
+                  } catch (error) {
+                    setAvailabilityError(error.message || "Unable to remove availability.");
+                    throw error;
+                  }
+                }}
+              />
+            </Panel>
 
-            {!isCoach && (
-              <Panel title="Subscription" accent={accent}>
-                {(() => {
-                  const subs = unifiedData?.client_details?.subscriptions || [];
-                  const invoices = unifiedData?.client_details?.invoices || [];
-                  const cycles = unifiedData?.client_details?.billing_cycles || [];
-                  const activeSub = subs.find((s) => s.status === "active");
-                  const activeCoachId =
-                    activeSub?.coach_id ?? activeSub?.coachId ?? activeSub?.coach?.id ?? activeSub?.cid;
-
-                  return (
-                    <div className="space-y-4">
-                      {/* Current subscription */}
-
-                      {/* Next billing cycle */}
-                      {(() => {
-                        if (cycles.length === 0) return null;
-                        const outstandingInvoiceForCycle = invoices.find(
-                          inv => inv.coach_name === cycles[0].coach_name && inv.outstanding_balance > 0
-                        );
-                        const amountDue = outstandingInvoiceForCycle?.outstanding_balance ?? (cycles[0].price_cents / 100);
-                        return (
-                          <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 px-4 py-3">
-                            <p className="text-xs font-semibold text-blue-300">
-                              ${amountDue.toFixed(2)} is due by {new Date(cycles[0].end_date).toLocaleDateString()} by 12am
-                            </p>
-                            <p className="text-[10px] text-slate-500 mt-0.5">
-                              {cycles[0].coach_name} &middot; {cycles[0].payment_interval}
-                            </p>
-                          </div>
-                        );
-                      })()}
-                      
-                      {activeSub ? (
-                        <div className="rounded-xl border border-white/6 bg-[#101827] px-4 py-3">
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="flex-1">
-                              <p className="text-sm font-semibold text-white">{activeSub.coach_name}</p>
-                              <p className="text-xs text-slate-400 mt-0.5">
-                                {activeSub.payment_interval} &middot; ${(activeSub.price_cents / 100).toFixed(2)}
-                              </p>
-                              <p className="text-[10px] text-slate-500 mt-0.5">Since {activeSub.start_date}</p>
-                            </div>
-                            <div className="flex shrink-0 items-center gap-2">
-                              <span className="rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-green-500/15 text-green-400">
-                                Active
-                              </span>
-                              {(() => {
-                                const outstandingInvoice = invoices.find(
-                                  inv => inv.coach_name === activeSub.coach_name && inv.outstanding_balance > 0
-                                );
-                                return outstandingInvoice ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setSelectedInvoiceForPayment(outstandingInvoice);
-                                      setPaymentAmount("");
-                                      setShowPaymentDialog(true);
-                                    }}
-                                    className="rounded-lg bg-blue-600 hover:bg-blue-700 px-3 py-2 text-xs font-medium text-white transition"
-                                  >
-                                    Pay
-                                  </button>
-                                ) : null;
-                              })()}
-                              {activeCoachId && (
-                                <button
-                                  type="button"
-                                  onClick={() => navigate(`/coaches/${activeCoachId}`)}
-                                  className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs font-medium text-slate-300 transition hover:bg-[rgba(255,255,255,0.06)] hover:text-white"
-                                >
-                                  View Coach
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      ) : (
-                        <p className="text-xs text-slate-500">No active subscription.</p>
-                      )}
-
-                      {/* Invoices */}
-                      {invoices.length > 0 && (
-                        <div>
-                          <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-2">Invoices</p>
-                          <div className="space-y-2 max-h-48 overflow-y-auto">
-                            {invoices.map((inv) => (
-                              <div key={inv.invoice_id} className="flex items-center justify-between rounded-lg bg-[#101827] px-3 py-2">
-                                <div>
-                                  <p className="text-xs text-white">{inv.coach_name}</p>
-                                  <p className="text-[10px] text-slate-500">{inv.entry_date} - {inv.end_date}</p>
-                                </div>
-                                <p className="text-xs font-semibold text-white">${inv.amount.toFixed(2)}</p>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {subs.length === 0 && invoices.length === 0 && cycles.length === 0 && (
-                        <p className="text-xs text-slate-500">No subscription or billing history yet. Hire a coach to get started.</p>
-                      )}
-                    </div>
-                  );
-                })()}
-              </Panel>
-            )}
 
             {isCoach && (
               <>
-                <Panel title="Specialisations" accent={accent}>
+                <Panel id="specializations" title="Specialisations" accent={accent} {...panelProps("specializations")}>
                   <div className="flex flex-wrap gap-2">
                     {specializationOptions.map((item) => {
                       const selected = specializations.includes(item);
@@ -1304,9 +1476,17 @@ function ProfilePage({ role = "client" }) {
                       );
                     })}
                   </div>
+                  <SectionSaveBar
+                    id="specializations"
+                    accent={accent}
+                    status={sectionStatus.specializations}
+                    onSave={saveSpecializations}
+                    saving={savingSection === "specializations"}
+                    disabled={profileInputsDisabled}
+                  />
                 </Panel>
 
-                <Panel title="Pricing Plan" accent={accent}>
+                <Panel id="pricing" title="Pricing Plan" accent={accent} {...panelProps("pricing")}>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-1">
                       <label className="text-xs font-medium text-slate-400">Payment Interval</label>
@@ -1329,9 +1509,29 @@ function ProfilePage({ role = "client" }) {
                       disabled={profileInputsDisabled}
                     />
                   </div>
+                  <SectionSaveBar
+                    id="pricing"
+                    accent={accent}
+                    status={sectionStatus.pricing}
+                    onSave={savePricing}
+                    saving={savingSection === "pricing"}
+                    disabled={profileInputsDisabled}
+                  />
                 </Panel>
 
                 <EditableMetadataSection
+                  sectionId="certifications"
+                  panelOpenProps={panelProps("certifications")}
+                  saveBar={
+                    <SectionSaveBar
+                      id="certifications"
+                      accent={accent}
+                      status={sectionStatus.certifications}
+                      onSave={saveCertifications}
+                      saving={savingSection === "certifications"}
+                      disabled={profileInputsDisabled}
+                    />
+                  }
                   title="Certifications"
                   items={certifications}
                   newItem={newCertification}
@@ -1348,6 +1548,18 @@ function ProfilePage({ role = "client" }) {
                 />
 
                 <EditableMetadataSection
+                  sectionId="experience"
+                  panelOpenProps={panelProps("experience")}
+                  saveBar={
+                    <SectionSaveBar
+                      id="experience"
+                      accent={accent}
+                      status={sectionStatus.experience}
+                      onSave={saveExperience}
+                      saving={savingSection === "experience"}
+                      disabled={profileInputsDisabled}
+                    />
+                  }
                   title="Experience"
                   items={experiences}
                   newItem={newExperience}
@@ -1364,20 +1576,6 @@ function ProfilePage({ role = "client" }) {
                 />
               </>
             )}
-
-            <div className="flex justify-end gap-3 pt-2">
-              <button className="rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] px-5 py-3 text-sm font-medium text-slate-300">
-                Discard
-              </button>
-              <button
-                onClick={isCoach ? handleSaveCoachProfile : handleSaveClientProfile}
-                disabled={profileInputsDisabled}
-                className="rounded-xl px-5 py-3 text-sm font-semibold text-white shadow-lg"
-                style={{ backgroundColor: accent }}
-              >
-                {loadingProfile ? "Refreshing..." : savingProfile ? "Saving..." : "Save Changes"}
-              </button>
-            </div>
 
           </div>
         </div>
@@ -1450,20 +1648,59 @@ function SidebarCard({ title, children }) {
   );
 }
 
-function Panel({ title, children, accent }) {
+function PanelChildrenWrapper({ children }) {
+  return <div className="mt-4"> {children} </div>;
+}
+
+function Panel({ id, title, children, accent, collapsible = true, open = true, onToggle }) {
+  const handleToggle = () => collapsible && onToggle?.();
+
   return (
-    <div className="rounded-2xl border border-white/8 bg-[#0B1120] p-5 shadow-[0_0_30px_rgba(0,0,0,0.2)]">
+    <section
+      id={id}
+      className="rounded-2xl border border-white/8 bg-[#0B1120] p-5 shadow-[0_0_30px_rgba(0,0,0,0.2)] scroll-mt-20"
+    >
       {title && (
-        <div className="mb-4 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={handleToggle}
+          className={`mb-0 flex w-full items-center justify-between gap-4 text-left ${collapsible ? "cursor-pointer" : "cursor-default"}`}
+          aria-expanded={open}
+        >
           <h2 className="text-sm font-bold text-white">{title}</h2>
           <div
-            className="h-[1px] flex-1 ml-4"
+            className="h-[1px] flex-1"
             style={{ background: `linear-gradient(to right, ${accent}40, transparent)` }}
           />
-        </div>
+          {collapsible && (
+            <span className="text-2xl leading-none text-slate-300 select-none w-6 text-center">
+              {open ? "▾" : "▸"}
+            </span>
+          )}
+        </button>
       )}
-      {children}
-    </div>
+
+
+      {open && PanelChildrenWrapper({ children })}
+    </section>
+  );
+}
+
+function SectionIndex({ sections, accent, onJump }) {
+  return (
+    <nav className="sticky top-2 z-10 -mx-1 flex flex-wrap gap-2 rounded-2xl border border-white/8 bg-[#0B1120]/95 backdrop-blur px-3 py-2 shadow-[0_0_30px_rgba(0,0,0,0.25)]">
+      {sections.map((s) => (
+        <button
+          key={s.id}
+          type="button"
+          onClick={() => onJump(s.id)}
+          className="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-white/5"
+          style={{ borderColor: `${accent}30` }}
+        >
+          {s.label}
+        </button>
+      ))}
+    </nav>
   );
 }
 
@@ -1502,6 +1739,27 @@ function TextArea({ label, value, onChange, rows = 4, placeholder = "", disabled
   );
 }
 
+function SectionSaveBar({ id, accent, status, onSave, saving, disabled, label = "Save changes" }) {
+  return (
+    <div className="mt-5 flex items-center justify-end gap-3 pt-3 border-t border-white/5">
+      {status?.text ? (
+        <span className={`text-xs ${status.type === "error" ? "text-red-300" : "text-emerald-300"}`}>
+          {status.text}
+        </span>
+      ) : null}
+      <button
+        type="button"
+        onClick={onSave}
+        disabled={disabled || saving}
+        className="rounded-lg px-4 py-2 text-xs font-semibold text-white shadow disabled:opacity-50"
+        style={{ backgroundColor: accent }}
+      >
+        {saving ? "Saving…" : label}
+      </button>
+    </div>
+  );
+}
+
 function StatBox({ label, value }) {
   return (
     <div className="rounded-xl border border-white/6 bg-[#111827] px-3 py-4 text-center">
@@ -1512,6 +1770,9 @@ function StatBox({ label, value }) {
 }
 
 function EditableMetadataSection({
+  sectionId,
+  panelOpenProps,
+  saveBar,
   title,
   items,
   newItem,
@@ -1527,7 +1788,7 @@ function EditableMetadataSection({
   disabled = false,
 }) {
   return (
-    <Panel title={title} accent={accent}>
+    <Panel id={sectionId} title={title} accent={accent} {...(panelOpenProps || {})}>
       <div className="space-y-3">
         {items.map((item) => (
           <div
@@ -1681,12 +1942,11 @@ function EditableMetadataSection({
           </div>
         )}
       </div>
+      {saveBar || null}
     </Panel>
   );
 }
 
 export default ProfilePage;
-
-
 
 

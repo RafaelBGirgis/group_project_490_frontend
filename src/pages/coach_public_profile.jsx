@@ -14,7 +14,8 @@ import {
   requestCoach,
   terminateRelationship,
 } from "../api/client";
-import { fetchCoachAvailability, fetchCoachProfile } from "../api/coach";
+import { fetchCoachAvailabilityWindows, fetchCoachProfile } from "../api/coach";
+import AvailabilityCalendar from "../components/availability/AvailabilityCalendar";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
 
@@ -206,7 +207,8 @@ export default function CoachPublicProfilePage() {
   const [coach, setCoach] = useState(null);
   const [reviews, setReviews] = useState([]);
   const [, setReports] = useState([]);
-  const [availability, setAvailability] = useState([]);
+  const [availabilityRows, setAvailabilityRows] = useState([]);
+  const [availabilityRange, setAvailabilityRange] = useState({ from: null, to: null });
   const [pendingRequests, setPendingRequests] = useState({});
   const [activeCoachRelationshipId, setActiveCoachRelationshipId] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -257,15 +259,13 @@ export default function CoachPublicProfilePage() {
           }
         }
 
-        const [reviewResponse, reportResponse, availabilityResponse] = await Promise.all([
+        const [reviewResponse, reportResponse] = await Promise.all([
           fetchCoachReviews(coachId).catch(() => ({ reviews: [] })),
           fetchCoachReports(coachId).catch(() => ({ reports: [] })),
-          fetchCoachAvailability(coachId).catch(() => []),
         ]);
 
         setReviews(Array.isArray(reviewResponse?.reviews) ? reviewResponse.reviews : []);
         setReports(Array.isArray(reportResponse?.reports) ? reportResponse.reports : []);
-        setAvailability(Array.isArray(availabilityResponse) ? availabilityResponse : []);
       } catch (error) {
         setActionError(error.message || "Unable to load this coach profile.");
       } finally {
@@ -275,6 +275,13 @@ export default function CoachPublicProfilePage() {
 
     loadPage();
   }, [coachId, navigate, previewMode]);
+
+  useEffect(() => {
+    if (!coachId || !availabilityRange.from || !availabilityRange.to) return;
+    fetchCoachAvailabilityWindows(coachId, availabilityRange.from, availabilityRange.to)
+      .then((rows) => setAvailabilityRows(Array.isArray(rows) ? rows : []))
+      .catch(() => setAvailabilityRows([]));
+  }, [coachId, availabilityRange]);
 
   const userInitials = useMemo(() => {
     const name = account?.name || "";
@@ -632,39 +639,13 @@ export default function CoachPublicProfilePage() {
             <section className="rounded-2xl border border-white/8 bg-[#0F1729] p-6">
               <h3 className="text-lg font-bold text-white">Availability</h3>
               <div className="mt-4">
-                {availability.length === 0 ? (
-                  <p className="text-sm text-gray-500">No coach availability has been set yet.</p>
-                ) : (
-                  <>
-                    <div className="grid grid-cols-8 gap-1 mb-2">
-                      <div />
-                      {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => (
-                        <div key={day} className="text-[10px] text-gray-500 text-center font-medium">
-                          {day}
-                        </div>
-                      ))}
-                    </div>
-                    <div className="space-y-1">
-                      {availability.map(({ time, slots }) => (
-                        <div key={time} className="grid grid-cols-8 gap-1">
-                          <div className="text-[10px] text-gray-500 flex items-center">{time}</div>
-                          {slots.map((status, index) => (
-                            <div
-                              key={`${time}-${index}`}
-                              className={`rounded py-1 text-center text-[10px] font-medium ${
-                                status === "available"
-                                  ? "bg-blue-900/60 text-blue-300"
-                                  : "bg-[#0A1020] text-gray-700"
-                              }`}
-                            >
-                              {status === "available" ? time : "—"}
-                            </div>
-                          ))}
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
+                <AvailabilityCalendar
+                  availabilities={availabilityRows}
+                  busySlots={[]}
+                  role="coach"
+                  mode="view"
+                  onRangeChange={(from, to) => setAvailabilityRange({ from, to })}
+                />
               </div>
             </section>
 

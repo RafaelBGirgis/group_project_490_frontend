@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Navbar } from "../components/navbar";
 import { fetchMe } from "../api/client";
 import { buildCoachRequestPayload, createCoachRequest, fetchCoachProfile } from "../api/coach";
-import { EMPTY_TRAINING_AVAILABILITY } from "../utils/availabilityModel";
+import AvailabilityCalendar from "../components/availability/AvailabilityCalendar";
 
 const SPECIALIZATION_OPTIONS = [
   "Strength Training",
@@ -17,12 +17,6 @@ const SPECIALIZATION_OPTIONS = [
   "CrossFit",
   "Rehabilitation",
 ];
-const AVAILABILITY_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const AVAILABILITY_TIMES = [
-  "6AM", "7AM", "8AM", "9AM", "10AM", "11AM",
-  "12PM", "1PM", "2PM", "3PM", "4PM", "5PM", "6PM", "7PM", "8PM",
-];
-
 function CoachRequestFormPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -35,8 +29,6 @@ function CoachRequestFormPage() {
 
   const [form, setForm] = useState({
     name: "",
-    requestedDate: new Date().toISOString().slice(0, 10),
-    yearsExperience: "",
     reason: "",
     specializations: [],
     certifications: [],
@@ -58,7 +50,7 @@ function CoachRequestFormPage() {
   const [editingExperience, setEditingExperience] = useState(null);
   const [showCertForm, setShowCertForm] = useState(false);
   const [showExpForm, setShowExpForm] = useState(false);
-  const [availability, setAvailability] = useState(EMPTY_TRAINING_AVAILABILITY);
+  const [availabilityWindows, setAvailabilityWindows] = useState([]);
 
   const initials = useMemo(() => {
     const parts = form.name.trim().split(/\s+/).filter(Boolean);
@@ -100,7 +92,7 @@ function CoachRequestFormPage() {
               }))
             : prev.experiences,
         }));
-        setAvailability({ ...EMPTY_TRAINING_AVAILABILITY });
+        setAvailabilityWindows([]);
 
         if ((isViewMode || isEditMode) && !existingCoachProfile?.coach_account) {
           setSubmitMessage(
@@ -137,14 +129,6 @@ function CoachRequestFormPage() {
       setError("Name is required.");
       return;
     }
-    if (!form.requestedDate) {
-      setError("Date is required.");
-      return;
-    }
-    if (!form.yearsExperience || Number(form.yearsExperience) < 0) {
-      setError("Please enter valid years of experience.");
-      return;
-    }
     if (form.specializations.length === 0) {
       setError("Select at least one specialization.");
       return;
@@ -153,7 +137,7 @@ function CoachRequestFormPage() {
       setError("Please explain why you want to be a coach.");
       return;
     }
-    if (!Object.values(availability).some((slots) => slots.length > 0)) {
+    if (availabilityWindows.length === 0) {
       setError("Add at least one availability slot.");
       return;
     }
@@ -161,7 +145,7 @@ function CoachRequestFormPage() {
     setError("");
     setSubmitting(true);
 
-    const backendPayload = buildCoachRequestPayload(form, availability);
+    const backendPayload = buildCoachRequestPayload(form, availabilityWindows);
 
     try {
       await createCoachRequest(backendPayload);
@@ -253,16 +237,6 @@ function CoachRequestFormPage() {
     setShowExpForm(true);
   };
 
-  const toggleAvailability = (day, time) => {
-    if (isViewMode) return;
-    setAvailability((prev) => ({
-      ...prev,
-      [day]: prev[day].includes(time)
-        ? prev[day].filter((slot) => slot !== time)
-        : [...prev[day], time],
-    }));
-  };
-
   return (
     <div className="min-h-screen bg-[#080D19] text-white">
       <Navbar role="client" userName={initials} onSwitch={() => navigate("/coach")} />
@@ -311,39 +285,6 @@ function CoachRequestFormPage() {
               />
             </div>
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div>
-                <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
-                  Date
-                </label>
-                <input
-                  type="date"
-                  value={form.requestedDate}
-                  onChange={(e) => setForm((prev) => ({ ...prev, requestedDate: e.target.value }))}
-                  className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
-                  disabled={isViewMode}
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
-                  Total Years Of Experience
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={form.yearsExperience}
-                  onChange={(e) => setForm((prev) => ({ ...prev, yearsExperience: e.target.value }))}
-                  placeholder="e.g. 3"
-                  className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600"
-                  disabled={isViewMode}
-                  required
-                />
-              </div>
-            </div>
-
             <div>
               <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
                 Specialties
@@ -375,39 +316,26 @@ function CoachRequestFormPage() {
                 Availability
               </label>
               <div className="rounded-xl border border-white/6 bg-[#101827] p-4">
-                <div className="mb-3 grid grid-cols-[70px_repeat(7,minmax(0,1fr))] gap-2 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
-                  <div>Time</div>
-                  {AVAILABILITY_DAYS.map((day) => (
-                    <div key={day} className="text-center">{day}</div>
-                  ))}
-                </div>
-                <div className="space-y-2">
-                  {AVAILABILITY_TIMES.map((time) => (
-                    <div key={time} className="grid grid-cols-[70px_repeat(7,minmax(0,1fr))] gap-2">
-                      <div className="flex items-center text-xs text-slate-400">{time}</div>
-                      {AVAILABILITY_DAYS.map((day) => {
-                        const selected = availability[day].includes(time);
-                        return (
-                          <button
-                            key={`${day}-${time}`}
-                            type="button"
-                            onClick={() => toggleAvailability(day, time)}
-                            disabled={isViewMode}
-                            className="rounded-lg border px-2 py-2 text-[10px] font-semibold transition"
-                            style={{
-                              borderColor: selected ? "#F59E0B" : "rgba(255,255,255,0.08)",
-                              backgroundColor: selected ? "rgba(245,158,11,0.18)" : "rgba(255,255,255,0.03)",
-                              color: selected ? "#FBBF24" : "#64748B",
-                              cursor: isViewMode ? "default" : "pointer",
-                            }}
-                          >
-                            {selected ? "Open" : ""}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ))}
-                </div>
+                <AvailabilityCalendar
+                  availabilities={availabilityWindows.map((w, i) => ({
+                    id: `pending-${i}`,
+                    start_dt: w.start_dt,
+                    end_dt: w.end_dt,
+                    repeats_weekly: w.repeats_weekly,
+                    recurrence_end_dt: w.recurrence_end_dt,
+                  }))}
+                  busySlots={[]}
+                  role="coach"
+                  mode={isViewMode ? "view" : "edit"}
+                  onCreate={async (payload) => {
+                    setAvailabilityWindows((prev) => [...prev, payload]);
+                  }}
+                  onDelete={async (id) => {
+                    if (typeof id !== "string" || !id.startsWith("pending-")) return;
+                    const idx = Number(id.slice("pending-".length));
+                    setAvailabilityWindows((prev) => prev.filter((_, i) => i !== idx));
+                  }}
+                />
               </div>
             </div>
 

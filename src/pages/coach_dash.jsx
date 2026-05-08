@@ -21,10 +21,8 @@ import {
   fetchCoachEarnings,
   fetchMyClients,
   fetchUpcomingSessions,
-  fetchCoachAvailability,
   fetchCoachReviews,
   fetchCoachWorkoutPlans,
-  saveCoachAvailability,
   fetchClientRequests,
   lookupClient,
   acceptClientRequest,
@@ -35,28 +33,9 @@ import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
 import SessionsDetail from "../components/overlays/sessions_detail";
 import ReviewsDetail from "../components/overlays/reviews_detail";
-import AvailabilityDetail from "../components/overlays/availability_detail";
 import ClientProfile from "../components/overlays/client_profile";
 
 const role = "coach";
-const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
-function summarizeAvailability(rows) {
-  const safeRows = Array.isArray(rows) ? rows : [];
-  const openSlots = safeRows.reduce(
-    (sum, row) => sum + (Array.isArray(row.slots) ? row.slots.filter((slot) => slot === "available").length : 0),
-    0
-  );
-  const bookedSlots = safeRows.reduce(
-    (sum, row) => sum + (Array.isArray(row.slots) ? row.slots.filter((slot) => slot === "booked").length : 0),
-    0
-  );
-  const activeDays = WEEKDAYS.reduce(
-    (sum, _, dayIdx) => sum + (safeRows.some((row) => row.slots?.[dayIdx] === "available") ? 1 : 0),
-    0
-  );
-  return { openSlots, bookedSlots, activeDays };
-}
 
 function resolveClientName(source, fallbackId) {
   return (
@@ -166,15 +145,6 @@ function formatCoachEarnings(value) {
   return amount.toFixed(2);
 }
 
-const SlotCell = ({ status, time }) => {
-  const base = "rounded py-1 text-center text-[10px] font-medium transition-colors";
-  if (status === "booked")
-    return <div className={`${base} bg-blue-900/60 text-blue-300`}>{time}</div>;
-  if (status === "available")
-    return <div className={`${base} bg-orange-900/60 text-orange-300`}>{time}</div>;
-  return <div className={`${base} bg-[#0A1020] text-gray-700`}>—</div>;
-};
-
 export default function CoachDashboard() {
   const navigate = useNavigate();
 
@@ -197,14 +167,11 @@ export default function CoachDashboard() {
   const [earnings, setEarnings] = useState(null);
   const [clients, setClients] = useState([]);
   const [sessions, setSessions] = useState([]);
-  const [availability, setAvailability] = useState([]);
   const [reviews, setReviews] = useState([]);
   const [workoutPlans, setWorkoutPlans] = useState([]);
   const [clientRequests, setClientRequests] = useState([]);
   const [clientRequestDetails, setClientRequestDetails] = useState({});
   const [requestActionId, setRequestActionId] = useState(null);
-  const [availabilityError, setAvailabilityError] = useState("");
-  const [availabilityMessage, setAvailabilityMessage] = useState("");
   const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(false);
   const [chatActionId, setChatActionId] = useState(null);
   const [selectedClient, setSelectedClient] = useState(null);
@@ -235,12 +202,11 @@ export default function CoachDashboard() {
     if (!coachId) return;
     (async () => {
       try {
-        const [profile, s, c, sess, avail, rev, plans, earningsResponse] = await Promise.all([
+        const [profile, s, c, sess, rev, plans, earningsResponse] = await Promise.all([
           fetchCoachProfile().catch(() => null),
           fetchCoachStats(coachId).catch(() => null),
           fetchMyClients(coachId).catch(() => []),
           fetchUpcomingSessions(coachId).catch(() => []),
-          fetchCoachAvailability(coachId).catch(() => []),
           fetchCoachReviews(coachId).catch(() => []),
           fetchCoachWorkoutPlans(coachId).catch(() => []),
           fetchCoachEarnings().catch(() => null),
@@ -277,7 +243,6 @@ export default function CoachDashboard() {
           )
         );
         setSessions(sess);
-        setAvailability(Array.isArray(avail) ? avail : []);
         setReviews(rev);
         setWorkoutPlans(plans);
         setEarnings(earningsResponse);
@@ -468,7 +433,6 @@ export default function CoachDashboard() {
   const lastName = nameParts.slice(1).join(" ") || "";
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good Morning" : hour < 17 ? "Good Afternoon" : "Good Evening";
-  const availabilitySummary = summarizeAvailability(availability);
 
   /*  loading skeleton  */
   if (loading) {
@@ -545,7 +509,7 @@ export default function CoachDashboard() {
         {/*  CLIENTS & SESSIONS  */}
         <SectionHeader label="CLIENTS & SESSIONS" role={role} />
 
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 items-stretch">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-stretch">
           {/* My Clients */}
           {(() => {
             const activeClients = clients.filter((c) => c.status === "active");
@@ -613,73 +577,6 @@ export default function CoachDashboard() {
               </DashboardCard>
             );
           })()}
-
-          
-
-          {/* Availability */}
-          <DashboardCard
-            role={role}
-            title="My Availability"
-            action={{ label: "Edit", onClick: () => setOverlay("availability") }}
-          >
-            {availabilityMessage ? (
-              <div className="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">
-                {availabilityMessage}
-              </div>
-            ) : null}
-            {availabilityError ? (
-              <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
-                {availabilityError}
-              </div>
-            ) : null}
-            <div className="mb-3 grid grid-cols-3 gap-2">
-              <div className="rounded-lg bg-[#0A1020] px-3 py-2 text-center">
-                <p className="text-lg font-bold text-orange-300">{availabilitySummary.openSlots}</p>
-                <p className="text-[10px] uppercase tracking-widest text-gray-500">Open Slots</p>
-              </div>
-              <div className="rounded-lg bg-[#0A1020] px-3 py-2 text-center">
-                <p className="text-lg font-bold text-white">{availabilitySummary.activeDays}</p>
-                <p className="text-[10px] uppercase tracking-widest text-gray-500">Active Days</p>
-              </div>
-              <div className="rounded-lg bg-[#0A1020] px-3 py-2 text-center">
-                <p className="text-lg font-bold text-blue-300">{availabilitySummary.bookedSlots}</p>
-                <p className="text-[10px] uppercase tracking-widest text-gray-500">Booked</p>
-              </div>
-            </div>
-            <p className="mb-3 text-xs text-gray-500">
-              Saved as one-hour windows through your coach information route.
-            </p>
-            <div className="grid grid-cols-8 gap-1 mb-2">
-              <div />
-              {WEEKDAYS.map((d) => (
-                <div key={d} className="text-[10px] text-gray-500 text-center font-medium">{d}</div>
-              ))}
-            </div>
-            {availability.length === 0 ? (
-              <p className="text-gray-500 text-sm text-center py-6">No availability set</p>
-            ) : (
-              availability.map(({ time, slots }) => (
-                <div key={time} className="grid grid-cols-8 gap-1 mb-1">
-                  <div className="text-[10px] text-gray-500 flex items-center">{time}</div>
-                  {slots.map((status, i) => (
-                    <SlotCell key={i} status={status} time={time} />
-                  ))}
-                </div>
-              ))
-            )}
-            <div className="flex gap-4 mt-3">
-              {[
-                { color: "bg-orange-400", label: "Available" },
-                { color: "bg-blue-400", label: "Booked" },
-                { color: "bg-gray-600", label: "Unavailable" },
-              ].map(({ color, label }) => (
-                <span key={label} className="flex items-center gap-1.5 text-[10px] text-gray-400">
-                  <span className={`w-2 h-2 rounded-full ${color}`} />
-                  {label}
-                </span>
-              ))}
-            </div>
-          </DashboardCard>
 
           <DashboardCard
             role={role}
@@ -762,7 +659,7 @@ export default function CoachDashboard() {
             title="Workout Plans"
             footer={
               <button
-                onClick={() => navigate("/plan?role=coach")}
+                onClick={() => navigate("/plan-my-week?role=coach")}
                 className="w-full py-2 rounded-xl border border-orange-500/30 text-orange-400 text-xs font-semibold hover:bg-orange-500/10 transition-colors"
               >
                 Prescribe Plans
@@ -810,27 +707,6 @@ export default function CoachDashboard() {
 
       <Overlay open={overlay === "sessions"} onClose={closeOverlay} title="Upcoming Sessions" wide>
         <SessionsDetail sessions={sessions} />
-      </Overlay>
-
-      <Overlay open={overlay === "availability"} onClose={closeOverlay} title="My Availability" wide>
-        <AvailabilityDetail
-          slots={availability}
-          weekdays={WEEKDAYS}
-          role="coach"
-          showDefaultRows={false}
-          onSave={async (updatedSlots) => {
-            setAvailabilityError("");
-            setAvailabilityMessage("");
-            try {
-              const refreshedAvailability = await saveCoachAvailability(coachId, updatedSlots);
-              setAvailability(Array.isArray(refreshedAvailability) ? refreshedAvailability : []);
-              setAvailabilityMessage("Availability saved to your coach profile.");
-            } catch (error) {
-              setAvailabilityError(error.message || "Unable to save coach availability.");
-              throw error;
-            }
-          }}
-        />
       </Overlay>
 
       <Overlay open={overlay === "reviews"} onClose={closeOverlay} title="Client Reviews">

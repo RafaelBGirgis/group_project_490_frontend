@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import AvailabilityDetail from "../components/overlays/availability_detail";
+import AvailabilityCalendar from "../components/availability/AvailabilityCalendar";
 import {
   buildClientInformationPayload,
   buildInitialSurveyPayload,
@@ -9,11 +9,6 @@ import {
   updateAccount,
   updateClientInformation,
 } from "../api/client";
-import {
-  convertGridToTrainingAvailability,
-  convertTrainingAvailabilityToGrid,
-  EMPTY_TRAINING_AVAILABILITY,
-} from "../utils/availabilityModel";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
 
@@ -23,7 +18,16 @@ const PRIMARY_GOALS = [
   "Muscle Gain",
 ];
 
-const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const normalizeGenderToOnboardingValue = (value) => {
+  const normalized = String(value || "").trim().toLowerCase().replaceAll("_", "-");
+  if (normalized === "male") return "male";
+  if (normalized === "female") return "female";
+  if (normalized === "non-binary" || normalized === "nonbinary") return "non-binary";
+  if (normalized === "prefer-not-to-say" || normalized === "prefer not to say") {
+    return "prefer_not_to_say";
+  }
+  return "";
+};
 
 const buildAccountUpdatePayload = ({ age, email, bio, gender }) => {
   const payload = {};
@@ -45,32 +49,6 @@ const buildAccountUpdatePayload = ({ age, email, bio, gender }) => {
   return payload;
 };
 
-const normalizeTrainingAvailability = (value, fallbackDays = []) => {
-  const base = {
-    Mon: [],
-    Tue: [],
-    Wed: [],
-    Thu: [],
-    Fri: [],
-    Sat: [],
-    Sun: [],
-  };
-
-  if (!value || typeof value !== "object") {
-    fallbackDays.forEach((day) => {
-      if (base[day]) base[day] = [];
-    });
-    return base;
-  }
-
-  Object.keys(base).forEach((day) => {
-    const slots = value[day];
-    base[day] = Array.isArray(slots) ? slots : [];
-  });
-
-  return base;
-};
-
 function OnboardingPage() {
   const navigate = useNavigate();
 
@@ -82,11 +60,10 @@ function OnboardingPage() {
     email: "",
     primaryGoal: "",
     weight: "",
-    height: "",
     age: "",
     gender: "",
     bio: "",
-    trainingAvailability: { ...EMPTY_TRAINING_AVAILABILITY },
+    availabilityWindows: [],
     cardNumber: "",
     cardCvv: "",
     cardExpiry: "",
@@ -96,13 +73,12 @@ function OnboardingPage() {
     return Boolean(
       form.primaryGoal &&
         form.weight &&
-        form.height &&
         form.age &&
         form.gender &&
         form.cardNumber &&
         form.cardCvv &&
         form.cardExpiry &&
-        Object.values(form.trainingAvailability).some((slots) => slots.length > 0)
+        form.availabilityWindows.length > 0
     );
   }, [form]);
 
@@ -130,14 +106,10 @@ function OnboardingPage() {
 
         setForm((prev) => ({
           ...prev,
-          trainingAvailability: normalizeTrainingAvailability(
-            prev.trainingAvailability,
-            []
-          ),
           name: account.name || prev.name,
           email,
           age: account.age != null ? String(account.age) : prev.age,
-          gender: account.gender || prev.gender,
+          gender: normalizeGenderToOnboardingValue(account.gender) || prev.gender,
           bio: account.bio || prev.bio,
         }));
       } catch (err) {
@@ -176,15 +148,12 @@ function OnboardingPage() {
         await updateAccount(accountPayload);
       }
 
-      let response = null;
-
       try {
-        response = await createClientInitialSurvey(surveyPayload);
+        await createClientInitialSurvey(surveyPayload);
       } catch (initialSurveyError) {
         const clientInformationPayload = buildClientInformationPayload({
           primaryGoal: form.primaryGoal,
           weight: form.weight,
-          trainingAvailability: form.trainingAvailability,
           paymentMethod: {
             ccnum: form.cardNumber,
             cv: form.cardCvv,
@@ -196,7 +165,7 @@ function OnboardingPage() {
           throw initialSurveyError;
         }
 
-        response = await updateClientInformation(clientInformationPayload);
+        await updateClientInformation(clientInformationPayload);
       }
 
       navigate("/client");
@@ -284,13 +253,6 @@ function OnboardingPage() {
                   placeholder="Weight (e.g. 165 lbs)"
                   required
                 />
-                <input
-                  value={form.height}
-                  onChange={(e) => setForm((prev) => ({ ...prev, height: e.target.value }))}
-                  className="rounded-lg border border-white/10 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
-                  placeholder="Height (e.g. 5 ft 10 in)"
-                  required
-                />
                 <select
                   value={form.gender}
                   onChange={(e) => setForm((prev) => ({ ...prev, gender: e.target.value }))}
@@ -317,17 +279,32 @@ function OnboardingPage() {
               <h2 className="text-sm font-bold uppercase tracking-widest text-slate-400">
                 Training Availability
               </h2>
-              <p className="text-xs text-slate-500">Set your available training time slots</p>
-              <AvailabilityDetail
-                slots={convertTrainingAvailabilityToGrid(form.trainingAvailability)}
-                weekdays={WEEKDAYS}
-                onSave={(updatedSlots) => {
+              <p className="text-xs text-slate-500">Add training windows by date and time. Toggle "Repeat weekly" to roll a slot forward.</p>
+              <AvailabilityCalendar
+                availabilities={form.availabilityWindows.map((w, i) => ({
+                  id: `pending-${i}`,
+                  start_dt: w.start_dt,
+                  end_dt: w.end_dt,
+                  repeats_weekly: w.repeats_weekly,
+                  recurrence_end_dt: w.recurrence_end_dt,
+                }))}
+                busySlots={[]}
+                role="client"
+                mode="edit"
+                onCreate={async (payload) => {
                   setForm((prev) => ({
                     ...prev,
-                    trainingAvailability: convertGridToTrainingAvailability(updatedSlots),
+                    availabilityWindows: [...prev.availabilityWindows, payload],
                   }));
                 }}
-                role="client"
+                onDelete={async (id) => {
+                  if (typeof id !== "string" || !id.startsWith("pending-")) return;
+                  const idx = Number(id.slice("pending-".length));
+                  setForm((prev) => ({
+                    ...prev,
+                    availabilityWindows: prev.availabilityWindows.filter((_, i) => i !== idx),
+                  }));
+                }}
               />
             </section>
 

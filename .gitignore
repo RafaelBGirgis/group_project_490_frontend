@@ -27,3 +27,6 @@ dist-ssr
 *.sln
 *.sw?
 .claude/
+
+# UI Testing
+selenium/_pycache_

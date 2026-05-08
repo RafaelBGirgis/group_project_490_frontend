@@ -32,7 +32,7 @@ export default function ReportsDetail({ reports, onDismiss, onEscalate }) {
         <div className="space-y-3">
           {reports.map((report) => (
             <div
-              key={report.id}
+              key={`${report.kind}-${report.id}`}
               className="rounded-xl border border-white/5 bg-[rgba(255,255,255,0.02)] p-4 space-y-3"
             >
               <div className="flex items-start justify-between">
@@ -52,16 +52,17 @@ export default function ReportsDetail({ reports, onDismiss, onEscalate }) {
 
               <div className="flex gap-2">
                 <button
-                  onClick={() => onDismiss?.(report.id)}
+                  onClick={() => onDismiss?.(report.kind, report.id)}
                   className="flex-1 text-xs border border-gray-700 text-gray-300 hover:bg-gray-800 rounded-lg py-2 transition-colors"
                 >
                   Dismiss
                 </button>
                 <button
-                  onClick={() => onEscalate?.(report.id)}
-                  className="flex-1 text-xs bg-red-900/40 text-red-400 border border-red-500/30 hover:bg-red-900/60 rounded-lg py-2 transition-colors"
+                  onClick={() => onEscalate?.(report.kind, report.id)}
+                  className="flex-1 text-xs bg-orange-900/40 text-orange-400 border border-orange-500/30 hover:bg-orange-900/60 rounded-lg py-2 transition-colors"
+                  title="Suspend the reported account"
                 >
-                  Take Action
+                  Suspend {report.kind === "client_on_coach" ? "Coach" : "Client"}
                 </button>
               </div>
             </div>

@@ -29,4 +29,4 @@ dist-ssr
 .claude/
 
 # UI Testing
-selenium/_pycache_
+selenium/__pycache__

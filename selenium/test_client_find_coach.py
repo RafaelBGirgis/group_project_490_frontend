@@ -307,54 +307,31 @@ def test_client_find_coach():
             WII_FIT_TRAINER_PASSWORD,
         )
 
-        manage_requests_button = coach_wait.until(
-            EC.element_to_be_clickable(
-                (By.XPATH, "//h3[contains(normalize-space(), 'Client Requests')]/following::button[contains(normalize-space(), 'Manage')][1]")
-            )
-        )
-        ActionChains(coach_driver).move_to_element(manage_requests_button).perform()
-        time.sleep(1)
-        manage_requests_button.click()
-
-        client_request_card = coach_wait.until(
+        client_requests_card = coach_wait.until(
             EC.presence_of_element_located(
                 (
                     By.XPATH,
-                    "//div[contains(@class, 'rounded-2xl')][.//p[normalize-space()='John Doe'] and .//button[normalize-space()='Accept']]",
+                    "//h3[contains(normalize-space(), 'Client Requests')]/ancestor::div[contains(@class, 'rounded-2xl')][1]",
                 )
             )
         )
-        ActionChains(coach_driver).move_to_element(client_request_card).perform()
-        time.sleep(1)
 
         accept_button = coach_wait.until(
             EC.element_to_be_clickable(
                 (
                     By.XPATH,
-                    "//div[contains(@class, 'rounded-2xl')][.//p[normalize-space()='John Doe'] and .//button[normalize-space()='Accept']]"
-                    "//button[normalize-space()='Accept']",
+                    "//h3[contains(normalize-space(), 'Client Requests')]/ancestor::div[contains(@class, 'rounded-2xl')][1]"
+                    "//button[@title='Accept']",
                 )
             )
         )
+        client_request_card = accept_button.find_element(
+            By.XPATH,
+            "./ancestor::div[contains(@class, 'flex') and .//button[@title='Accept']][1]",
+        )
+        ActionChains(coach_driver).move_to_element(client_request_card).perform()
+        time.sleep(1)
         accept_button.click()
-
-        print("Coach accepted the client request successfully")
-
-        close_requests_button = coach_wait.until(
-            EC.element_to_be_clickable(
-                (
-                    By.XPATH,
-                    "//h2[normalize-space()='Client Requests']/following-sibling::button[1]",
-                )
-            )
-        )
-        close_requests_button.click()
-
-        coach_wait.until(
-            EC.invisibility_of_element_located(
-                (By.XPATH, "//h2[normalize-space()='Client Requests']")
-            )
-        )
 
         my_clients_card = coach_wait.until(
             EC.presence_of_element_located(
@@ -364,6 +341,12 @@ def test_client_find_coach():
                 )
             )
         )
+        coach_wait.until(
+            EC.staleness_of(client_request_card)
+        )
+
+        print("Coach accepted the client request successfully")
+
         ActionChains(coach_driver).move_to_element(my_clients_card).perform()
         time.sleep(2)
 
@@ -393,15 +376,46 @@ def test_client_find_coach():
             f"Expected to still be on '/client', got: {client_driver.current_url}"
         )
 
+        # Fire coach
         fire_coach_button = client_wait.until(
             EC.element_to_be_clickable(
-                (By.XPATH, "//button[normalize-space()='Fire Coach']")
+                (By.XPATH, "//button[normalize-space()='End Relationship']")
             )
         )
         fire_coach_button.click()        
         relationship_alert = client_wait.until(EC.alert_is_present())
         time.sleep(1)
         relationship_alert.accept()
+        time.sleep(2)
+
+        # Navigate to profile
+        open_profile_button = client_wait.until(
+            EC.element_to_be_clickable(
+                (By.CSS_SELECTOR, "button[title='Open Profile']")
+            )
+        )
+        open_profile_button.click()
+
+        client_wait.until(EC.url_contains("/profile"))
+        wait_for_page_to_fully_load(client_driver)
+
+        # Delete test account
+        delete_account_button = client_wait.until(
+            EC.element_to_be_clickable(
+                (By.XPATH, "//button[normalize-space()='Delete Account']")
+            )
+        )
+        delete_account_button.click()
+
+        delete_account_alert = client_wait.until(EC.alert_is_present())
+        delete_account_alert.accept()
+
+        account_deleted_alert = client_wait.until(EC.alert_is_present())
+        account_deleted_alert.accept()
+
+        client_wait.until(EC.url_contains("/login"))
+        wait_for_page_to_fully_load(client_driver)
+
         time.sleep(2)
 
         printSuccess(f"No errors: {client_driver.current_url}")

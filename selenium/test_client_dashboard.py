@@ -15,13 +15,7 @@ from selenium.webdriver.edge.options import Options
 
 from helpers import createDriver, printSuccess
 from helpers import login
-from helpers import scroll
-
-
-FRONTEND_URL = "http://localhost:5173"
-
-TEST_EMAIL = "rat8@njit.edu"
-TEST_PASSWORD = "password"   
+from helpers import scroll 
 
 def test_client_dashboard():
     """Navigate from login page to client dashboard"""

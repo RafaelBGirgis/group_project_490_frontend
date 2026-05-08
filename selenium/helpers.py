@@ -1,3 +1,4 @@
+import tkinter
 import time
 
 from selenium import webdriver
@@ -6,16 +7,50 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support.ui import Select
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.edge.options import Options
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import (
+    NoSuchElementException,
+    StaleElementReferenceException,
+    TimeoutException,
+)
 
 
 FRONTEND_URL = "http://localhost:5173"
-CLIENT_EMAIL = "rat8@njit.edu"
-CLIENT_PASSWORD = "password"
+ADMIN_EMAIL = "rat8@njit.edu"
+CLIENT_EMAIL = "janedoe@gmail.com"
 DEFAULT_PFP_URL = "https://upload.wikimedia.org/wikipedia/en/e/e9/New_Jersey_IT_seal.svg"
 DEFAULT_SIGNUP_BIO = "This is a Selenium test account."
 DEFAULT_ONBOARDING_BIO = "This is a Selenium onboarding test account, onboarding bio."
 
+def createDriver():
+    # Get screen size
+    root = tkinter.Tk()
+    root.withdraw()
+
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+
+    edge_options = Options()
+    edge_options.add_experimental_option("excludeSwitches", ["enable-logging"])
+    edge_options.add_argument("--log-level=3")
+    driver = webdriver.Edge(options=edge_options)
+
+    # Modify these to change size/location of browser
+    browser_width = screen_width // 2
+    browser_height = screen_height
+
+    x = 0
+    y = 0
+
+    driver.set_window_rect(
+        x=x,
+        y=y,
+        width=browser_width,
+        height=browser_height
+    )
+
+    driver.get("https://example.com")
+
+    return driver
 
 def wait_for_page_to_fully_load(driver, timeout=10):
     wait = WebDriverWait(driver, timeout)
@@ -33,7 +68,19 @@ def wait_for_page_to_fully_load(driver, timeout=10):
         )
     )
 
-    time.sleep(2)
+    try:
+        profile_text = driver.find_element(
+            By.XPATH, "//button[@title='Open Profile']"
+        ).text.strip()
+
+        if profile_text == "?":
+            wait.until(
+                lambda d: d.find_element(
+                    By.XPATH, "//button[@title='Open Profile']"
+                ).text.strip() not in ("", "?")
+            )
+    except (NoSuchElementException, StaleElementReferenceException):
+        pass
 
 def scroll(driver, direction, pause=0.3, step=350):
     """
@@ -70,14 +117,6 @@ def scroll(driver, direction, pause=0.3, step=350):
 
     else:
         raise ValueError("direction must be either 'down' or 'up'")
-
-def createDriver():
-    edge_options = Options()
-    edge_options.add_experimental_option("excludeSwitches", ["enable-logging"])
-    edge_options.add_argument("--log-level=3")
-    driver = webdriver.Edge(options=edge_options)
-
-    return driver
 
 def login(driver):
     """Logs into an existing user, execution stops after reaching '/client'"""
@@ -125,7 +164,7 @@ def login(driver):
         email_input.send_keys(CLIENT_EMAIL)
 
         password_input.clear()
-        password_input.send_keys(CLIENT_PASSWORD)
+        password_input.send_keys("password")
 
         # Submit login form
         print("Submitting login form...")
@@ -298,22 +337,15 @@ def signup(
 
         # --------------------------------------AVAILABILITY--------------------------------------
         try:
-            # Click "+ Add Time Slot"
-            add_slot_button = wait.until(
-                EC.element_to_be_clickable((By.XPATH, "//button[contains(normalize-space(), 'Add Time Slot')]"))
-            )
-            add_slot_button.click()
-
-            # Click "9AM" in the time picker
-            time_slot = wait.until(
-                EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='9AM']"))
-            )
-            time_slot.click()
-
-            # Click the Monday cell in the 9AM row
-            wait.until(EC.presence_of_element_located((By.XPATH, "//div[normalize-space()='9AM']")))
+            # The onboarding availability editor now renders the full weekly grid by default.
+            # Toggle the Monday cell in the 9AM row, then save the schedule.
             time_cell = wait.until(
-                EC.element_to_be_clickable((By.XPATH, "//div[normalize-space()='9AM']/following-sibling::div[1]"))
+                EC.element_to_be_clickable(
+                    (
+                        By.XPATH,
+                        "//div[normalize-space()='9AM']/parent::div/div[2]",
+                    )
+                )
             )
             time_cell.click()
 

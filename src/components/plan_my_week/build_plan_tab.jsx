@@ -9,12 +9,14 @@ import {
   createWorkoutPlan,
   prescribePlanToClient,
 } from "../../api/plan_my_week";
+import { ROLE_THEMES } from "../theme";
 import WorkoutGrid from "./workout_grid";
 import ActivityConfig from "./activity_config";
 import ScheduleBlocks from "./schedule_blocks";
 
 export default function BuildPlanTab() {
   const { state, dispatch } = usePlanMyWeek();
+  const theme = ROLE_THEMES[state.role] ?? ROLE_THEMES.client;
   const [workoutGridOpen, setWorkoutGridOpen] = useState(false);
   const [pickedWorkout, setPickedWorkout] = useState(null);
   const [editingDraftId, setEditingDraftId] = useState(null);
@@ -110,14 +112,14 @@ export default function BuildPlanTab() {
             <h2 className="text-sm uppercase tracking-widest text-gray-500">Activities</h2>
             <button
               onClick={() => setWorkoutGridOpen(true)}
-              className="px-3 py-1.5 rounded-lg bg-orange-500 text-white text-xs font-semibold hover:bg-orange-400"
+              className={`px-3 py-1.5 rounded-lg text-white text-xs font-semibold ${theme.btnPrimary}`}
             >
               + Add activity
             </button>
           </div>
           {state.draftPlan.activities.length === 0 ? (
             <p className="text-sm text-gray-500 py-6 text-center">
-              No activities yet. Click <span className="text-orange-300">+ Add activity</span> to pick a workout.
+              No activities yet. Click <span className={theme.tagText}>+ Add activity</span> to pick a workout.
             </p>
           ) : (
             <ul className="space-y-2">
@@ -164,7 +166,7 @@ export default function BuildPlanTab() {
           )}
           {state.draftPlan.activities.length > 0 ? (
             <div className="text-xs text-gray-500 text-right">
-              Total estimated calories: <span className="text-orange-300 font-semibold">{totalCalories.toFixed(2)}</span>
+              Total estimated calories: <span className={`${theme.tagText} font-semibold`}>{totalCalories.toFixed(2)}</span>
             </div>
           ) : null}
         </div>
@@ -184,7 +186,7 @@ export default function BuildPlanTab() {
         <button
           disabled={saving}
           onClick={handleSave}
-          className="w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:bg-blue-900/40 text-sm font-semibold"
+          className={`w-full py-2.5 rounded-lg disabled:opacity-50 text-sm font-semibold ${theme.btnPrimary}`}
         >
           {saving
             ? "Saving…"

@@ -328,10 +328,11 @@ function OnboardingPage() {
                   required
                 />
                 <input
-                  type="date"
+                  type="month"
                   value={form.cardExpiry}
                   onChange={(e) => setForm((prev) => ({ ...prev, cardExpiry: e.target.value }))}
                   className="rounded-lg border border-white/10 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
+                  placeholder="YYYY-MM"
                   required
                 />
               </div>

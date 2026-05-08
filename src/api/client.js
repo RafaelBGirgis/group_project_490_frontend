@@ -424,7 +424,7 @@ export function buildInitialSurveyPayload(form) {
     payment_information: {
       ccnum: String(form.cardNumber || "").replace(/\s+/g, ""),
       cv: String(form.cardCvv || ""),
-      exp_date: form.cardExpiry || "",
+      exp_date: normalizePaymentExpiryDate(form.cardExpiry),
     },
     availabilities,
     initial_health_metric: {
@@ -675,9 +675,18 @@ function buildPaymentInformation(paymentMethod) {
   if (!paymentMethod) return null;
   const ccnum = String(paymentMethod.ccnum || "").replace(/\s+/g, "");
   const cv = String(paymentMethod.cv || "");
-  const exp_date = paymentMethod.exp_date || "";
+  const exp_date = normalizePaymentExpiryDate(paymentMethod.exp_date);
   if (!ccnum || !cv || !exp_date) return null;
   return { ccnum, cv, exp_date };
+}
+
+function normalizePaymentExpiryDate(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "";
+  if (/^\d{4}-\d{2}$/.test(normalized)) {
+    return `${normalized}-01`;
+  }
+  return normalized;
 }
 
 function adaptWorkoutPlansForDay(plans, weekdayIdx) {

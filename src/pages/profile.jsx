@@ -723,6 +723,252 @@ function ProfilePage({ role = "client" }) {
     }
   };
 
+  const subscriptionPanel = !isCoach ? (
+    <Panel id="subscription" title="Subscription & Payment" accent={accent} {...panelProps("subscription")}>
+      {(() => {
+        const subs = unifiedData?.client_details?.subscriptions || [];
+        const invoices = unifiedData?.client_details?.invoices || [];
+        const cycles = unifiedData?.client_details?.billing_cycles || [];
+        const activeSub = subs.find((s) => s.status === "active");
+        const activeCoachId =
+          activeSub?.coach_id ?? activeSub?.coachId ?? activeSub?.coach?.id ?? activeSub?.cid;
+        const cycle = cycles[0];
+        const outstandingInvoiceForCycle = cycle
+          ? invoices.find((inv) => inv.coach_name === cycle.coach_name && inv.outstanding_balance > 0)
+          : null;
+        const amountDue = outstandingInvoiceForCycle?.outstanding_balance ?? 0;
+        const nextInvoiceAmount = activeSub?.price_cents != null
+          ? activeSub.price_cents / 100
+          : (cycle?.price_cents != null ? cycle.price_cents / 100 : null);
+
+        return (
+          <div className="space-y-4">
+            {cycle ? (
+              amountDue > 0 ? (
+                <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3">
+                  <p className="text-xs font-semibold text-red-300">
+                    ${amountDue.toFixed(2)} is due by {new Date(cycle.end_date).toLocaleDateString()} by 12am
+                  </p>
+                </div>
+              ) : nextInvoiceAmount === 0 ? (
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
+                  <p className="text-xs font-semibold text-emerald-300">
+                    You're on a free plan, enjoy!
+                  </p>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
+                  <p className="text-xs font-semibold text-emerald-300">
+                    Balance paid.{nextInvoiceAmount != null
+                      ? ` $${nextInvoiceAmount.toFixed(2)} will be invoiced for the next billing period starting ${new Date(cycle.end_date).toLocaleDateString()}.`
+                      : ""}
+                  </p>
+                </div>
+              )
+            ) : null}
+
+            {activeSub ? (
+              <div className="rounded-xl border border-white/6 bg-[#101827] px-4 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-white">{activeSub.coach_name}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {activeSub.payment_interval} &middot; ${(activeSub.price_cents / 100).toFixed(2)}
+                    </p>
+                    <p className="text-[10px] text-slate-500 mt-0.5">Since {activeSub.start_date}</p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-green-500/15 text-green-400">
+                      Active
+                    </span>
+                    {(() => {
+                      const outstandingInvoice = invoices.find(
+                        (inv) => inv.coach_name === activeSub.coach_name && inv.outstanding_balance > 0
+                      );
+                      return outstandingInvoice ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedInvoiceForPayment(outstandingInvoice);
+                            setPaymentAmount("");
+                            setShowPaymentDialog(true);
+                          }}
+                          className="rounded-lg bg-blue-600 hover:bg-blue-700 px-3 py-2 text-xs font-medium text-white transition"
+                        >
+                          Pay
+                        </button>
+                      ) : null;
+                    })()}
+                    {activeCoachId && (
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/coaches/${activeCoachId}`)}
+                        className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs font-medium text-slate-300 transition hover:bg-[rgba(255,255,255,0.06)] hover:text-white"
+                      >
+                        View Coach
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-500">No active subscription.</p>
+            )}
+
+            {invoices.length > 0 && (
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-2">Invoices</p>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {invoices.map((inv) => (
+                    <div key={inv.invoice_id} className="flex items-center justify-between rounded-lg bg-[#101827] px-3 py-2">
+                      <div>
+                        <p className="text-xs text-white">{inv.coach_name}</p>
+                        <p className="text-[10px] text-slate-500">{inv.entry_date} - {inv.end_date}</p>
+                      </div>
+                      <p className="text-xs font-semibold text-white">${inv.amount.toFixed(2)}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="pt-2 border-t border-white/5">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-2">Payment Method</p>
+              {paymentMethod && (
+                <div
+                  key={paymentMethod.id}
+                  className="rounded-xl border border-white/6 bg-[#101827] px-4 py-3"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">
+                        Card
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-semibold text-white">
+                          {paymentMethod.type.charAt(0).toUpperCase() + paymentMethod.type.slice(1)} Card
+                        </h3>
+                        <p className="text-xs text-slate-400">
+                          **** **** **** {paymentMethod.lastFour}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          Expires {paymentMethod.expiryMonth}/{paymentMethod.expiryYear}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (profileInputsDisabled) return;
+                        if (hasActivePaidSub) {
+                          setSectionResult(
+                            "subscription",
+                            "error",
+                            "You have an active paid subscription — replace your payment method instead of removing it."
+                          );
+                          return;
+                        }
+                        setPaymentMethod(null);
+                        setShowPaymentForm(false);
+                      }}
+                      disabled={profileInputsDisabled || hasActivePaidSub}
+                      title={hasActivePaidSub ? "Cannot remove payment method while on a paid subscription" : undefined}
+                      className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {!paymentMethod && !showPaymentForm ? (
+                <button
+                  onClick={() => !profileInputsDisabled && setShowPaymentForm(true)}
+                  disabled={profileInputsDisabled}
+                  className="w-full rounded-xl border border-dashed px-4 py-3 text-sm font-semibold transition"
+                  style={{ borderColor: `${accent}55`, color: accent, backgroundColor: `${accent}08` }}
+                >
+                  + Add Payment Method
+                </button>
+              ) : !paymentMethod && showPaymentForm ? (
+                <div className="rounded-xl border border-white/6 bg-[#101827] p-4 space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                        Card Type
+                      </label>
+                      <select
+                        value={newPaymentMethod.type}
+                        onChange={(e) => !profileInputsDisabled && setNewPaymentMethod((prev) => ({ ...prev, type: e.target.value }))}
+                        disabled={profileInputsDisabled}
+                        className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <option value="">Select card type</option>
+                        <option value="credit">Credit Card</option>
+                        <option value="debit">Debit Card</option>
+                      </select>
+                    </div>
+                    <Input
+                      label="Card Number"
+                      value={newPaymentMethod.ccnum}
+                      onChange={(v) => !profileInputsDisabled && setNewPaymentMethod((prev) => ({ ...prev, ccnum: v }))}
+                      placeholder="4111111111111111"
+                      disabled={profileInputsDisabled}
+                    />
+                    <Input
+                      label="CVV"
+                      value={newPaymentMethod.cv}
+                      onChange={(v) => !profileInputsDisabled && setNewPaymentMethod((prev) => ({ ...prev, cv: v }))}
+                      placeholder="123"
+                      disabled={profileInputsDisabled}
+                    />
+                    <Input
+                      label="Expiry Date"
+                      value={newPaymentMethod.exp_date}
+                      onChange={(v) => !profileInputsDisabled && setNewPaymentMethod((prev) => ({ ...prev, exp_date: v }))}
+                      placeholder="2027-12-01"
+                      disabled={profileInputsDisabled}
+                    />
+                  </div>
+
+                  <div className="flex justify-end gap-2">
+                    <button
+                      onClick={() => !profileInputsDisabled && setShowPaymentForm(false)}
+                      disabled={profileInputsDisabled}
+                      className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs font-medium text-slate-300"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={addPaymentMethod}
+                      disabled={profileInputsDisabled}
+                      className="rounded-lg px-3 py-2 text-xs font-semibold text-white"
+                      style={{ backgroundColor: accent }}
+                    >
+                      Add Payment Method
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            {subs.length === 0 && invoices.length === 0 && cycles.length === 0 && !paymentMethod && (
+              <p className="text-xs text-slate-500">No subscription or billing history yet. Hire a coach to get started.</p>
+            )}
+          </div>
+        );
+      })()}
+      <SectionSaveBar
+        id="subscription"
+        accent={accent}
+        status={sectionStatus.subscription}
+        onSave={savePayment}
+        saving={savingSection === "subscription"}
+        disabled={profileInputsDisabled}
+        label="Save payment method"
+      />
+    </Panel>
+  ) : null;
+
   const toggleSpecialization = (item) => {
     if (profileInputsDisabled) return;
     setSpecializations((prev) =>
@@ -986,262 +1232,12 @@ function ProfilePage({ role = "client" }) {
                 { id: "certifications", label: "Certifications" },
                 { id: "experience", label: "Experience" },
               ] : [
-                { id: "subscription", label: "Subscription & Payment" },
                 { id: "personal", label: "Personal" },
                 { id: "telemetry", label: "Progress" },
                 { id: "availability", label: "Availability" },
+                { id: "subscription", label: "Subscription & Payment" },
               ]}
             />
-
-            {!isCoach && (
-              <Panel id="subscription" title="Subscription & Payment" accent={accent} {...panelProps("subscription")}>
-                {(() => {
-                  const subs = unifiedData?.client_details?.subscriptions || [];
-                  const invoices = unifiedData?.client_details?.invoices || [];
-                  const cycles = unifiedData?.client_details?.billing_cycles || [];
-                  const activeSub = subs.find((s) => s.status === "active");
-                  const activeCoachId =
-                    activeSub?.coach_id ?? activeSub?.coachId ?? activeSub?.coach?.id ?? activeSub?.cid;
-                  const cycle = cycles[0];
-                  const outstandingInvoiceForCycle = cycle
-                    ? invoices.find(inv => inv.coach_name === cycle.coach_name && inv.outstanding_balance > 0)
-                    : null;
-                  const amountDue = outstandingInvoiceForCycle?.outstanding_balance ?? 0;
-                  const nextInvoiceAmount = activeSub?.price_cents != null
-                    ? activeSub.price_cents / 100
-                    : (cycle?.price_cents != null ? cycle.price_cents / 100 : null);
-
-                  return (
-                    <div className="space-y-4">
-                      {/* Next billing notice */}
-                      {cycle ? (
-                        amountDue > 0 ? (
-                          <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3">
-                            <p className="text-xs font-semibold text-red-300">
-                              ${amountDue.toFixed(2)} is due by {new Date(cycle.end_date).toLocaleDateString()} by 12am
-                            </p>
-                          </div>
-                        ) : nextInvoiceAmount === 0 ? (
-                          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
-                            <p className="text-xs font-semibold text-emerald-300">
-                              You're on a free plan, enjoy!
-                            </p>
-                          </div>
-                        ) : (
-                          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
-                            <p className="text-xs font-semibold text-emerald-300">
-                              Balance paid.{nextInvoiceAmount != null
-                                ? ` $${nextInvoiceAmount.toFixed(2)} will be invoiced for the next billing period starting ${new Date(cycle.end_date).toLocaleDateString()}.`
-                                : ""}
-                            </p>
-                          </div>
-                        )
-                      ) : null}
-
-                      {/* Active subscription */}
-                      {activeSub ? (
-                        <div className="rounded-xl border border-white/6 bg-[#101827] px-4 py-3">
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="flex-1">
-                              <p className="text-sm font-semibold text-white">{activeSub.coach_name}</p>
-                              <p className="text-xs text-slate-400 mt-0.5">
-                                {activeSub.payment_interval} &middot; ${(activeSub.price_cents / 100).toFixed(2)}
-                              </p>
-                              <p className="text-[10px] text-slate-500 mt-0.5">Since {activeSub.start_date}</p>
-                            </div>
-                            <div className="flex shrink-0 items-center gap-2">
-                              <span className="rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-green-500/15 text-green-400">
-                                Active
-                              </span>
-                              {(() => {
-                                const outstandingInvoice = invoices.find(
-                                  inv => inv.coach_name === activeSub.coach_name && inv.outstanding_balance > 0
-                                );
-                                return outstandingInvoice ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setSelectedInvoiceForPayment(outstandingInvoice);
-                                      setPaymentAmount("");
-                                      setShowPaymentDialog(true);
-                                    }}
-                                    className="rounded-lg bg-blue-600 hover:bg-blue-700 px-3 py-2 text-xs font-medium text-white transition"
-                                  >
-                                    Pay
-                                  </button>
-                                ) : null;
-                              })()}
-                              {activeCoachId && (
-                                <button
-                                  type="button"
-                                  onClick={() => navigate(`/coaches/${activeCoachId}`)}
-                                  className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs font-medium text-slate-300 transition hover:bg-[rgba(255,255,255,0.06)] hover:text-white"
-                                >
-                                  View Coach
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      ) : (
-                        <p className="text-xs text-slate-500">No active subscription.</p>
-                      )}
-
-                      {/* Invoices */}
-                      {invoices.length > 0 && (
-                        <div>
-                          <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-2">Invoices</p>
-                          <div className="space-y-2 max-h-48 overflow-y-auto">
-                            {invoices.map((inv) => (
-                              <div key={inv.invoice_id} className="flex items-center justify-between rounded-lg bg-[#101827] px-3 py-2">
-                                <div>
-                                  <p className="text-xs text-white">{inv.coach_name}</p>
-                                  <p className="text-[10px] text-slate-500">{inv.entry_date} - {inv.end_date}</p>
-                                </div>
-                                <p className="text-xs font-semibold text-white">${inv.amount.toFixed(2)}</p>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Payment method */}
-                      <div className="pt-2 border-t border-white/5">
-                        <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-2">Payment Method</p>
-                        {paymentMethod && (
-                          <div
-                            key={paymentMethod.id}
-                            className="rounded-xl border border-white/6 bg-[#101827] px-4 py-3"
-                          >
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="flex items-center gap-3">
-                                <div className="text-xs font-semibold uppercase tracking-widest text-slate-500">
-                                  Card
-                                </div>
-                                <div>
-                                  <h3 className="text-sm font-semibold text-white">
-                                    {paymentMethod.type.charAt(0).toUpperCase() + paymentMethod.type.slice(1)} Card
-                                  </h3>
-                                  <p className="text-xs text-slate-400">
-                                    **** **** **** {paymentMethod.lastFour}
-                                  </p>
-                                  <p className="text-xs text-slate-500">
-                                    Expires {paymentMethod.expiryMonth}/{paymentMethod.expiryYear}
-                                  </p>
-                                </div>
-                              </div>
-                              <button
-                                onClick={() => {
-                                  if (profileInputsDisabled) return;
-                                  if (hasActivePaidSub) {
-                                    setSectionResult(
-                                      "subscription",
-                                      "error",
-                                      "You have an active paid subscription — replace your payment method instead of removing it."
-                                    );
-                                    return;
-                                  }
-                                  setPaymentMethod(null);
-                                  setShowPaymentForm(false);
-                                }}
-                                disabled={profileInputsDisabled || hasActivePaidSub}
-                                title={hasActivePaidSub ? "Cannot remove payment method while on a paid subscription" : undefined}
-                                className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                Remove
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        {!paymentMethod && !showPaymentForm ? (
-                          <button
-                            onClick={() => !profileInputsDisabled && setShowPaymentForm(true)}
-                            disabled={profileInputsDisabled}
-                            className="w-full rounded-xl border border-dashed px-4 py-3 text-sm font-semibold transition"
-                            style={{ borderColor: `${accent}55`, color: accent, backgroundColor: `${accent}08` }}
-                          >
-                            + Add Payment Method
-                          </button>
-                        ) : !paymentMethod && showPaymentForm ? (
-                          <div className="rounded-xl border border-white/6 bg-[#101827] p-4 space-y-3">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              <div>
-                                <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
-                                  Card Type
-                                </label>
-                                <select
-                                  value={newPaymentMethod.type}
-                                  onChange={(e) => !profileInputsDisabled && setNewPaymentMethod((prev) => ({ ...prev, type: e.target.value }))}
-                                  disabled={profileInputsDisabled}
-                                  className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                  <option value="">Select card type</option>
-                                  <option value="credit">Credit Card</option>
-                                  <option value="debit">Debit Card</option>
-                                </select>
-                              </div>
-                              <Input
-                                label="Card Number"
-                                value={newPaymentMethod.ccnum}
-                                onChange={(v) => !profileInputsDisabled && setNewPaymentMethod((prev) => ({ ...prev, ccnum: v }))}
-                                placeholder="4111111111111111"
-                                disabled={profileInputsDisabled}
-                              />
-                              <Input
-                                label="CVV"
-                                value={newPaymentMethod.cv}
-                                onChange={(v) => !profileInputsDisabled && setNewPaymentMethod((prev) => ({ ...prev, cv: v }))}
-                                placeholder="123"
-                                disabled={profileInputsDisabled}
-                              />
-                              <Input
-                                label="Expiry Date"
-                                value={newPaymentMethod.exp_date}
-                                onChange={(v) => !profileInputsDisabled && setNewPaymentMethod((prev) => ({ ...prev, exp_date: v }))}
-                                placeholder="2027-12-01"
-                                disabled={profileInputsDisabled}
-                              />
-                            </div>
-
-                            <div className="flex justify-end gap-2">
-                              <button
-                                onClick={() => !profileInputsDisabled && setShowPaymentForm(false)}
-                                disabled={profileInputsDisabled}
-                                className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs font-medium text-slate-300"
-                              >
-                                Cancel
-                              </button>
-                              <button
-                                onClick={addPaymentMethod}
-                                disabled={profileInputsDisabled}
-                                className="rounded-lg px-3 py-2 text-xs font-semibold text-white"
-                                style={{ backgroundColor: accent }}
-                              >
-                                Add Payment Method
-                              </button>
-                            </div>
-                          </div>
-                        ) : null}
-                      </div>
-
-                      {subs.length === 0 && invoices.length === 0 && cycles.length === 0 && !paymentMethod && (
-                        <p className="text-xs text-slate-500">No subscription or billing history yet. Hire a coach to get started.</p>
-                      )}
-                    </div>
-                  );
-                })()}
-                <SectionSaveBar
-                  id="subscription"
-                  accent={accent}
-                  status={sectionStatus.subscription}
-                  onSave={savePayment}
-                  saving={savingSection === "subscription"}
-                  disabled={profileInputsDisabled}
-                  label="Save payment method"
-                />
-              </Panel>
-            )}
 
             <Panel id="personal" title={isCoach ? "Personal Information" : "Edit Profile Information"} accent={accent} {...panelProps("personal")}>
               {isCoach ? (
@@ -1456,6 +1452,7 @@ function ProfilePage({ role = "client" }) {
               />
             </Panel>
 
+            {subscriptionPanel}
 
             {isCoach && (
               <>
@@ -1952,5 +1949,3 @@ function EditableMetadataSection({
 }
 
 export default ProfilePage;
-
-

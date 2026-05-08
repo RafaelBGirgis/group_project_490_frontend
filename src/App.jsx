@@ -10,8 +10,7 @@ import ProfilePage from "./pages/profile";
 import CoachRequestFormPage from "./pages/coach_request_form";
 import OnboardingPage from "./pages/onboarding";
 import ChatPage from "./pages/chat";
-import CoachChatPage from "./pages/coach_chat";
-import ClientChatPage from "./pages/client_chat";
+import MessagesPage from "./pages/messages";
 import FindCoachPage from "./pages/find_coach";
 import PlanMyWeekPage from "./pages/plan_my_week";
 import CoachPublicProfilePage from "./pages/coach_public_profile";
@@ -34,10 +33,12 @@ function App() {
           <Route path="/coach" element={<CoachDashboard />} />
           <Route path="/admin" element={<AdminDashboard />} />
           <Route path="/chat" element={<ChatPage />} />
-          <Route path="/client/messages" element={<ClientChatPage />} />
-          <Route path="/coach/messages" element={<CoachChatPage />} />
-          <Route path="/client-chat" element={<Navigate to="/client/messages" replace />} />
-          <Route path="/coach-chat" element={<Navigate to="/coach/messages" replace />} />
+          <Route path="/messages" element={<MessagesPage />} />
+          {/* Legacy role-split URLs redirect to the unified page, preserving query params (e.g. ?account=). */}
+          <Route path="/client/messages" element={<MessagesPage />} />
+          <Route path="/coach/messages" element={<MessagesPage />} />
+          <Route path="/client-chat" element={<Navigate to="/messages" replace />} />
+          <Route path="/coach-chat" element={<Navigate to="/messages" replace />} />
           <Route path="/find-coach" element={<FindCoachPage />} />
           <Route path="/coaches/:coachId" element={<CoachPublicProfilePage />} />
           <Route path="/plan-my-week" element={<PlanMyWeekPage />} />

@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Navbar,
   StatCard,
@@ -133,6 +133,9 @@ export default function ClientDash() {
   const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(false);
   const [pendingCoachRequest, setPendingCoachRequest] = useState(null);
   const [approvedCoachRequest, setApprovedCoachRequest] = useState(null);
+  // Tracks whether there's something worth polling for (pending request or active coach).
+  // Using a ref so the interval callback reads fresh state without needing to restart.
+  const shouldPollRef = useRef(false);
   const [requestStatusError, setRequestStatusError] = useState("");
   const [requestStatusMessage, setRequestStatusMessage] = useState("");
   const [openingCoachChat, setOpeningCoachChat] = useState(false);
@@ -141,7 +144,7 @@ export default function ClientDash() {
   const refreshCoachRelationshipState = useCallback(async () => {
     const [requestList, myCoach] = await Promise.all([
       fetchMyCoachRequests().catch(() => null),
-      fetchMyCoach().catch(() => null),
+      fetchMyCoach(),
     ]);
     const { activeCoach, byCoachId } = resolveActiveCoachRelationship(myCoach, requestList);
     const terminatedCoachIds = new Set(getRememberedTerminatedCoachIds());
@@ -180,6 +183,8 @@ export default function ClientDash() {
     if (!nextCoach) {
       setCoachRating(null);
     }
+    // Only keep polling if there's something that could change.
+    shouldPollRef.current = !!(nextCoach || nextPending);
     return { nextPending, nextApproved, myCoach: nextCoach };
   }, []);
 
@@ -218,7 +223,7 @@ export default function ClientDash() {
     if (!clientId) return undefined;
 
     const refreshRequests = () => {
-      void refreshCoachRelationshipState();
+      if (shouldPollRef.current) void refreshCoachRelationshipState();
     };
 
     window.addEventListener("focus", refreshRequests);

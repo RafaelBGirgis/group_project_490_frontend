@@ -1054,9 +1054,13 @@ function ProfilePage({ role = "client" }) {
         userName={initials}
         userAvatar={profilePicturePreviewUrl}
         switchOptions={[
-          ...(!isCoach && canSwitchToCoach ? [{ label: "Coach", to: "/coach" }] : []),
-          ...(isCoach ? [{ label: "Client", to: "/profile" }] : []),
+          // Profile-vs-profile swaps. Labels reflect destination so users know
+          // they're flipping between profile pages, not jumping to a dashboard.
+          ...(!isCoach && canSwitchToCoach ? [{ label: "Coach Profile", to: "/coach-profile" }] : []),
+          ...(isCoach ? [{ label: "Client Profile", to: "/profile" }] : []),
           ...(canSwitchToAdmin ? [{ label: "Admin", to: "/admin" }] : []),
+          // Always-visible "Dashboard" jumps back to the current role's dash.
+          { label: "Dashboard", to: isCoach ? "/coach" : "/client" },
         ]}
       />
 

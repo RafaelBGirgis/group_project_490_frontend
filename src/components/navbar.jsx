@@ -9,6 +9,7 @@ import {
   readAllNotifications,
   readNotification,
 } from "../api/notifications";
+import { fetchUnreadMessageCount } from "../api/chat";
 
 const NOTIFICATION_ICONS = {
   payment: CreditCard,
@@ -142,6 +143,7 @@ export function Navbar({
   onSwitch,
   canSwitchToCoach = false,
   switchOptions = null,
+  hideProfile = false,
 }) {
   const theme = ROLE_THEMES[role];
   const navigate = useNavigate();
@@ -150,6 +152,7 @@ export function Navbar({
   const [notifs, setNotifs] = useState(() => (externalNotifs ?? []).map(normalizeNotification));
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [notificationsError, setNotificationsError] = useState("");
+  const [unreadMessages, setUnreadMessages] = useState(0);
 
   useEffect(() => {
     if (externalNotifs) {
@@ -209,7 +212,21 @@ export function Navbar({
     return () => window.removeEventListener("keydown", handler);
   }, [showNotifs]);
 
-  const unreadCount = notifs.filter((notification) => !notification.read).length;
+  // Poll unread message count independently of the notification bell.
+  useEffect(() => {
+    let isMounted = true;
+    const load = async () => {
+      const count = await fetchUnreadMessageCount();
+      if (isMounted) setUnreadMessages(count);
+    };
+    load();
+    const intervalId = window.setInterval(load, 5000);
+    return () => { isMounted = false; window.clearInterval(intervalId); };
+  }, []);
+
+  // Exclude chat_message from the bell — those surface on the messages button instead.
+  const bellNotifs = notifs.filter((n) => n.category !== "chat_message");
+  const unreadCount = bellNotifs.filter((n) => !n.read).length;
 
   const markAllRead = async () => {
     if (unreadCount === 0) return;
@@ -324,7 +341,7 @@ export function Navbar({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                   d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
               </svg>
-              {`Switch to ${resolvedSwitchOptions[0].label}`}
+              {`${resolvedSwitchOptions[0].label} Dash`}
             </button>
           )}
 
@@ -332,7 +349,7 @@ export function Navbar({
             <div className="flex items-center gap-2">
               {resolvedSwitchOptions.map((option) => (
                 <button
-                  key={option.to}
+                  key={`${option.to}:${option.label}`}
                   onClick={() => navigate(option.to)}
                   className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${theme.btnOutline}`}
                 >
@@ -340,24 +357,30 @@ export function Navbar({
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                       d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
                   </svg>
-                  {`Switch to ${option.label}`}
+                  {option.label}
                 </button>
               ))}
             </div>
           )}
 
-          {role !== "admin" && (
-            <button
-              onClick={onMessage || (() => navigate(`/${role}/messages`))}
-              className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] text-slate-400 transition-colors hover:bg-[rgba(255,255,255,0.06)] hover:text-white"
-              aria-label="Messages"
-            >
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-              </svg>
-            </button>
-          )}
+          <button
+            onClick={onMessage || (() => navigate("/messages"))}
+            className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] text-slate-400 transition-colors hover:bg-[rgba(255,255,255,0.06)] hover:text-white"
+            aria-label={unreadMessages > 0 ? `Messages, ${unreadMessages} unread` : "Messages"}
+          >
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            </svg>
+            {unreadMessages > 0 && (
+              <span
+                className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white"
+                style={{ backgroundColor: theme.accent, boxShadow: `0 0 10px ${theme.accent}60` }}
+              >
+                {unreadMessages > 99 ? "99+" : unreadMessages}
+              </span>
+            )}
+          </button>
 
           <div className="relative" ref={dropdownRef}>
             <button
@@ -398,10 +421,10 @@ export function Navbar({
                     <p className="py-8 text-center text-sm text-gray-500">Loading notifications...</p>
                   ) : notificationsError ? (
                     <p className="py-8 text-center text-sm text-rose-300">{notificationsError}</p>
-                  ) : notifs.length === 0 ? (
+                  ) : bellNotifs.length === 0 ? (
                     <p className="py-8 text-center text-sm text-gray-500">No notifications</p>
                   ) : (
-                    notifs.map((notification) => {
+                    bellNotifs.map((notification) => {
                       const Icon = NOTIFICATION_ICONS[notification.category] || Bell;
                       return (
                         <button
@@ -446,22 +469,24 @@ export function Navbar({
             )}
           </div>
 
-          <button
-            onClick={handleProfileClick}
-            className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full text-sm font-bold text-white transition-transform hover:scale-105"
-            style={{ backgroundColor: theme.accent, boxShadow: `0 0 20px ${theme.accent}50` }}
-            title="Open Profile"
-          >
-            {userAvatar ? (
-              <img
-                src={userAvatar}
-                alt="Open Profile"
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              userName
-            )}
-          </button>
+          {!hideProfile && (
+            <button
+              onClick={handleProfileClick}
+              className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full text-sm font-bold text-white transition-transform hover:scale-105"
+              style={{ backgroundColor: theme.accent, boxShadow: `0 0 20px ${theme.accent}50` }}
+              title="Open Profile"
+            >
+              {userAvatar ? (
+                <img
+                  src={userAvatar}
+                  alt="Open Profile"
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                userName
+              )}
+            </button>
+          )}
         </div>
       </div>
     </nav>

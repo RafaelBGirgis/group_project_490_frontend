@@ -478,7 +478,7 @@ export default function AdminDash() {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#080D19]">
-        <Navbar role={role} userName="?" />
+        <Navbar role={role} userName="?" hideProfile />
         <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
           <div className="h-5 w-40 bg-white/5 rounded animate-pulse" />
           <div className="grid grid-cols-4 gap-4">
@@ -503,6 +503,7 @@ export default function AdminDash() {
       <Navbar
         role={role}
         userName={initials}
+        hideProfile
         switchOptions={[
           { label: "Client", to: "/client" },
           { label: "Coach", to: "/coach" },

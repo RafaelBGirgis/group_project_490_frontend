@@ -31,6 +31,7 @@ import {
 } from "../api/coach";
 import AvailabilityCalendar from "../components/availability/AvailabilityCalendar";
 import { getCoachAccessState } from "../utils/roleAccess";
+import { resolveRoleState } from "../utils/sessionAuth";
 import { clearAuth } from "../api/auth";
 
 const PRIMARY_GOALS = [
@@ -221,6 +222,8 @@ function ProfilePage({ role = "client" }) {
   });
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
+  const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(false);
+  const [hasCoachStatus, setHasCoachStatus] = useState(false);
   const [progressPicPage, setProgressPicPage] = useState(0);
   const PICS_PER_PAGE = 6;
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
@@ -348,13 +351,16 @@ function ProfilePage({ role = "client" }) {
 
       try {
         // Single unified API call for all profile data
-        const [meData, unified] = await Promise.all([
+        const [meData, unified, roleState] = await Promise.all([
           fetchMe(),
           fetchUnifiedProfile().catch(() => null),
+          resolveRoleState().catch(() => null),
         ]);
         const data = meData;
         const coachAccess = await getCoachAccessState(data);
+        setCanSwitchToAdmin(Boolean(roleState?.hasAdminRole));
         setCanSwitchToCoach(coachAccess.canAccessCoach);
+        setHasCoachStatus(coachAccess.hasCoachRecord);
         if (isCoach && !coachAccess.canAccessCoach) {
           navigate("/profile");
           return;
@@ -801,8 +807,11 @@ function ProfilePage({ role = "client" }) {
         role={role}
         userName={initials}
         userAvatar={profilePicturePreviewUrl}
-        canSwitchToCoach={!isCoach && canSwitchToCoach}
-        onSwitch={() => navigate(role === "coach" ? "/profile" : "/coach-profile")}
+        switchOptions={[
+          ...(!isCoach && canSwitchToCoach ? [{ label: "Coach", to: "/coach" }] : []),
+          ...(isCoach ? [{ label: "Client", to: "/profile" }] : []),
+          ...(canSwitchToAdmin ? [{ label: "Admin", to: "/admin" }] : []),
+        ]}
       />
 
       <div className="max-w-7xl mx-auto px-4 md:px-6 py-6 space-y-6">
@@ -899,14 +908,14 @@ function ProfilePage({ role = "client" }) {
                     onClick={handleDeleteCoachAccount}
                     className="w-full rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-300"
                   >
-                    Delete Coach Account
+                    Delete Account
                   </button>
 
                   <button
                     onClick={handleDeactivateCoachAccount}
                     className="w-full rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm font-semibold text-orange-300"
                   >
-                    Deactivate Coach Account
+                    Deactivate Account
                   </button>
 
                   <button
@@ -924,13 +933,15 @@ function ProfilePage({ role = "client" }) {
               <>
                 <SidebarCard title="Account Actions">
                   <div className="space-y-3">
-                    <button
-                      onClick={() => navigate("/coach-request")}
-                      className="w-full rounded-xl px-4 py-3 text-sm font-semibold text-white"
-                      style={{ backgroundColor: "#F59E0B" }}
-                    >
-                      Become Coach
-                    </button>
+                    {!hasCoachStatus && (
+                      <button
+                        onClick={() => navigate("/coach-request")}
+                        className="w-full rounded-xl px-4 py-3 text-sm font-semibold text-white"
+                        style={{ backgroundColor: "#F59E0B" }}
+                      >
+                        Become Coach
+                      </button>
+                    )}
 
                     <button
                       onClick={handleDeactivateAccount}
@@ -1937,7 +1948,5 @@ function EditableMetadataSection({
 }
 
 export default ProfilePage;
-
-
 
 

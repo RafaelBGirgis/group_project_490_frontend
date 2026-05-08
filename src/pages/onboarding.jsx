@@ -18,6 +18,17 @@ const PRIMARY_GOALS = [
   "Muscle Gain",
 ];
 
+const normalizeGenderToOnboardingValue = (value) => {
+  const normalized = String(value || "").trim().toLowerCase().replaceAll("_", "-");
+  if (normalized === "male") return "male";
+  if (normalized === "female") return "female";
+  if (normalized === "non-binary" || normalized === "nonbinary") return "non-binary";
+  if (normalized === "prefer-not-to-say" || normalized === "prefer not to say") {
+    return "prefer_not_to_say";
+  }
+  return "";
+};
+
 const buildAccountUpdatePayload = ({ age, email, bio, gender }) => {
   const payload = {};
 
@@ -49,7 +60,6 @@ function OnboardingPage() {
     email: "",
     primaryGoal: "",
     weight: "",
-    height: "",
     age: "",
     gender: "",
     bio: "",
@@ -63,7 +73,6 @@ function OnboardingPage() {
     return Boolean(
       form.primaryGoal &&
         form.weight &&
-        form.height &&
         form.age &&
         form.gender &&
         form.cardNumber &&
@@ -100,7 +109,7 @@ function OnboardingPage() {
           name: account.name || prev.name,
           email,
           age: account.age != null ? String(account.age) : prev.age,
-          gender: account.gender || prev.gender,
+          gender: normalizeGenderToOnboardingValue(account.gender) || prev.gender,
           bio: account.bio || prev.bio,
         }));
       } catch (err) {
@@ -242,13 +251,6 @@ function OnboardingPage() {
                   onChange={(e) => setForm((prev) => ({ ...prev, weight: e.target.value }))}
                   className="rounded-lg border border-white/10 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
                   placeholder="Weight (e.g. 165 lbs)"
-                  required
-                />
-                <input
-                  value={form.height}
-                  onChange={(e) => setForm((prev) => ({ ...prev, height: e.target.value }))}
-                  className="rounded-lg border border-white/10 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
-                  placeholder="Height (e.g. 5 ft 10 in)"
                   required
                 />
                 <select

@@ -36,8 +36,6 @@ function CoachRequestFormPage() {
 
   const [form, setForm] = useState({
     name: "",
-    requestedDate: new Date().toISOString().slice(0, 10),
-    yearsExperience: "",
     reason: "",
     specializations: [],
     certifications: [],
@@ -136,14 +134,6 @@ function CoachRequestFormPage() {
 
     if (!form.name.trim()) {
       setError("Name is required.");
-      return;
-    }
-    if (!form.requestedDate) {
-      setError("Date is required.");
-      return;
-    }
-    if (!form.yearsExperience || Number(form.yearsExperience) < 0) {
-      setError("Please enter valid years of experience.");
       return;
     }
     if (form.specializations.length === 0) {
@@ -300,39 +290,6 @@ function CoachRequestFormPage() {
                 readOnly
                 className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-slate-300 outline-none"
               />
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div>
-                <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
-                  Date
-                </label>
-                <input
-                  type="date"
-                  value={form.requestedDate}
-                  onChange={(e) => setForm((prev) => ({ ...prev, requestedDate: e.target.value }))}
-                  className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
-                  disabled={isViewMode}
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
-                  Total Years Of Experience
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={form.yearsExperience}
-                  onChange={(e) => setForm((prev) => ({ ...prev, yearsExperience: e.target.value }))}
-                  placeholder="e.g. 3"
-                  className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600"
-                  disabled={isViewMode}
-                  required
-                />
-              </div>
             </div>
 
             <div>

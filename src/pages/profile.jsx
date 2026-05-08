@@ -618,7 +618,7 @@ function ProfilePage({ role = "client" }) {
 
   const handleLogout = () => {
     clearAuth();
-    window.location.href = "/login";
+    navigate("/login");
   };
 
   const handlePayInvoice = async () => {

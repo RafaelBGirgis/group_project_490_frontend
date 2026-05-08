@@ -17,7 +17,7 @@ import {
   SkeletonAvailability,
 } from "../components";
 import WorkoutDetail from "../components/overlays/workout_detail";
-import AvailabilityDetail from "../components/overlays/availability_detail";
+import AvailabilityCalendar from "../components/availability/AvailabilityCalendar";
 import MealDetail from "../components/overlays/meal_detail";
 import DailySurvey from "../components/overlays/daily_survey";
 import StepsLog from "../components/overlays/steps_log";
@@ -29,14 +29,16 @@ import {
   logWorkoutActivity,
   fetchMyCoach,
   fetchCoachRating,
-  fetchAvailability,
-  saveAvailability,
   fetchMealsToday,
   fetchAvailableOnDemandMeals,
   fetchMyCoachRequests,
   logMeal,
   deleteCoachRequest,
   terminateRelationship,
+  listClientAvailability,
+  createClientAvailability,
+  deleteClientAvailability,
+  listClientBusySlots,
 } from "../api/client";
 import {
   fetchAllDailySurveys,
@@ -58,34 +60,30 @@ const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const TODAY_IDX = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
 const pct = (val, max) => Math.min(100, Math.round((val / max) * 100));
 
-function summarizeAvailability(rows) {
+function summarizeAvailabilityWindows(rows, busySlots) {
   const safeRows = Array.isArray(rows) ? rows : [];
-  const openSlots = safeRows.reduce(
-    (sum, row) => sum + (Array.isArray(row.slots) ? row.slots.filter((slot) => slot === "available").length : 0),
-    0
-  );
-  const bookedSlots = safeRows.reduce(
-    (sum, row) => sum + (Array.isArray(row.slots) ? row.slots.filter((slot) => slot === "booked").length : 0),
-    0
-  );
-  const activeDays = WEEKDAYS.reduce(
-    (sum, _, dayIdx) => sum + (safeRows.some((row) => row.slots?.[dayIdx] === "available") ? 1 : 0),
-    0
-  );
-  return { openSlots, bookedSlots, activeDays };
+  const safeBusy = Array.isArray(busySlots) ? busySlots : [];
+  const totalHours = safeRows.reduce((sum, row) => {
+    const occurrences = Array.isArray(row?.occurrences) ? row.occurrences : [];
+    return sum + occurrences.reduce((acc, occ) => {
+      const a = new Date(occ.start_dt).getTime();
+      const b = new Date(occ.end_dt).getTime();
+      return acc + Math.max(0, (b - a) / 3_600_000);
+    }, 0);
+  }, 0);
+  const days = new Set();
+  safeRows.forEach((row) => {
+    (row?.occurrences || []).forEach((occ) => {
+      const d = new Date(occ.start_dt);
+      days.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+    });
+  });
+  return {
+    openHours: Math.round(totalHours),
+    bookedSlots: safeBusy.length,
+    activeDays: days.size,
+  };
 }
-
-const SlotCell = ({ status, time }) => {
-  const base =
-    "rounded py-1 text-center text-[10px] font-medium transition-colors";
-  if (status === "booked")
-    return (
-      <div className={`${base} bg-orange-900/60 text-orange-300`}>{time}</div>
-    );
-  if (status === "available")
-    return <div className={`${base} bg-blue-900/60 text-blue-300`}>{time}</div>;
-  return <div className={`${base} bg-[#0A1020] text-gray-700`}>—</div>;
-};
 
 export default function ClientDash() {
   const navigate = useNavigate();
@@ -152,7 +150,9 @@ export default function ClientDash() {
   const [workoutActivities, setWorkoutActivities] = useState([]);
   const [coach, setCoach]               = useState(null);
   const [coachRating, setCoachRating]   = useState(null);
-  const [availabilitySlots, setAvailabilitySlots] = useState([]);
+  const [availabilityRows, setAvailabilityRows] = useState([]);
+  const [availabilityBusy, setAvailabilityBusy] = useState([]);
+  const [availabilityRange, setAvailabilityRange] = useState({ from: null, to: null });
   const [prescribedMeals, setPrescribedMeals] = useState([]);
   const [availableMeals, setAvailableMeals] = useState([]);
   const [loading, setLoading]           = useState(true);
@@ -254,7 +254,7 @@ export default function ClientDash() {
 
     (async () => {
       try {
-        const [telemetry, availability, meals, mealOptions] =
+        const [telemetry, meals, mealOptions] =
           await Promise.all([
             fetchTelemetryToday(clientId).catch(() => ({
               step_count: 0,
@@ -262,7 +262,6 @@ export default function ClientDash() {
               calories_consumed: 0,
               calories_goal: 2000,
             })),
-            fetchAvailability(clientId).catch(() => []),
             fetchMealsToday(clientId).catch(() => []),
             fetchAvailableOnDemandMeals(clientId).catch(() => []),
           ]);
@@ -272,7 +271,6 @@ export default function ClientDash() {
         setCaloriesConsumed(telemetry.calories_consumed);
         if (telemetry.calories_goal) setCaloriesGoal(telemetry.calories_goal);
 
-        setAvailabilitySlots(Array.isArray(availability) ? availability : []);
         setPrescribedMeals(meals);
         setAvailableMeals(mealOptions);
       } catch {
@@ -283,6 +281,23 @@ export default function ClientDash() {
     clientId,
     refreshSurveyStatus,
   ]);
+
+  const refreshAvailability = useCallback(async (fromIso, toIso) => {
+    if (!fromIso || !toIso) return;
+    const [rows, busy] = await Promise.all([
+      listClientAvailability(fromIso, toIso).catch(() => []),
+      listClientBusySlots(fromIso, toIso).catch(() => []),
+    ]);
+    setAvailabilityRows(Array.isArray(rows) ? rows : []);
+    setAvailabilityBusy(Array.isArray(busy) ? busy : []);
+  }, []);
+
+  useEffect(() => {
+    if (!clientId) return;
+    if (availabilityRange.from && availabilityRange.to) {
+      refreshAvailability(availabilityRange.from, availabilityRange.to);
+    }
+  }, [clientId, availabilityRange, refreshAvailability]);
 
   /*  load coach rating when coach is known  */
   useEffect(() => {
@@ -393,7 +408,7 @@ export default function ClientDash() {
   const stepsPercent   = pct(stepCount ?? 0, 10000);
   const calPercent     = pct(caloriesConsumed ?? 0, caloriesGoal);
   const workoutPercent = pct(completedCount, totalCount || 1);
-  const availabilitySummary = summarizeAvailability(availabilitySlots);
+  const availabilitySummary = summarizeAvailabilityWindows(availabilityRows, availabilityBusy);
   const hasActiveCoach = Boolean(coach?.coach_id && relationshipId);
 
   /*  greeting based on time of day  */
@@ -733,8 +748,8 @@ export default function ClientDash() {
             ) : null}
             <div className="mb-3 grid grid-cols-3 gap-2">
               <div className="rounded-lg bg-[#0A1020] px-3 py-2 text-center">
-                <p className="text-lg font-bold text-blue-300">{availabilitySummary.openSlots}</p>
-                <p className="text-[10px] uppercase tracking-widest text-gray-500">Open Slots</p>
+                <p className="text-lg font-bold text-blue-300">{availabilitySummary.openHours}</p>
+                <p className="text-[10px] uppercase tracking-widest text-gray-500">Open Hours</p>
               </div>
               <div className="rounded-lg bg-[#0A1020] px-3 py-2 text-center">
                 <p className="text-lg font-bold text-white">{availabilitySummary.activeDays}</p>
@@ -745,53 +760,13 @@ export default function ClientDash() {
                 <p className="text-[10px] uppercase tracking-widest text-gray-500">Booked</p>
               </div>
             </div>
-            <p className="mb-3 text-xs text-gray-500">
-              Saved as one-hour windows through your client availability route.
-            </p>
-            <div className="grid grid-cols-8 gap-1 mb-2">
-              <div />
-              {WEEKDAYS.map((d) => (
-                <div
-                  key={d}
-                  className="text-[10px] text-gray-500 text-center font-medium"
-                >
-                  {d}
-                </div>
-              ))}
-            </div>
-
-            {availabilitySlots.length === 0 ? (
-              <p className="text-gray-500 text-sm text-center py-6">
-                No availability set
-              </p>
-            ) : (
-              availabilitySlots.map(({ time, slots }) => (
-                <div key={time} className="grid grid-cols-8 gap-1 mb-1">
-                  <div className="text-[10px] text-gray-500 flex items-center">
-                    {time}
-                  </div>
-                  {slots.map((status, i) => (
-                    <SlotCell key={i} status={status} time={time} />
-                  ))}
-                </div>
-              ))
-            )}
-
-            <div className="flex gap-4 mt-3">
-              {[
-                { color: "bg-blue-400", label: "Available" },
-                { color: "bg-orange-400", label: "Booked" },
-                { color: "bg-gray-600", label: "Unavailable" },
-              ].map(({ color, label }) => (
-                <span
-                  key={label}
-                  className="flex items-center gap-1.5 text-[10px] text-gray-400"
-                >
-                  <span className={`w-2 h-2 rounded-full ${color}`} />
-                  {label}
-                </span>
-              ))}
-            </div>
+            <AvailabilityCalendar
+              availabilities={availabilityRows}
+              busySlots={availabilityBusy}
+              role="client"
+              mode="view"
+              onRangeChange={(from, to) => setAvailabilityRange({ from, to })}
+            />
           </DashboardCard>
         </div>
 
@@ -864,23 +839,30 @@ export default function ClientDash() {
         />
       </Overlay>
 
-      {/* Coach Profile */}
-      {/* Availability */}
+      {/* Availability editor */}
       <Overlay
         open={overlay === "availability"}
         onClose={closeOverlay}
         title="Your Availability"
         wide
       >
-        <AvailabilityDetail
-          slots={availabilitySlots}
-          weekdays={WEEKDAYS}
+        <AvailabilityCalendar
+          availabilities={availabilityRows}
+          busySlots={availabilityBusy}
           role="client"
-          onSave={async (updatedSlots) => {
+          mode="edit"
+          onRangeChange={(from, to) => setAvailabilityRange({ from, to })}
+          onCreate={async (payload) => {
             setAvailabilityMessage("");
-            const refreshedAvailability = await saveAvailability(clientId, updatedSlots);
-            setAvailabilitySlots(Array.isArray(refreshedAvailability) ? refreshedAvailability : []);
-            setAvailabilityMessage("Availability saved to your client profile.");
+            await createClientAvailability(payload);
+            await refreshAvailability(availabilityRange.from, availabilityRange.to);
+            setAvailabilityMessage("Availability saved.");
+          }}
+          onDelete={async (id) => {
+            setAvailabilityMessage("");
+            await deleteClientAvailability(id);
+            await refreshAvailability(availabilityRange.from, availabilityRange.to);
+            setAvailabilityMessage("Availability removed.");
           }}
         />
       </Overlay>

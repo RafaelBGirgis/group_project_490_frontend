@@ -22,8 +22,9 @@ import {
   fetchCoachInfo,
   fetchCoachRating,
   fetchNextSession,
-  fetchAvailability,
-  saveAvailability,
+  listClientAvailability,
+  createClientAvailability,
+  deleteClientAvailability,
   fetchMealsToday,
   logMeal,
   fetchAvailableCoaches,
@@ -292,117 +293,48 @@ describe("fetchCoachRating", () => {
    AVAILABILITY
    ═══════════════════════════════════════════════════════════════════════ */
 
-describe("fetchAvailability", () => {
-  it("returns empty availability array on fallback", async () => {
-    mockFetchFail();
-    const slots = await fetchAvailability(1);
-    expect(slots).toEqual([]);
-  });
-
-  it("prefers the shared full-profile route because client /me omits availabilities", async () => {
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        headers: { get: () => "application/json" },
-        json: () => Promise.resolve({
-          account: { id: 1, client_id: 1 },
-          roles: ["client"],
-          client_details: {
-            id: 1,
-            availabilities: [
-              { weekday: "monday", start_time: "09:00:00", end_time: "10:00:00" },
-            ],
-          },
-        }),
-        text: () => Promise.resolve(""),
-      });
-
-    const slots = await fetchAvailability(1);
-
-    expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining("/roles/shared/account/me"),
-      expect.objectContaining({
-        credentials: "include",
-        headers: expect.objectContaining({ "Content-Type": "application/json" }),
-      })
-    );
-    expect(slots).toEqual([
-      { time: "9AM", slots: ["available", null, null, null, null, null, null] },
-    ]);
+describe("listClientAvailability", () => {
+  it("queries the date-range availability endpoint", async () => {
+    mockFetchOk([]);
+    await listClientAvailability("2026-05-01T00:00:00Z", "2026-05-08T00:00:00Z");
+    const [url] = global.fetch.mock.calls[0];
+    expect(url).toContain("/roles/client/availability");
+    expect(url).toContain("from_dt=");
+    expect(url).toContain("to_dt=");
   });
 });
 
-describe("saveAvailability", () => {
-  it("patches client information with availability data", async () => {
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        headers: { get: () => "application/json" },
-        json: () => Promise.resolve({ success: true }),
-        text: () => Promise.resolve(JSON.stringify({ success: true })),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        headers: { get: () => "application/json" },
-        json: () => Promise.resolve({
-          client_account: {
-            availabilities: [
-              { weekday: "monday", start_time: "09:00:00", end_time: "10:00:00" },
-              { weekday: "tuesday", start_time: "09:00:00", end_time: "10:00:00" },
-              { weekday: "wednesday", start_time: "09:00:00", end_time: "10:00:00" },
-              { weekday: "thursday", start_time: "09:00:00", end_time: "10:00:00" },
-              { weekday: "friday", start_time: "09:00:00", end_time: "10:00:00" },
-              { weekday: "saturday", start_time: "09:00:00", end_time: "10:00:00" },
-              { weekday: "sunday", start_time: "09:00:00", end_time: "10:00:00" },
-            ],
-          },
-        }),
-        text: () => Promise.resolve(""),
-      });
-    localStorage.setItem("jwt", "tok");
-    const slots = [{ time: "9AM", slots: Array(7).fill("available") }];
-    await saveAvailability(1, slots);
+describe("createClientAvailability", () => {
+  it("posts a datetime window payload", async () => {
+    mockFetchOk({ id: 5 });
+    const payload = {
+      start_dt: "2026-05-04T15:00:00Z",
+      end_dt: "2026-05-04T17:00:00Z",
+      repeats_weekly: false,
+      recurrence_end_dt: null,
+    };
+    await createClientAvailability(payload);
     const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toContain("/roles/client/information");
-    expect(opts.method).toBe("PATCH");
-    expect(JSON.parse(opts.body).availabilities.length).toBeGreaterThan(0);
+    expect(url).toContain("/roles/client/availability");
+    expect(opts.method).toBe("POST");
+    expect(JSON.parse(opts.body)).toEqual(payload);
   });
+});
 
-  it("accepts nested singular availability data from the patch response", async () => {
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        headers: { get: () => "application/json" },
-        json: () => Promise.resolve({
-          client_account: {
-            availability: [
-              { weekday: "monday", start_time: "09:00:00", end_time: "10:00:00" },
-            ],
-          },
-        }),
-        text: () => Promise.resolve(""),
-      });
-
-    const result = await saveAvailability(1, [{ time: "9AM", slots: ["available", null, null, null, null, null, null] }]);
-
-    expect(result).toEqual([
-      { time: "9AM", slots: ["available", null, null, null, null, null, null] },
-    ]);
+describe("deleteClientAvailability", () => {
+  it("deletes by id", async () => {
+    mockFetchOk({ details: "deleted" });
+    await deleteClientAvailability(7);
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toContain("/roles/client/availability/7");
+    expect(opts.method).toBe("DELETE");
   });
 });
 
 describe("buildClientInformationPayload", () => {
-  it("includes an empty availability array when the client clears availability", () => {
-    const payload = buildClientInformationPayload({
-      trainingAvailability: { Mon: [], Tue: [], Wed: [], Thu: [], Fri: [], Sat: [], Sun: [] },
-    });
-
-    expect(payload).toHaveProperty("availabilities");
-    expect(payload.availabilities).toEqual([]);
+  it("no longer carries availability — that's managed by the /availability CRUD routes", () => {
+    const payload = buildClientInformationPayload({});
+    expect(payload).not.toHaveProperty("availabilities");
   });
 });
 
@@ -569,21 +501,27 @@ describe("extractUploadedAssetUrl", () => {
 });
 
 describe("buildInitialSurveyPayload", () => {
-  it("maps onboarding fields to the backend client payload", () => {
+  it("maps onboarding fields to the backend client payload using datetime windows", () => {
     const payload = buildInitialSurveyPayload({
       primaryGoal: "Weight Loss",
       cardNumber: "4111111111111111",
       cardCvv: "123",
       cardExpiry: "2027-12-01",
       weight: "165 lbs",
-      trainingAvailability: { Mon: ["9AM"], Tue: [], Wed: [], Thu: [], Fri: [], Sat: [], Sun: [] },
+      availabilityWindows: [
+        {
+          start_dt: "2026-05-04T13:00:00.000Z",
+          end_dt: "2026-05-04T14:00:00.000Z",
+          repeats_weekly: true,
+          recurrence_end_dt: null,
+        },
+      ],
     });
     expect(payload.fitness_goals.goal_enum).toBe("weight loss");
     expect(payload.payment_information.ccnum).toBe("4111111111111111");
     expect(payload.initial_health_metric.weight).toBe(165);
-    expect(payload.availabilities[0].weekday).toBe("monday");
-    expect(payload.availabilities[0].start_time).toBe("09:00:00");
-    expect(payload.availabilities[0].end_time).toBe("10:00:00");
-    expect("max_time_commitment_seconds" in payload.availabilities[0]).toBe(false);
+    expect(payload.availabilities[0].start_dt).toBe("2026-05-04T13:00:00.000Z");
+    expect(payload.availabilities[0].end_dt).toBe("2026-05-04T14:00:00.000Z");
+    expect(payload.availabilities[0].repeats_weekly).toBe(true);
   });
 });

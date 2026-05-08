@@ -21,41 +21,50 @@ import {
   fetchCoachEarnings,
   fetchMyClients,
   fetchUpcomingSessions,
-  fetchCoachAvailability,
   fetchCoachReviews,
   fetchCoachWorkoutPlans,
-  saveCoachAvailability,
   fetchClientRequests,
   lookupClient,
   acceptClientRequest,
   denyClientRequest,
+  listSelfAvailability,
+  createSelfAvailability,
+  deleteSelfAvailability,
+  listSelfBusySlots,
 } from "../api/coach";
 import { getConversationWithAccount } from "../api/chat";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
 import SessionsDetail from "../components/overlays/sessions_detail";
 import ReviewsDetail from "../components/overlays/reviews_detail";
-import AvailabilityDetail from "../components/overlays/availability_detail";
+import AvailabilityCalendar from "../components/availability/AvailabilityCalendar";
 import ClientProfile from "../components/overlays/client_profile";
 
 const role = "coach";
-const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-function summarizeAvailability(rows) {
+function summarizeAvailabilityWindows(rows, busySlots) {
   const safeRows = Array.isArray(rows) ? rows : [];
-  const openSlots = safeRows.reduce(
-    (sum, row) => sum + (Array.isArray(row.slots) ? row.slots.filter((slot) => slot === "available").length : 0),
-    0
-  );
-  const bookedSlots = safeRows.reduce(
-    (sum, row) => sum + (Array.isArray(row.slots) ? row.slots.filter((slot) => slot === "booked").length : 0),
-    0
-  );
-  const activeDays = WEEKDAYS.reduce(
-    (sum, _, dayIdx) => sum + (safeRows.some((row) => row.slots?.[dayIdx] === "available") ? 1 : 0),
-    0
-  );
-  return { openSlots, bookedSlots, activeDays };
+  const safeBusy = Array.isArray(busySlots) ? busySlots : [];
+  const totalHours = safeRows.reduce((sum, row) => {
+    const occurrences = Array.isArray(row?.occurrences) ? row.occurrences : [];
+    return sum + occurrences.reduce((acc, occ) => {
+      const a = new Date(occ.start_dt).getTime();
+      const b = new Date(occ.end_dt).getTime();
+      return acc + Math.max(0, (b - a) / 3_600_000);
+    }, 0);
+  }, 0);
+  const days = new Set();
+  safeRows.forEach((row) => {
+    (row?.occurrences || []).forEach((occ) => {
+      const d = new Date(occ.start_dt);
+      days.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+    });
+  });
+  return {
+    openHours: Math.round(totalHours),
+    bookedSlots: safeBusy.length,
+    activeDays: days.size,
+  };
 }
 
 function resolveClientName(source, fallbackId) {
@@ -166,15 +175,6 @@ function formatCoachEarnings(value) {
   return amount.toFixed(2);
 }
 
-const SlotCell = ({ status, time }) => {
-  const base = "rounded py-1 text-center text-[10px] font-medium transition-colors";
-  if (status === "booked")
-    return <div className={`${base} bg-blue-900/60 text-blue-300`}>{time}</div>;
-  if (status === "available")
-    return <div className={`${base} bg-orange-900/60 text-orange-300`}>{time}</div>;
-  return <div className={`${base} bg-[#0A1020] text-gray-700`}>—</div>;
-};
-
 export default function CoachDashboard() {
   const navigate = useNavigate();
 
@@ -197,7 +197,9 @@ export default function CoachDashboard() {
   const [earnings, setEarnings] = useState(null);
   const [clients, setClients] = useState([]);
   const [sessions, setSessions] = useState([]);
-  const [availability, setAvailability] = useState([]);
+  const [availabilityRows, setAvailabilityRows] = useState([]);
+  const [availabilityBusy, setAvailabilityBusy] = useState([]);
+  const [availabilityRange, setAvailabilityRange] = useState({ from: null, to: null });
   const [reviews, setReviews] = useState([]);
   const [workoutPlans, setWorkoutPlans] = useState([]);
   const [clientRequests, setClientRequests] = useState([]);
@@ -235,12 +237,11 @@ export default function CoachDashboard() {
     if (!coachId) return;
     (async () => {
       try {
-        const [profile, s, c, sess, avail, rev, plans, earningsResponse] = await Promise.all([
+        const [profile, s, c, sess, rev, plans, earningsResponse] = await Promise.all([
           fetchCoachProfile().catch(() => null),
           fetchCoachStats(coachId).catch(() => null),
           fetchMyClients(coachId).catch(() => []),
           fetchUpcomingSessions(coachId).catch(() => []),
-          fetchCoachAvailability(coachId).catch(() => []),
           fetchCoachReviews(coachId).catch(() => []),
           fetchCoachWorkoutPlans(coachId).catch(() => []),
           fetchCoachEarnings().catch(() => null),
@@ -277,7 +278,6 @@ export default function CoachDashboard() {
           )
         );
         setSessions(sess);
-        setAvailability(Array.isArray(avail) ? avail : []);
         setReviews(rev);
         setWorkoutPlans(plans);
         setEarnings(earningsResponse);
@@ -288,6 +288,23 @@ export default function CoachDashboard() {
       }
     })();
   }, [coachId]);
+
+  const refreshAvailability = useCallback(async (fromIso, toIso) => {
+    if (!fromIso || !toIso) return;
+    const [rows, busy] = await Promise.all([
+      listSelfAvailability(fromIso, toIso).catch(() => []),
+      listSelfBusySlots(fromIso, toIso).catch(() => []),
+    ]);
+    setAvailabilityRows(Array.isArray(rows) ? rows : []);
+    setAvailabilityBusy(Array.isArray(busy) ? busy : []);
+  }, []);
+
+  useEffect(() => {
+    if (!coachId) return;
+    if (availabilityRange.from && availabilityRange.to) {
+      refreshAvailability(availabilityRange.from, availabilityRange.to);
+    }
+  }, [coachId, availabilityRange, refreshAvailability]);
 
   const refreshRelationshipData = useCallback(async () => {
     if (!coachId) return;
@@ -468,7 +485,7 @@ export default function CoachDashboard() {
   const lastName = nameParts.slice(1).join(" ") || "";
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good Morning" : hour < 17 ? "Good Afternoon" : "Good Evening";
-  const availabilitySummary = summarizeAvailability(availability);
+  const availabilitySummary = summarizeAvailabilityWindows(availabilityRows, availabilityBusy);
 
   /*  loading skeleton  */
   if (loading) {
@@ -634,8 +651,8 @@ export default function CoachDashboard() {
             ) : null}
             <div className="mb-3 grid grid-cols-3 gap-2">
               <div className="rounded-lg bg-[#0A1020] px-3 py-2 text-center">
-                <p className="text-lg font-bold text-orange-300">{availabilitySummary.openSlots}</p>
-                <p className="text-[10px] uppercase tracking-widest text-gray-500">Open Slots</p>
+                <p className="text-lg font-bold text-orange-300">{availabilitySummary.openHours}</p>
+                <p className="text-[10px] uppercase tracking-widest text-gray-500">Open Hours</p>
               </div>
               <div className="rounded-lg bg-[#0A1020] px-3 py-2 text-center">
                 <p className="text-lg font-bold text-white">{availabilitySummary.activeDays}</p>
@@ -646,39 +663,13 @@ export default function CoachDashboard() {
                 <p className="text-[10px] uppercase tracking-widest text-gray-500">Booked</p>
               </div>
             </div>
-            <p className="mb-3 text-xs text-gray-500">
-              Saved as one-hour windows through your coach information route.
-            </p>
-            <div className="grid grid-cols-8 gap-1 mb-2">
-              <div />
-              {WEEKDAYS.map((d) => (
-                <div key={d} className="text-[10px] text-gray-500 text-center font-medium">{d}</div>
-              ))}
-            </div>
-            {availability.length === 0 ? (
-              <p className="text-gray-500 text-sm text-center py-6">No availability set</p>
-            ) : (
-              availability.map(({ time, slots }) => (
-                <div key={time} className="grid grid-cols-8 gap-1 mb-1">
-                  <div className="text-[10px] text-gray-500 flex items-center">{time}</div>
-                  {slots.map((status, i) => (
-                    <SlotCell key={i} status={status} time={time} />
-                  ))}
-                </div>
-              ))
-            )}
-            <div className="flex gap-4 mt-3">
-              {[
-                { color: "bg-orange-400", label: "Available" },
-                { color: "bg-blue-400", label: "Booked" },
-                { color: "bg-gray-600", label: "Unavailable" },
-              ].map(({ color, label }) => (
-                <span key={label} className="flex items-center gap-1.5 text-[10px] text-gray-400">
-                  <span className={`w-2 h-2 rounded-full ${color}`} />
-                  {label}
-                </span>
-              ))}
-            </div>
+            <AvailabilityCalendar
+              availabilities={availabilityRows}
+              busySlots={availabilityBusy}
+              role="coach"
+              mode="view"
+              onRangeChange={(from, to) => setAvailabilityRange({ from, to })}
+            />
           </DashboardCard>
 
           <DashboardCard
@@ -813,20 +804,33 @@ export default function CoachDashboard() {
       </Overlay>
 
       <Overlay open={overlay === "availability"} onClose={closeOverlay} title="My Availability" wide>
-        <AvailabilityDetail
-          slots={availability}
-          weekdays={WEEKDAYS}
+        <AvailabilityCalendar
+          availabilities={availabilityRows}
+          busySlots={availabilityBusy}
           role="coach"
-          showDefaultRows={false}
-          onSave={async (updatedSlots) => {
+          mode="edit"
+          onRangeChange={(from, to) => setAvailabilityRange({ from, to })}
+          onCreate={async (payload) => {
             setAvailabilityError("");
             setAvailabilityMessage("");
             try {
-              const refreshedAvailability = await saveCoachAvailability(coachId, updatedSlots);
-              setAvailability(Array.isArray(refreshedAvailability) ? refreshedAvailability : []);
-              setAvailabilityMessage("Availability saved to your coach profile.");
+              await createSelfAvailability(payload);
+              await refreshAvailability(availabilityRange.from, availabilityRange.to);
+              setAvailabilityMessage("Availability saved.");
             } catch (error) {
               setAvailabilityError(error.message || "Unable to save coach availability.");
+              throw error;
+            }
+          }}
+          onDelete={async (id) => {
+            setAvailabilityError("");
+            setAvailabilityMessage("");
+            try {
+              await deleteSelfAvailability(id);
+              await refreshAvailability(availabilityRange.from, availabilityRange.to);
+              setAvailabilityMessage("Availability removed.");
+            } catch (error) {
+              setAvailabilityError(error.message || "Unable to remove availability.");
               throw error;
             }
           }}

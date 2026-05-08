@@ -14,7 +14,8 @@ import {
   requestCoach,
   terminateRelationship,
 } from "../api/client";
-import { fetchCoachAvailability, fetchCoachProfile } from "../api/coach";
+import { fetchCoachAvailabilityWindows, fetchCoachProfile } from "../api/coach";
+import AvailabilityCalendar from "../components/availability/AvailabilityCalendar";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
 
@@ -206,7 +207,8 @@ export default function CoachPublicProfilePage() {
   const [coach, setCoach] = useState(null);
   const [reviews, setReviews] = useState([]);
   const [, setReports] = useState([]);
-  const [availability, setAvailability] = useState([]);
+  const [availabilityRows, setAvailabilityRows] = useState([]);
+  const [availabilityRange, setAvailabilityRange] = useState({ from: null, to: null });
   const [pendingRequests, setPendingRequests] = useState({});
   const [activeCoachRelationshipId, setActiveCoachRelationshipId] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -257,15 +259,13 @@ export default function CoachPublicProfilePage() {
           }
         }
 
-        const [reviewResponse, reportResponse, availabilityResponse] = await Promise.all([
+        const [reviewResponse, reportResponse] = await Promise.all([
           fetchCoachReviews(coachId).catch(() => ({ reviews: [] })),
           fetchCoachReports(coachId).catch(() => ({ reports: [] })),
-          fetchCoachAvailability(coachId).catch(() => []),
         ]);
 
         setReviews(Array.isArray(reviewResponse?.reviews) ? reviewResponse.reviews : []);
         setReports(Array.isArray(reportResponse?.reports) ? reportResponse.reports : []);
-        setAvailability(Array.isArray(availabilityResponse) ? availabilityResponse : []);
       } catch (error) {
         setActionError(error.message || "Unable to load this coach profile.");
       } finally {
@@ -275,6 +275,13 @@ export default function CoachPublicProfilePage() {
 
     loadPage();
   }, [coachId, navigate, previewMode]);
+
+  useEffect(() => {
+    if (!coachId || !availabilityRange.from || !availabilityRange.to) return;
+    fetchCoachAvailabilityWindows(coachId, availabilityRange.from, availabilityRange.to)
+      .then((rows) => setAvailabilityRows(Array.isArray(rows) ? rows : []))
+      .catch(() => setAvailabilityRows([]));
+  }, [coachId, availabilityRange]);
 
   const userInitials = useMemo(() => {
     const name = account?.name || "";
@@ -535,23 +542,13 @@ export default function CoachPublicProfilePage() {
                 </div>
 
                 <div className="mt-4 space-y-3">
-                  {isPending && !activeCoachRelationshipId ? (
+                  {coach?.account_id ? (
                     <button
                       type="button"
-                      onClick={handleCancelRequest}
-                      disabled={requesting}
-                      className="w-full rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-medium text-amber-300 disabled:opacity-60"
+                      onClick={() => navigate(`/client/messages?account=${coach.account_id}`)}
+                      className="w-full rounded-2xl bg-blue-600 px-6 py-5 text-base font-bold text-white hover:bg-blue-700 transition-colors shadow-lg shadow-blue-900/30"
                     >
-                      {requesting ? "Cancelling..." : "Cancel Request"}
-                    </button>
-                  ) : !isApproved && !activeCoachRelationshipId ? (
-                    <button
-                      type="button"
-                      onClick={handleRequestCoach}
-                      disabled={requesting}
-                      className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white disabled:bg-blue-900/40 hover:bg-blue-700 transition-colors"
-                    >
-                      {requesting ? "Sending..." : "Request Coach"}
+                      Message Coach
                     </button>
                   ) : null}
 
@@ -568,7 +565,40 @@ export default function CoachPublicProfilePage() {
                     </button>
                   ) : null}
 
+                  {relationshipId ? (
+                    <button
+                      type="button"
+                      onClick={handleTerminateRelationship}
+                      disabled={terminating}
+                      className="w-full rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+                    >
+                      {terminating ? "Ending..." : "Fire Coach"}
+                    </button>
+                  ) : null}
+
                   <div className="grid gap-3 md:grid-cols-2">
+                    {isPending && !activeCoachRelationshipId ? (
+                      <button
+                        type="button"
+                        onClick={handleCancelRequest}
+                        disabled={requesting}
+                        className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-medium text-amber-300 disabled:opacity-60"
+                      >
+                        {requesting ? "Cancelling..." : "Cancel Request"}
+                      </button>
+                    ) : !isApproved && !activeCoachRelationshipId ? (
+                      <button
+                        type="button"
+                        onClick={handleRequestCoach}
+                        disabled={requesting}
+                        className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white disabled:bg-blue-900/40 hover:bg-blue-700 transition-colors"
+                      >
+                        {requesting ? "Sending..." : "Request Coach"}
+                      </button>
+                    ) : (
+                      <div />
+                    )}
+
                     <button
                       type="button"
                       onClick={() => {
@@ -579,17 +609,6 @@ export default function CoachPublicProfilePage() {
                     >
                       Report Coach
                     </button>
-
-                    {relationshipId ? (
-                      <button
-                        type="button"
-                        onClick={handleTerminateRelationship}
-                        disabled={terminating}
-                        className="rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
-                      >
-                        {terminating ? "Ending..." : "Fire Coach"}
-                      </button>
-                    ) : null}
                   </div>
                 </div>
               </section>
@@ -632,39 +651,13 @@ export default function CoachPublicProfilePage() {
             <section className="rounded-2xl border border-white/8 bg-[#0F1729] p-6">
               <h3 className="text-lg font-bold text-white">Availability</h3>
               <div className="mt-4">
-                {availability.length === 0 ? (
-                  <p className="text-sm text-gray-500">No coach availability has been set yet.</p>
-                ) : (
-                  <>
-                    <div className="grid grid-cols-8 gap-1 mb-2">
-                      <div />
-                      {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => (
-                        <div key={day} className="text-[10px] text-gray-500 text-center font-medium">
-                          {day}
-                        </div>
-                      ))}
-                    </div>
-                    <div className="space-y-1">
-                      {availability.map(({ time, slots }) => (
-                        <div key={time} className="grid grid-cols-8 gap-1">
-                          <div className="text-[10px] text-gray-500 flex items-center">{time}</div>
-                          {slots.map((status, index) => (
-                            <div
-                              key={`${time}-${index}`}
-                              className={`rounded py-1 text-center text-[10px] font-medium ${
-                                status === "available"
-                                  ? "bg-blue-900/60 text-blue-300"
-                                  : "bg-[#0A1020] text-gray-700"
-                              }`}
-                            >
-                              {status === "available" ? time : "—"}
-                            </div>
-                          ))}
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
+                <AvailabilityCalendar
+                  availabilities={availabilityRows}
+                  busySlots={[]}
+                  role="coach"
+                  mode="view"
+                  onRangeChange={(from, to) => setAvailabilityRange({ from, to })}
+                />
               </div>
             </section>
 

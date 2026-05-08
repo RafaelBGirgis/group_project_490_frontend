@@ -4,6 +4,8 @@ import {
   listEquipment,
   searchWorkouts,
 } from "../../api/plan_my_week";
+import { ROLE_THEMES } from "../theme";
+import { usePlanMyWeek } from "../../contexts/plan_my_week_context";
 
 const PAGE_SIZE = 12;
 const TYPE_OPTIONS = [
@@ -13,6 +15,8 @@ const TYPE_OPTIONS = [
 ];
 
 export default function WorkoutGrid({ onClose, onPick, allowCreate }) {
+  const { state } = usePlanMyWeek();
+  const theme = ROLE_THEMES[state.role] ?? ROLE_THEMES.client;
   const [text, setText] = useState("");
   const [type, setType] = useState("");
   const [equipmentId, setEquipmentId] = useState("");
@@ -57,7 +61,7 @@ export default function WorkoutGrid({ onClose, onPick, allowCreate }) {
             {allowCreate ? (
               <button
                 onClick={() => setCreateOpen(true)}
-                className="px-3 py-1.5 rounded-lg bg-orange-500 text-white text-xs font-semibold hover:bg-orange-400"
+                className={`px-3 py-1.5 rounded-lg text-white text-xs font-semibold ${theme.btnPrimary}`}
               >
                 + New workout
               </button>
@@ -155,6 +159,7 @@ export default function WorkoutGrid({ onClose, onPick, allowCreate }) {
 
       {createOpen ? (
         <CreateWorkout
+          role={state.role}
           equipmentList={equipmentList}
           onClose={() => setCreateOpen(false)}
           onCreated={() => {
@@ -185,7 +190,8 @@ function Backdrop({ onClose, children }) {
 
 /* ─── Coach-only: create a new Workout with 3 intensity tiers + equipment ─ */
 
-function CreateWorkout({ equipmentList, onClose, onCreated }) {
+function CreateWorkout({ equipmentList, onClose, onCreated, role }) {
+  const theme = ROLE_THEMES[role] ?? ROLE_THEMES.client;
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [instructions, setInstructions] = useState("");
@@ -353,8 +359,8 @@ function CreateWorkout({ equipmentList, onClose, onCreated }) {
                   onClick={() => toggleEquipment(eq.id)}
                   className={`px-3 py-1 rounded-full text-xs border transition-colors ${
                     selectedEquipment.includes(eq.id)
-                      ? "bg-orange-500 border-orange-500 text-white"
-                      : "border-white/10 text-gray-300 hover:border-orange-400"
+                      ? `${theme.badge} border-transparent text-white`
+                      : "border-white/10 text-gray-300 hover:border-white/30"
                   }`}
                 >
                   {eq.name}
@@ -373,7 +379,7 @@ function CreateWorkout({ equipmentList, onClose, onCreated }) {
           <button
             disabled={submitting}
             onClick={handleSubmit}
-            className="px-4 py-2 text-sm bg-orange-500 hover:bg-orange-400 disabled:bg-orange-900/40 rounded-lg font-semibold"
+            className={`px-4 py-2 text-sm rounded-lg font-semibold text-white disabled:opacity-50 ${theme.btnPrimary}`}
           >
             {submitting ? "Saving…" : "Create workout"}
           </button>

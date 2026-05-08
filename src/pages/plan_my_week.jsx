@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Navbar } from "../components";
 import ProfileAvatar from "../components/profile_avatar";
+import { ROLE_THEMES } from "../components/theme";
+import { getCoachAccessState } from "../utils/roleAccess";
+import { resolveRoleState } from "../utils/sessionAuth";
 import {
   PlanMyWeekProvider,
   usePlanMyWeek,
@@ -26,9 +29,19 @@ function Inner({ role }) {
   const navigate = useNavigate();
   const { state } = usePlanMyWeek();
   const [account, setAccount] = useState(null);
+  const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
+  const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(false);
 
   useEffect(() => {
-    fetchMe().then(setAccount).catch(() => {});
+    fetchMe()
+      .then(async (me) => {
+        setAccount(me);
+        const roleState = await resolveRoleState().catch(() => null);
+        const coachAccess = await getCoachAccessState(me);
+        setCanSwitchToCoach(coachAccess.canAccessCoach);
+        setCanSwitchToAdmin(Boolean(roleState?.hasAdminRole));
+      })
+      .catch(() => {});
   }, []);
 
   // Coach must select a client before tabs open.
@@ -42,6 +55,18 @@ function Inner({ role }) {
           account?.name
             ? account.name.split(" ").map((n) => n[0]).join("").toUpperCase()
             : "?"
+        }
+        canSwitchToCoach={role === "client" ? canSwitchToCoach : false}
+        switchOptions={
+          role === "coach"
+            ? [
+                { label: "Client", to: "/client" },
+                ...(canSwitchToAdmin ? [{ label: "Admin", to: "/admin" }] : []),
+              ]
+            : [
+                ...(canSwitchToCoach ? [{ label: "Coach", to: "/coach" }] : []),
+                ...(canSwitchToAdmin ? [{ label: "Admin", to: "/admin" }] : []),
+              ]
         }
       />
       <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
@@ -70,6 +95,7 @@ function Inner({ role }) {
 
 function Tabs() {
   const { state, dispatch } = usePlanMyWeek();
+  const theme = ROLE_THEMES[state.role] ?? ROLE_THEMES.client;
   const TABS = useMemo(
     () => [
       { key: "build", label: "Build Plan" },
@@ -88,9 +114,10 @@ function Tabs() {
             onClick={() => dispatch({ type: "SET_TAB", tab: t.key })}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               state.activeTab === t.key
-                ? "border-orange-400 text-orange-300"
+                ? `${theme.tagText}`
                 : "border-transparent text-gray-400 hover:text-gray-200"
             }`}
+            style={state.activeTab === t.key ? { borderColor: theme.accent } : undefined}
           >
             {t.label}
           </button>
@@ -99,7 +126,7 @@ function Tabs() {
           <div className="ml-auto flex items-center gap-2 text-xs text-gray-400">
             <span>Client #{state.selectedClientId}</span>
             <button
-              className="text-blue-400 hover:underline"
+              className={`${theme.tagText} hover:underline`}
               onClick={() => dispatch({ type: "SELECT_CLIENT", clientId: null })}
             >
               change

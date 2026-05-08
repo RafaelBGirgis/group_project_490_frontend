@@ -324,7 +324,7 @@ export function Navbar({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                   d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
               </svg>
-              {`Switch to ${resolvedSwitchOptions[0].label}`}
+              {`${resolvedSwitchOptions[0].label} Dash`}
             </button>
           )}
 
@@ -332,7 +332,7 @@ export function Navbar({
             <div className="flex items-center gap-2">
               {resolvedSwitchOptions.map((option) => (
                 <button
-                  key={option.to}
+                  key={`${option.to}:${option.label}`}
                   onClick={() => navigate(option.to)}
                   className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${theme.btnOutline}`}
                 >
@@ -340,7 +340,7 @@ export function Navbar({
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                       d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
                   </svg>
-                  {`Switch to ${option.label}`}
+                  {option.label}
                 </button>
               ))}
             </div>

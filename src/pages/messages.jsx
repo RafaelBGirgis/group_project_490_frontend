@@ -3,21 +3,20 @@ import { useEffect, useRef, useState, useMemo } from "react";
 import { Navbar, SkeletonMessage } from "../components";
 import { fetchMe } from "../api/client";
 import {
+  blockAccount,
   fetchAllConversations,
+  fetchBlockStatus,
   fetchMessages,
   fetchPublicAccount,
   formatChatTimestamp,
   getConversationWithAccount,
   sendMessage,
+  unblockAccount,
 } from "../api/chat";
+import { apiPost, withQuery } from "../api/api";
 import { ROLE_THEMES } from "../components/theme";
 import { getCoachAccessState } from "../utils/roleAccess";
 
-/**
- * Unified chat page. Replaces the role-split client_chat / coach_chat pages.
- * Conversations come from /roles/shared/chat/conversations and include each
- * partner's public profile (name, pfp_url, age, gender, role).
- */
 export default function MessagesPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -38,8 +37,6 @@ export default function MessagesPage() {
       .finally(() => setLoadingAccount(false));
   }, []);
 
-  // Pick the role used for navbar/theme. Admin wins if present (admins may also
-  // hold client/coach roles on the same account, but their dashboard is admin).
   const role = account?.admin_id
     ? "admin"
     : account?.coach_id
@@ -52,9 +49,6 @@ export default function MessagesPage() {
   const [loadingConvos, setLoadingConvos] = useState(true);
   const [chatError, setChatError] = useState("");
 
-  // Load full conversation list. Always re-runs when the URL ?account changes
-  // so deep-links from find_coach / pending requests / public profile open
-  // straight to the right thread.
   useEffect(() => {
     if (!account) return;
 
@@ -74,8 +68,6 @@ export default function MessagesPage() {
             ) || null;
 
           if (!nextActiveChat) {
-            // Brand-new chat: ensure the row exists, then re-fetch the list so
-            // the partner's profile is populated by the backend.
             const ensured = await getConversationWithAccount(
               Number(preselectedAccount),
               { account_id: Number(preselectedAccount) },
@@ -117,7 +109,7 @@ export default function MessagesPage() {
     };
   }, [account, preselectedAccount]);
 
-  // ── Messages for the active chat ───────────────────────────────────────────
+  // ── Messages ───────────────────────────────────────────────────────────────
   const [messages, setMessages] = useState([]);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
   const messagesEndRef = useRef(null);
@@ -155,9 +147,7 @@ export default function MessagesPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Lazy-fetch partner profile if the conversation row didn't bring one yet
-  // (defensive — the unified endpoint should always populate it, but a freshly
-  // ensured chat that came back through the legacy normalize path may not).
+  // ── Partner profile ────────────────────────────────────────────────────────
   const [partnerOverride, setPartnerOverride] = useState(null);
   useEffect(() => {
     setPartnerOverride(null);
@@ -167,9 +157,7 @@ export default function MessagesPage() {
     fetchPublicAccount(activeChat.partner_account_id).then((profile) => {
       if (!cancelled) setPartnerOverride(profile);
     });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [activeChat?.id, activeChat?.partner_account_id]);
 
   const partnerProfile = useMemo(() => {
@@ -180,6 +168,9 @@ export default function MessagesPage() {
       pfp_url: partnerOverride?.pfp_url || activeChat.partner_pfp_url || null,
       age: partnerOverride?.age ?? activeChat.partner_age ?? null,
       gender: partnerOverride?.gender || activeChat.partner_gender || null,
+      is_admin: !!(partnerOverride?.is_admin ?? activeChat.partner_is_admin),
+      is_verified_coach: !!(partnerOverride?.is_verified_coach ?? activeChat.partner_is_verified_coach),
+      is_client: !!(partnerOverride?.is_client ?? activeChat.partner_is_client),
       role: partnerOverride?.is_coach
         ? "coach"
         : partnerOverride?.is_client
@@ -188,6 +179,97 @@ export default function MessagesPage() {
     };
   }, [activeChat, partnerOverride]);
 
+  // ── Block status ───────────────────────────────────────────────────────────
+  const [blockStatus, setBlockStatus] = useState({
+    i_blocked_them: false,
+    they_blocked_me: false,
+  });
+
+  useEffect(() => {
+    if (!activeChat?.partner_account_id) return;
+    let cancelled = false;
+    const refresh = async () => {
+      const s = await fetchBlockStatus(activeChat.partner_account_id);
+      if (!cancelled)
+        setBlockStatus({ i_blocked_them: !!s.i_blocked_them, they_blocked_me: !!s.they_blocked_me });
+    };
+    refresh();
+    const intervalId = window.setInterval(refresh, 5000);
+    return () => { cancelled = true; window.clearInterval(intervalId); };
+  }, [activeChat?.partner_account_id]);
+
+  // ── Block / report actions ─────────────────────────────────────────────────
+  const [reportedPartnerIds, setReportedPartnerIds] = useState(new Set());
+  const partnerAlreadyReported = activeChat?.partner_account_id
+    ? reportedPartnerIds.has(activeChat.partner_account_id)
+    : false;
+
+  const [showBlockModal, setShowBlockModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportReason, setReportReason] = useState("");
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionMessage, setActionMessage] = useState("");
+
+  const handleConfirmBlock = async () => {
+    if (!activeChat?.partner_account_id || actionBusy) return;
+    setActionBusy(true);
+    setActionMessage("");
+    try {
+      await blockAccount(activeChat.partner_account_id);
+      const s = await fetchBlockStatus(activeChat.partner_account_id);
+      setBlockStatus({ i_blocked_them: !!s.i_blocked_them, they_blocked_me: !!s.they_blocked_me });
+      setShowBlockModal(false);
+      setActionMessage("Account blocked. The chat is read-only.");
+    } catch (err) {
+      setActionMessage(err.message || "Could not block this account.");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleUnblock = async () => {
+    if (!activeChat?.partner_account_id || actionBusy) return;
+    setActionBusy(true);
+    setActionMessage("");
+    try {
+      await unblockAccount(activeChat.partner_account_id);
+      const s = await fetchBlockStatus(activeChat.partner_account_id);
+      setBlockStatus({ i_blocked_them: !!s.i_blocked_them, they_blocked_me: !!s.they_blocked_me });
+      setActionMessage("Account unblocked. You can send messages again.");
+    } catch (err) {
+      setActionMessage(err.message || "Could not unblock this account.");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleSubmitReport = async () => {
+    if (!activeChat?.partner_account_id || actionBusy) return;
+    if (!reportReason.trim()) { setActionMessage("Please add a short reason."); return; }
+    setActionBusy(true);
+    setActionMessage("");
+    try {
+      await apiPost(
+        withQuery(`/roles/shared/account/report/${activeChat.partner_account_id}`, {
+          reason: reportReason.trim(),
+        }),
+      );
+      setReportedPartnerIds((prev) => {
+        const next = new Set(prev);
+        next.add(activeChat.partner_account_id);
+        return next;
+      });
+      setShowReportModal(false);
+      setReportReason("");
+      setActionMessage("Report submitted. Thanks for letting us know.");
+    } catch (err) {
+      setActionMessage(err.message || "Could not submit the report.");
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  // ── Send ───────────────────────────────────────────────────────────────────
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
 
@@ -220,6 +302,7 @@ export default function MessagesPage() {
     }
   };
 
+  // ── Helpers ────────────────────────────────────────────────────────────────
   const getInitials = (name) =>
     name ? name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase() : "?";
 
@@ -236,6 +319,7 @@ export default function MessagesPage() {
     return ROLE_THEMES[senderRole] || ROLE_THEMES.client;
   };
 
+  // ── Render ─────────────────────────────────────────────────────────────────
   if (loadingAccount) {
     return (
       <div className="min-h-screen" style={{ backgroundColor: "#080D19" }}>
@@ -339,6 +423,7 @@ export default function MessagesPage() {
               </div>
             ) : (
               <>
+                {/* Chat header */}
                 <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5">
                   {partnerProfile.pfp_url ? (
                     <img
@@ -362,16 +447,47 @@ export default function MessagesPage() {
                       {partnerProfile.gender ? <> · {partnerProfile.gender}</> : null}
                     </p>
                   </div>
-                  {partnerProfile.role === "coach" && partnerProfile.id ? (
-                    <button
-                      onClick={() => navigate(`/coaches/${partnerProfile.id}`)}
-                      className="text-xs text-gray-400 hover:text-white border border-white/10 rounded-lg px-3 py-1.5 transition-colors"
-                    >
-                      View Profile
-                    </button>
-                  ) : null}
+                  <div className="flex items-center gap-2">
+                    {partnerProfile.role === "coach" && partnerProfile.id ? (
+                      <button
+                        onClick={() => navigate(`/coaches/${partnerProfile.id}`)}
+                        className="text-xs text-gray-400 hover:text-white border border-white/10 rounded-lg px-3 py-1.5 transition-colors"
+                      >
+                        View Profile
+                      </button>
+                    ) : null}
+                    {!partnerAlreadyReported && !blockStatus.they_blocked_me ? (
+                      <button
+                        onClick={() => { setActionMessage(""); setShowReportModal(true); }}
+                        className="text-xs font-medium text-red-300 hover:text-red-200 border border-red-500/30 bg-red-500/10 rounded-lg px-3 py-1.5 transition-colors"
+                      >
+                        Report
+                      </button>
+                    ) : null}
+                    {blockStatus.they_blocked_me ? null : blockStatus.i_blocked_them ? (
+                      <button
+                        onClick={handleUnblock}
+                        disabled={actionBusy}
+                        className="text-xs font-medium text-emerald-300 hover:text-emerald-200 border border-emerald-500/30 bg-emerald-500/10 rounded-lg px-3 py-1.5 transition-colors disabled:opacity-60"
+                      >
+                        {actionBusy ? "..." : "Unblock"}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => { setActionMessage(""); setShowBlockModal(true); }}
+                        className="text-xs font-medium text-amber-300 hover:text-amber-200 border border-amber-500/30 bg-amber-500/10 rounded-lg px-3 py-1.5 transition-colors"
+                      >
+                        Block
+                      </button>
+                    )}
+                  </div>
                 </div>
 
+                {actionMessage ? (
+                  <div className="px-6 pt-3 text-xs text-slate-300">{actionMessage}</div>
+                ) : null}
+
+                {/* Messages */}
                 <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
                   {loadingMsgs ? (
                     <>
@@ -385,10 +501,7 @@ export default function MessagesPage() {
                     messages.map((msg) => {
                       const isMe = msg.from_account_id === account?.id || msg.from_account_id === 0;
                       return (
-                        <div
-                          key={msg.id}
-                          className={`flex ${isMe ? "justify-end" : "justify-start"}`}
-                        >
+                        <div key={msg.id} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
                           <div className={`max-w-[70%] ${isMe ? "items-end" : "items-start"} flex flex-col`}>
                             <span className="text-[10px] text-gray-500 mb-1 px-1">
                               {formatChatTimestamp(msg.created_at, { includeZone: true })}
@@ -413,37 +526,128 @@ export default function MessagesPage() {
                   <div ref={messagesEndRef} />
                 </div>
 
+                {/* Input */}
                 <div className="px-6 py-4 border-t border-white/5">
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      handleSend();
-                    }}
-                    className="flex items-center gap-3"
-                  >
-                    <input
-                      type="text"
-                      value={draft}
-                      onChange={(e) => setDraft(e.target.value)}
-                      placeholder="Type a message..."
-                      className="flex-1 rounded-xl border border-white/10 bg-[#0A1020] px-4 py-3 text-sm text-white outline-none transition placeholder:text-gray-600 focus:border-blue-400/40 focus:ring-2 focus:ring-blue-500/10"
-                    />
-                    <button
-                      type="submit"
-                      disabled={!draft.trim() || sending}
-                      className="px-5 py-3 rounded-xl text-sm font-medium text-white transition disabled:cursor-not-allowed"
-                      style={{
-                        backgroundColor: sending || !draft.trim() ? "#1e3a5f" : theme.accent,
-                      }}
+                  {blockStatus.they_blocked_me ? (
+                    <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                      This account has blocked you. The conversation is read-only.
+                    </div>
+                  ) : blockStatus.i_blocked_them ? (
+                    <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300 flex items-center justify-between gap-4">
+                      <span>You blocked this account. Unblock to send messages.</span>
+                      <button
+                        onClick={handleUnblock}
+                        disabled={actionBusy}
+                        className="shrink-0 rounded-lg bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                      >
+                        {actionBusy ? "..." : "Unblock"}
+                      </button>
+                    </div>
+                  ) : (
+                    <form
+                      onSubmit={(e) => { e.preventDefault(); handleSend(); }}
+                      className="flex items-center gap-3"
                     >
-                      {sending ? "..." : "Send"}
-                    </button>
-                  </form>
+                      <input
+                        type="text"
+                        value={draft}
+                        onChange={(e) => setDraft(e.target.value)}
+                        placeholder="Type a message..."
+                        className="flex-1 rounded-xl border border-white/10 bg-[#0A1020] px-4 py-3 text-sm text-white outline-none transition placeholder:text-gray-600 focus:border-blue-400/40 focus:ring-2 focus:ring-blue-500/10"
+                      />
+                      <button
+                        type="submit"
+                        disabled={!draft.trim() || sending}
+                        className="px-5 py-3 rounded-xl text-sm font-medium text-white transition disabled:cursor-not-allowed"
+                        style={{ backgroundColor: sending || !draft.trim() ? "#1e3a5f" : theme.accent }}
+                      >
+                        {sending ? "..." : "Send"}
+                      </button>
+                    </form>
+                  )}
                 </div>
               </>
             )}
           </div>
         </div>
+      </div>
+
+      {showBlockModal ? (
+        <Modal
+          title={`Block ${partnerProfile?.name || "this account"}?`}
+          onClose={() => !actionBusy && setShowBlockModal(false)}
+        >
+          <p className="text-sm text-slate-300">
+            They won&apos;t be able to send you messages. Past messages stay visible in read-only
+            mode. Any active coaching relationship will end.
+          </p>
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              onClick={() => setShowBlockModal(false)}
+              disabled={actionBusy}
+              className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-4 py-2 text-xs font-medium text-slate-300 hover:bg-white/5 disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleConfirmBlock}
+              disabled={actionBusy}
+              className="rounded-lg bg-amber-600 hover:bg-amber-500 px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+            >
+              {actionBusy ? "Blocking..." : "Block"}
+            </button>
+          </div>
+        </Modal>
+      ) : null}
+
+      {showReportModal ? (
+        <Modal
+          title={`Report ${partnerProfile?.name || "this account"}`}
+          onClose={() => !actionBusy && setShowReportModal(false)}
+        >
+          <p className="text-sm text-slate-300">
+            Tell us what happened. Reports are reviewed by an admin.
+          </p>
+          <textarea
+            value={reportReason}
+            onChange={(e) => setReportReason(e.target.value)}
+            rows={5}
+            placeholder="Describe the issue..."
+            className="mt-3 w-full rounded-lg border border-white/10 bg-[#0A1020] px-3 py-2 text-sm text-white outline-none focus:border-red-400/40 focus:ring-2 focus:ring-red-500/10"
+          />
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              onClick={() => { setShowReportModal(false); setReportReason(""); }}
+              disabled={actionBusy}
+              className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-4 py-2 text-xs font-medium text-slate-300 hover:bg-white/5 disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSubmitReport}
+              disabled={actionBusy || !reportReason.trim()}
+              className="rounded-lg bg-red-600 hover:bg-red-500 px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+            >
+              {actionBusy ? "Submitting..." : "Submit Report"}
+            </button>
+          </div>
+        </Modal>
+      ) : null}
+    </div>
+  );
+}
+
+function Modal({ title, onClose, children }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0F1729] p-6 shadow-xl">
+        <div className="flex items-start justify-between gap-4">
+          <h3 className="text-base font-semibold text-white">{title}</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-300" aria-label="Close">
+            ×
+          </button>
+        </div>
+        <div className="mt-3">{children}</div>
       </div>
     </div>
   );

@@ -30,11 +30,16 @@ export async function fetchAllConversations() {
       partner_pfp_url: c.partner?.pfp_url || null,
       partner_age: c.partner?.age ?? null,
       partner_gender: c.partner?.gender || null,
-      partner_role: c.partner?.is_coach
-        ? "coach"
-        : c.partner?.is_client
-          ? "client"
-          : "user",
+      partner_is_admin: !!c.partner?.is_admin,
+      partner_is_verified_coach: !!c.partner?.is_verified_coach,
+      partner_is_client: !!c.partner?.is_client,
+      partner_role: c.partner?.is_admin
+        ? "admin"
+        : c.partner?.is_verified_coach
+          ? "coach"
+          : c.partner?.is_client
+            ? "client"
+            : "user",
       last_message: c.last_message || "",
       last_message_at: c.last_message_at || null,
       unread_count: Number(c.unread_count ?? 0),
@@ -93,16 +98,35 @@ export async function sendMessage(chatId, content) {
   };
 }
 
+/**
+ * Parses a backend timestamp into a Date. If the string carries no timezone
+ * suffix (older rows from before the UTC normalization), assume UTC — the
+ * backend never stores anything else.
+ */
+function parseUtcDate(value) {
+  if (value instanceof Date) return value;
+  if (typeof value !== "string") return new Date(NaN);
+  const trimmed = value.trim();
+  const hasTz = /([+-]\d{2}:?\d{2}|Z)$/i.test(trimmed);
+  return new Date(hasTz ? trimmed : `${trimmed}Z`);
+}
+
 export function formatChatTimestamp(value, { includeZone = false } = {}) {
   if (!value) return "";
   try {
-    const date = new Date(value);
-    const formatted = date.toLocaleTimeString("en-US", {
+    const date = parseUtcDate(value);
+    if (Number.isNaN(date.getTime())) return "";
+    // Use the user's browser locale + timezone — no hardcoded ET.
+    const formatted = date.toLocaleTimeString(undefined, {
       hour: "numeric",
       minute: "2-digit",
-      timeZone: "America/New_York",
     });
-    return includeZone ? `${formatted} ET` : formatted;
+    if (!includeZone) return formatted;
+    const tzAbbr =
+      new Intl.DateTimeFormat(undefined, { timeZoneName: "short" })
+        .formatToParts(date)
+        .find((p) => p.type === "timeZoneName")?.value || "";
+    return tzAbbr ? `${formatted} ${tzAbbr}` : formatted;
   } catch {
     return "";
   }
@@ -205,6 +229,16 @@ export async function listBlockedAccounts() {
     return Array.isArray(result?.blocked) ? result.blocked : [];
   } catch {
     return [];
+  }
+}
+
+/** Authoritative directional block probe between caller and partner.
+ *  Returns { partner_id, i_blocked_them, they_blocked_me } */
+export async function fetchBlockStatus(accountId) {
+  try {
+    return await apiGet(`/roles/shared/blocks/status/${accountId}`);
+  } catch {
+    return { partner_id: accountId, i_blocked_them: false, they_blocked_me: false };
   }
 }
 

@@ -535,7 +535,9 @@ function normalizeClientCoachRequest(item) {
   const derivedStatus =
     item.status != null
       ? String(item.status).toLowerCase()
-      : item.is_accepted === true
+      : item.relationship_active === false || item.relationship?.is_active === false || item.client_coach_relationship?.is_active === false
+        ? "terminated"
+        : item.is_accepted === true
         ? "approved"
         : item.is_accepted === false
           ? "rejected"
@@ -548,6 +550,8 @@ function normalizeClientCoachRequest(item) {
     coach_name: item.coach_name || item.coachName || item.coach?.name || "",
     coach_email: item.coach_email || item.coachEmail || item.coach?.email || "",
     status: derivedStatus,
+    relationship_active:
+      item.relationship_active ?? item.relationshipActive ?? item.relationship?.is_active ?? item.client_coach_relationship?.is_active ?? null,
     relationship_id:
       item.relationship_id != null
         ? Number(item.relationship_id)

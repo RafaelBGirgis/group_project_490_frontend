@@ -291,12 +291,18 @@ export default function CoachPublicProfilePage() {
   }, [account?.name]);
 
   const requestEntry = pendingRequests[coachId];
-  const relationshipId = activeCoachRelationshipId || requestEntry?.relationship_id || null;
+  const relationshipHistoryId = requestEntry?.relationship_id || null;
+  const activeRelationshipId = activeCoachRelationshipId || (
+    requestEntry?.status === "approved" && requestEntry?.relationship_active !== false
+      ? relationshipHistoryId
+      : null
+  );
   const requestStatus = requestEntry?.status || null;
   const hasRelationshipHistory = Boolean(
-    relationshipId
-    || requestEntry?.relationship_id
+    activeRelationshipId
+    || relationshipHistoryId
     || requestEntry?.status === "approved"
+    || requestEntry?.status === "terminated"
   );
   const canReview = !previewMode && hasRelationshipHistory;
   const isPending = requestStatus === "pending";
@@ -380,14 +386,14 @@ export default function CoachPublicProfilePage() {
   };
 
   const handleTerminateRelationship = async () => {
-    if (!relationshipId) {
+    if (!activeRelationshipId) {
       setActionError("No active relationship found for this coach.");
       return;
     }
     setTerminating(true);
     setActionError("");
     try {
-      await terminateRelationship(Number(relationshipId));
+      await terminateRelationship(Number(activeRelationshipId));
       setActiveCoachRelationshipId(null);
       const myRequests = await fetchMyCoachRequests().catch(() => []);
       setPendingRequests(Object.fromEntries(myRequests.map((item) => [item.coach_id, item])));
@@ -587,7 +593,7 @@ export default function CoachPublicProfilePage() {
                       Report Coach
                     </button>
 
-                    {relationshipId ? (
+                    {activeRelationshipId ? (
                       <button
                         type="button"
                         onClick={handleTerminateRelationship}

@@ -2,6 +2,10 @@ import { useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import { Navbar, StatusBadge, SkeletonDashCard } from "../components";
 import {
+  isBlockingCoachRequest,
+} from "../utils/coachRequests";
+
+import {
   fetchMe,
   fetchAvailableCoaches,
   fetchMyCoachRequests,
@@ -121,7 +125,7 @@ export default function FindCoachPage() {
         setRequestedIds(
           new Set(
             requests
-              .filter((item) => item?.status !== "rejected")
+              .filter(isBlockingCoachRequest)
               .map((item) => Number(item.coach_id))
           )
         );
@@ -218,7 +222,7 @@ export default function FindCoachPage() {
       setRequestedIds(
         new Set(
           requests
-            .filter((item) => item?.status !== "rejected")
+            .filter(isBlockingCoachRequest)
             .map((item) => Number(item.coach_id))
         )
       );
@@ -242,7 +246,7 @@ export default function FindCoachPage() {
       setRequestedIds(
         new Set(
           requests
-            .filter((item) => item?.status !== "rejected")
+            .filter(isBlockingCoachRequest)
             .map((item) => Number(item.coach_id))
         )
       );

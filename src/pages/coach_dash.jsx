@@ -27,6 +27,7 @@ import {
   lookupClient,
   acceptClientRequest,
   denyClientRequest,
+  terminateRelationship,
 } from "../api/coach";
 import { getConversationWithAccount } from "../api/chat";
 import { getCoachAccessState } from "../utils/roleAccess";
@@ -172,6 +173,7 @@ export default function CoachDashboard() {
   const [clientRequests, setClientRequests] = useState([]);
   const [clientRequestDetails, setClientRequestDetails] = useState({});
   const [requestActionId, setRequestActionId] = useState(null);
+  const [terminatingClientId, setTerminatingClientId] = useState(null);
   const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(false);
   const [chatActionId, setChatActionId] = useState(null);
   const [selectedClient, setSelectedClient] = useState(null);
@@ -392,6 +394,23 @@ export default function CoachDashboard() {
     }
   };
 
+  const handleTerminateClientRelationship = async (client) => {
+    if (!client?.relationship_id || terminatingClientId) return;
+    if (!window.confirm(`End your coaching relationship with ${client.name || "this client"}?`)) return;
+
+    setTerminatingClientId(client.id);
+    setClients((prev) => prev.filter((item) => Number(item.id) !== Number(client.id)));
+    setSelectedClient((prev) => (Number(prev?.id) === Number(client.id) ? null : prev));
+    try {
+      await terminateRelationship(client.relationship_id);
+      await refreshRelationshipData();
+    } catch {
+      await refreshRelationshipData();
+    } finally {
+      setTerminatingClientId(null);
+    }
+  };
+
   const handleOpenClientChat = async (client) => {
     const clientId = client?.id ?? client;
     if (!clientId) return;
@@ -566,6 +585,16 @@ export default function CoachDashboard() {
                       >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
                           <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={() => handleTerminateClientRelationship(c)}
+                        disabled={terminatingClientId === c.id}
+                        className="shrink-0 rounded-lg text-red-400 hover:text-red-300 transition-colors p-1.5 hover:bg-red-500/10 disabled:opacity-50"
+                        title="End relationship"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M18 6L6 18M6 6l12 12" />
                         </svg>
                       </button>
                     </div>

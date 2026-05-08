@@ -477,6 +477,32 @@ describe("fetchMyCoachRequests", () => {
       }),
     ]);
   });
+
+  it("keeps terminated relationship history from looking approved", async () => {
+    mockFetchOk([
+      {
+        id: 42,
+        coach_id: 10,
+        coach_name: "Coach Former",
+        is_accepted: true,
+        relationship_id: 78,
+        relationship_active: false,
+      },
+    ]);
+
+    const requests = await fetchMyCoachRequests();
+
+    expect(requests).toEqual([
+      expect.objectContaining({
+        request_id: 42,
+        coach_id: 10,
+        coach_name: "Coach Former",
+        status: "terminated",
+        relationship_id: 78,
+        relationship_active: false,
+      }),
+    ]);
+  });
 });
 
 describe("uploadProgressPicture", () => {

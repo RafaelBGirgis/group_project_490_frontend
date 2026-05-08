@@ -26,7 +26,15 @@ function normalizeStatus(value) {
 
 export function isApprovedCoachRequest(request) {
   const status = normalizeStatus(request?.status);
-  return status === "approved" || request?.is_accepted === true;
+  if (status) {
+    return status === "approved";
+  }
+  return request?.is_accepted === true;
+}
+
+export function isBlockingCoachRequest(request) {
+  const status = normalizeStatus(request?.status);
+  return status === "pending" || status === "approved";
 }
 
 export function isPendingCoachRequest(request) {

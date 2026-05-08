@@ -23,7 +23,8 @@ import {
   deleteExercise,
   fetchAnalytics,
   fetchCoachRequests,
-  fetchTotalTransactions,
+  fetchReports,
+  deleteReport,
   resolveCoachRequest,
 } from "../api/admin";
 import RoleRequestsDetail from "../components/overlays/role_requests_detail";
@@ -119,14 +120,24 @@ function BarChart({ data, labelKey, valueKey, secondaryKey, color = "#EF4444", s
   }, []);
 
   if (!data || data.length === 0) return null;
-  const maxVal = Math.max(...data.map((d) => d[valueKey]));
+
+  // Sqrt scaling: a single outlier (e.g. one bulk-seed day with 91 signups
+  // dwarfing every other day's 1–5 count) was making the rest of the chart
+  // unreadable. sqrt(v)/sqrt(max) compresses the outlier without lying about
+  // ordering — taller still means more, just not "65× more pixels."
+  const allValues = data.flatMap((d) =>
+    secondaryKey ? [d[valueKey], d[secondaryKey]] : [d[valueKey]]
+  );
+  const maxVal = Math.max(...allValues, 1);
+  const scaledMax = Math.sqrt(maxVal);
+  const scale = (v) => (v > 0 ? (Math.sqrt(v) / scaledMax) * 100 : 0);
 
   return (
     <div ref={ref} className="relative" style={{ height }}>
-      <div className="flex items-end justify-between gap-1 h-full px-1">
+      <div className="flex items-end justify-between gap-2 h-full px-1">
         {data.map((d, i) => {
-          const pct = animated ? (d[valueKey] / maxVal) * 100 : 0;
-          const secPct = secondaryKey && animated ? (d[secondaryKey] / maxVal) * 100 : 0;
+          const pct = animated ? scale(d[valueKey]) : 0;
+          const secPct = secondaryKey && animated ? scale(d[secondaryKey]) : 0;
           return (
             <div
               key={i}
@@ -141,30 +152,34 @@ function BarChart({ data, labelKey, valueKey, secondaryKey, color = "#EF4444", s
                   {secondaryKey && <p className="text-gray-400">{d[secondaryKey]} new</p>}
                 </div>
               )}
-              {/* Bars */}
-              <div className="w-full flex gap-0.5 items-end justify-center" style={{ height: `${height - 24}px` }}>
+              {/* Bars — wider since fewer buckets means more horizontal space.
+                  Tooltip on hover still shows the raw count, so visual scaling
+                  doesn't hide information. */}
+              <div className="w-full flex gap-1 items-end justify-center" style={{ height: `${height - 24}px` }}>
                 <div
-                  className="flex-1 rounded-t-sm transition-all duration-700 ease-out max-w-5"
+                  className="flex-1 rounded-t-md transition-all duration-700 ease-out max-w-[18px]"
                   style={{
                     height: `${pct}%`,
+                    minHeight: d[valueKey] > 0 ? "2px" : "0px",
                     backgroundColor: color,
-                    opacity: hoveredIdx === i ? 1 : 0.7,
-                    transitionDelay: `${i * 30}ms`,
+                    opacity: hoveredIdx === i ? 1 : 0.85,
+                    transitionDelay: `${i * 40}ms`,
                   }}
                 />
                 {secondaryKey && (
                   <div
-                    className="flex-1 rounded-t-sm transition-all duration-700 ease-out max-w-5"
+                    className="flex-1 rounded-t-md transition-all duration-700 ease-out max-w-[18px]"
                     style={{
                       height: `${secPct}%`,
+                      minHeight: d[secondaryKey] > 0 ? "2px" : "0px",
                       backgroundColor: secondaryColor,
-                      opacity: hoveredIdx === i ? 1 : 0.5,
-                      transitionDelay: `${i * 30 + 100}ms`,
+                      opacity: hoveredIdx === i ? 1 : 0.65,
+                      transitionDelay: `${i * 40 + 100}ms`,
                     }}
                   />
                 )}
               </div>
-              <span className="text-[9px] text-gray-600 mt-1 truncate w-full text-center">{d[labelKey]}</span>
+              <span className="text-[10px] text-gray-500 mt-1 truncate w-full text-center">{d[labelKey]}</span>
             </div>
           );
         })}
@@ -251,7 +266,6 @@ export default function AdminDash() {
   const [analytics, setAnalytics] = useState(null);
   const [roleRequests, setRoleRequests] = useState([]);
   const [reports, setReports] = useState([]);
-  const [totalTransactions, setTotalTransactions] = useState(0);
 
   /*  overlay state  */
   const [overlay, setOverlay] = useState(null);
@@ -332,43 +346,31 @@ export default function AdminDash() {
             total_clients: 0,
             total_coaches: 0,
             pending_role_requests: 0,
-            active_today: 0,
-            active_this_week: 0,
-            active_this_month: 0,
+            active_accounts: 0,
+            deactivated_accounts: 0,
+            signups_30d: 0,
+            avg_coach_rating: 0,
+            total_coach_reviews: 0,
+            coaches_with_reviews: 0,
             total_revenue: 0,
-            revenue_this_month: 0,
-            active_subscriptions: 0,
-            revenue_change: 0,
+            active_coach_client_pairs: 0,
+            total_messages_sent: 0,
           })),
           fetchAllUsers().catch(() => []),
-          fetchAnalytics().catch(() => ({
-            daily: [],
-            weekly: [],
-            monthly: [],
-            summary: {
-              dau: 0,
-              wau: 0,
-              mau: 0,
-              dau_change: 0,
-              wau_change: 0,
-              mau_change: 0,
-              total_signups_30d: 0,
-              avg_session_min: 0,
-              retention_7d: 0,
-            },
-          })),
+          fetchAnalytics().catch(() => ({ daily: [], weekly: [], monthly: [] })),
           fetchCoachRequests().catch(() => []),
         ]);
-        const transactions = await fetchTotalTransactions().catch(() => ({ total_transactions: 0 }));
-        const exerciseResponse = await fetchExerciseBank().catch(() => []);
+        const [exerciseResponse, reportsResponse] = await Promise.all([
+          fetchExerciseBank().catch(() => []),
+          fetchReports().catch(() => []),
+        ]);
 
         setStats(s);
         setUsers(u);
         setExercises(exerciseResponse);
         setAnalytics(an);
         setRoleRequests(requests);
-        setTotalTransactions(transactions.total_transactions || 0);
-        setReports([]);
+        setReports(reportsResponse);
       } finally {
         setLoading(false);
       }
@@ -385,11 +387,61 @@ export default function AdminDash() {
     await resolveCoachRequest(id, false);
     setRoleRequests((p) => p.map((r) => r.id === id ? { ...r, is_approved: false } : r));
   };
-  const handleDismissReport = (id) => setReports((p) => p.filter((r) => r.id !== id));
+  // Reports come from two tables (coach_report + client_report) with
+  // independent primary keys, so dismissal needs both kind and id to
+  // disambiguate. Hits DELETE /roles/admin/reports/{kind}/{id} so the row
+  // is gone for good, then drops it from the local feed.
+  const handleDismissReport = async (kind, id) => {
+    try {
+      await deleteReport(kind, id);
+      setReports((p) => p.filter((r) => !(r.kind === kind && r.id === id)));
+    } catch (e) {
+      window.alert(e?.message || "Dismiss failed");
+    }
+  };
+
+  // "Take Action" on a report: suspend the *reported* account (the coach for
+  // a client-on-coach report, the client for a coach-on-client report) and
+  // delete the report row so it stops showing up in the feed. The two writes
+  // aren't atomic — if the suspend succeeds and the delete fails the row will
+  // still be there on next reload, which is acceptable (admin can dismiss it
+  // manually).
+  const handleEscalateReport = async (kind, id) => {
+    const report = reports.find((r) => r.kind === kind && r.id === id);
+    if (!report?.reported_account_id) {
+      window.alert("Cannot suspend — reported account not found.");
+      return;
+    }
+    const who = kind === "client_on_coach" ? "coach" : "client";
+    if (!window.confirm(`Suspend the reported ${who} (${report.reported_name})?`)) return;
+    try {
+      await updateUserStatus(report.reported_account_id, "suspended");
+      setUsers((prev) =>
+        prev.map((u) => u.id === report.reported_account_id ? { ...u, status: "suspended" } : u)
+      );
+      await deleteReport(kind, id).catch(() => {});
+      setReports((p) => p.filter((r) => !(r.kind === kind && r.id === id)));
+    } catch (e) {
+      window.alert(e?.message || "Suspend failed");
+    }
+  };
 
   const handleUserStatusChange = async (userId, newStatus) => {
-    await updateUserStatus(userId, newStatus);
-    setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, status: newStatus } : u));
+    // Confirm only when moving an account *out* of active — reactivation is
+    // harmless and shouldn't pop a dialog.
+    if (
+      newStatus !== "active" &&
+      !window.confirm("Suspend this account? They'll be signed out and any active coach/client mappings will be torn down.")
+    ) return;
+    try {
+      await updateUserStatus(userId, newStatus);
+      setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, status: newStatus } : u));
+    } catch (e) {
+      // Backend safety errors land here: 400 self-action, 409 last-admin
+      // removal, or 401 expired token. Surface the actual message so the
+      // admin understands why nothing changed.
+      window.alert(e?.message || "Action failed");
+    }
   };
 
   const handleUserSort = (sortBy) => {
@@ -399,8 +451,12 @@ export default function AdminDash() {
 
   const handleDeleteUser = async (userId) => {
     if (!window.confirm("Permanently delete this account? This cannot be undone.")) return;
-    await deleteUser(userId);
-    setUsers((prev) => prev.filter((u) => u.id !== userId));
+    try {
+      await deleteUser(userId);
+      setUsers((prev) => prev.filter((u) => u.id !== userId));
+    } catch (e) {
+      window.alert(e?.message || "Delete failed");
+    }
   };
 
   const handleSaveExercise = async (exercise) => {
@@ -495,92 +551,101 @@ export default function AdminDash() {
         <SectionHeader label="OVERVIEW" role={role} />
 
         <div className="grid grid-cols-4 gap-4">
-          <div className="bg-[#0E1628] rounded-2xl p-4 flex flex-col justify-between">
-            <p className="text-[10px] text-gray-500 uppercase tracking-widest">TOTAL ACCOUNTS</p>
-            <p className="text-2xl font-bold text-white mt-1"><AnimatedNumber value={stats?.total_accounts ?? 0} /></p>
-            <Sparkline data={activeAnalytics.map((d) => d.active_users)} color="#EF4444" />
-          </div>
-          <div className="bg-[#0E1628] rounded-2xl p-4 flex flex-col justify-between">
-            <p className="text-[10px] text-gray-500 uppercase tracking-widest">ACTIVE CLIENTS</p>
-            <p className="text-2xl font-bold text-white mt-1"><AnimatedNumber value={stats?.total_clients ?? 0} /></p>
-            <p className="text-xs text-red-400 mt-1">across all coaches</p>
-          </div>
-          <div className="bg-[#0E1628] rounded-2xl p-4 flex flex-col justify-between">
-            <p className="text-[10px] text-gray-500 uppercase tracking-widest">ACTIVE COACHES</p>
-            <p className="text-2xl font-bold text-white mt-1"><AnimatedNumber value={stats?.total_coaches ?? 0} /></p>
-            <p className="text-xs text-red-400 mt-1">on the platform</p>
-          </div>
-          <div className="bg-[#0E1628] rounded-2xl p-4 flex flex-col justify-between">
-            <p className="text-[10px] text-gray-500 uppercase tracking-widest">PENDING REQUESTS</p>
-            <p className="text-2xl font-bold text-white mt-1"><AnimatedNumber value={stats?.pending_role_requests ?? 0} /></p>
-            <p className="text-xs text-red-400 mt-1">awaiting approval</p>
-          </div>
+          {/* Each tile is wrapped in DashboardCard so it inherits the shared
+              hover animation (lift + accent line + glow). The single inner
+              div keeps the tight stat layout — without it, DashboardCard's
+              flex-col + gap-4 body would space the label/value/sub apart. */}
+          <DashboardCard role={role}>
+            <div>
+              <p className="text-[10px] text-gray-500 uppercase tracking-widest">TOTAL ACCOUNTS</p>
+              <p className="text-2xl font-bold text-white mt-1"><AnimatedNumber value={stats?.total_accounts ?? 0} /></p>
+              <Sparkline data={activeAnalytics.map((d) => d.active_users)} color="#EF4444" />
+            </div>
+          </DashboardCard>
+          <DashboardCard role={role}>
+            <div>
+              <p className="text-[10px] text-gray-500 uppercase tracking-widest">ACTIVE CLIENTS</p>
+              <p className="text-2xl font-bold text-white mt-1"><AnimatedNumber value={stats?.total_clients ?? 0} /></p>
+              <p className="text-xs text-red-400 mt-1">across all coaches</p>
+            </div>
+          </DashboardCard>
+          <DashboardCard role={role}>
+            <div>
+              <p className="text-[10px] text-gray-500 uppercase tracking-widest">ACTIVE COACHES</p>
+              <p className="text-2xl font-bold text-white mt-1"><AnimatedNumber value={stats?.total_coaches ?? 0} /></p>
+              <p className="text-xs text-red-400 mt-1">on the platform</p>
+            </div>
+          </DashboardCard>
+          <DashboardCard role={role}>
+            <div>
+              <p className="text-[10px] text-gray-500 uppercase tracking-widest">PENDING REQUESTS</p>
+              <p className="text-2xl font-bold text-white mt-1"><AnimatedNumber value={stats?.pending_role_requests ?? 0} /></p>
+              <p className="text-xs text-red-400 mt-1">awaiting approval</p>
+            </div>
+          </DashboardCard>
         </div>
 
         {/* Revenue & Cashflow */}
         <div className="grid grid-cols-3 gap-4">
           {/* Total Revenue — feature card */}
-          <div className="bg-[#0E1628] rounded-2xl p-5 relative overflow-hidden">
-            <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full bg-green-500/5 blur-2xl" />
-            <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">TOTAL REVENUE</p>
-            <p className="text-3xl font-bold text-white">
-              $<AnimatedNumber value={stats?.total_revenue ?? 0} duration={1500} />
-            </p>
-            <p className="text-xs text-gray-500 mt-1">All-time platform earnings</p>
-            <div className="mt-3">
-              <Sparkline data={activeAnalytics.map((d) => d.active_users * 28 + d.new_signups * 50)} color="#22C55E" />
+          <DashboardCard role={role}>
+            <div className="relative">
+              <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full bg-green-500/5 blur-2xl pointer-events-none" />
+              <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">TOTAL REVENUE</p>
+              <p className="text-3xl font-bold text-white">
+                $<AnimatedNumber value={stats?.total_revenue ?? 0} duration={1500} />
+              </p>
+              <p className="text-xs text-gray-500 mt-1">All-time platform earnings</p>
+              <div className="mt-3">
+                <Sparkline data={activeAnalytics.map((d) => d.active_users * 28 + d.new_signups * 50)} color="#22C55E" />
+              </div>
             </div>
-          </div>
+          </DashboardCard>
 
-          {/* Monthly Revenue */}
-          <div className="bg-[#0E1628] rounded-2xl p-5 relative overflow-hidden">
-            <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full bg-blue-500/5 blur-2xl" />
-            <div className="flex items-center justify-between mb-1">
-              <p className="text-[10px] text-gray-500 uppercase tracking-widest">THIS MONTH</p>
-              {stats?.revenue_change != null && (
-                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${stats.revenue_change >= 0 ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"}`}>
-                  {stats.revenue_change >= 0 ? "↑" : "↓"} {Math.abs(stats.revenue_change)}%
+          {/* Active Coach-Client Pairs — /roles/admin/platform_engagement
+              counts client_coach_relationship rows where is_active=true. */}
+          <DashboardCard role={role}>
+            <div className="relative">
+              <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full bg-blue-500/5 blur-2xl pointer-events-none" />
+              <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">ACTIVE COACH-CLIENT PAIRS</p>
+              <p className="text-3xl font-bold text-white">
+                <AnimatedNumber value={stats?.active_coach_client_pairs ?? 0} duration={1500} />
+              </p>
+              <p className="text-xs text-gray-500 mt-1">Currently matched on the platform</p>
+              <div className="mt-3 flex items-center gap-3">
+                <div className="flex-1 h-2 bg-[#0A1020] rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-blue-500 to-blue-400 transition-all duration-1000"
+                    style={{ width: `${Math.min(100, Math.round(((stats?.active_coach_client_pairs ?? 0) / Math.max(1, stats?.total_clients ?? 1)) * 100))}%` }}
+                  />
+                </div>
+                <span className="text-[10px] text-blue-400 font-semibold whitespace-nowrap">
+                  {Math.round(((stats?.active_coach_client_pairs ?? 0) / Math.max(1, stats?.total_clients ?? 1)) * 100)}% of clients
                 </span>
-              )}
+              </div>
             </div>
-            <p className="text-3xl font-bold text-white">
-              $<AnimatedNumber value={stats?.revenue_this_month ?? 0} duration={1500} />
-            </p>
-            <p className="text-xs text-gray-500 mt-1">Compared to last month</p>
-            <div className="mt-3 flex items-end gap-[3px] h-[32px]">
-              {[38, 52, 45, 60, 72, 55, 68, 82, 74, 90, 85, 95].map((h, i) => (
-                <div
-                  key={i}
-                  className="flex-1 rounded-sm transition-all"
-                  style={{
-                    height: `${(h / 100) * 32}px`,
-                    backgroundColor: i === 11 ? "#3B82F6" : "rgba(59,130,246,0.15)",
-                  }}
-                />
-              ))}
-            </div>
-          </div>
+          </DashboardCard>
 
-          {/* Active Subscriptions */}
-          <div className="bg-[#0E1628] rounded-2xl p-5 relative overflow-hidden">
-            <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full bg-orange-500/5 blur-2xl" />
-            <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">ACTIVE SUBSCRIPTIONS</p>
-            <p className="text-3xl font-bold text-white">
-              <AnimatedNumber value={stats?.active_subscriptions ?? 0} duration={1500} />
-            </p>
-            <p className="text-xs text-gray-500 mt-1">Paying clients this cycle</p>
-            <div className="mt-3 flex items-center gap-3">
-              <div className="flex-1 h-2 bg-[#0A1020] rounded-full overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-orange-500 to-orange-400 transition-all duration-1000"
-                  style={{ width: `${Math.min(100, Math.round(((stats?.active_subscriptions ?? 0) / Math.max(1, stats?.total_clients ?? 1)) * 100))}%` }}
+          {/* Messages Sent — chat_message row count from
+              /roles/admin/platform_engagement. */}
+          <DashboardCard role={role}>
+            <div className="relative">
+              <div className="absolute -top-6 -right-6 w-28 h-28 rounded-full bg-orange-500/5 blur-2xl pointer-events-none" />
+              <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">MESSAGES SENT</p>
+              <p className="text-3xl font-bold text-white">
+                <AnimatedNumber value={stats?.total_messages_sent ?? 0} duration={1500} />
+              </p>
+              <p className="text-xs text-gray-500 mt-1">Total chat messages on the platform</p>
+              <div className="mt-3">
+                <Sparkline
+                  data={activeAnalytics.length > 1
+                    ? activeAnalytics.map((d) => d.active_users)
+                    : [1, 2, 3, 5, 8, 13]}
+                  color="#F97316"
                 />
               </div>
-              <span className="text-[10px] text-orange-400 font-semibold whitespace-nowrap">
-                {Math.round(((stats?.active_subscriptions ?? 0) / Math.max(1, stats?.total_clients ?? 1)) * 100)}% of clients
-              </span>
             </div>
-          </div>
+          </DashboardCard>
         </div>
 
         {/* ═══════════════════════════════════════════════════════════════
@@ -588,69 +653,129 @@ export default function AdminDash() {
             ═══════════════════════════════════════════════════════════════ */}
         <SectionHeader label="ENGAGEMENT ANALYTICS" role={role} />
 
+        {/* KPI cards — backend-derived account metrics. Pending coach
+            requests is intentionally NOT here; the OVERVIEW row already shows
+            it as one of the four headline KPIs.
+            Source: /roles/admin/accounts (is_active, created_at) for the
+            account-status cards, and /roles/client/query/hirable_coaches for
+            the platform-wide weighted rating. */}
+        <div className="grid grid-cols-3 gap-4">
+          <DashboardCard role={role}>
+            <div className="relative">
+              <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">ACTIVE ACCOUNTS</p>
+              <p className="text-3xl font-bold text-white">
+                <AnimatedNumber value={stats?.active_accounts ?? 0} duration={1500} />
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                {stats?.deactivated_accounts != null
+                  ? `${stats.deactivated_accounts} suspended`
+                  : "Users with an active account"}
+              </p>
+              <div className="absolute -bottom-4 -right-4 w-24 h-24 rounded-full opacity-5 bg-red-500 blur-2xl pointer-events-none" />
+            </div>
+          </DashboardCard>
+
+          <DashboardCard role={role}>
+            <div className="relative">
+              <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">NEW SIGNUPS (30D)</p>
+              <p className="text-3xl font-bold text-white">
+                <AnimatedNumber value={stats?.signups_30d ?? 0} duration={1500} />
+              </p>
+              <p className="text-xs text-gray-500 mt-1">Accounts created in the last 30 days</p>
+              <div className="absolute -bottom-4 -right-4 w-24 h-24 rounded-full opacity-5 bg-red-500 blur-2xl pointer-events-none" />
+            </div>
+          </DashboardCard>
+
+          {/* Avg coach rating — formatted to match the other two tiles so all
+              three sit on one row with consistent visual weight. */}
+          <DashboardCard role={role}>
+            <div className="relative">
+              <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">AVG COACH RATING</p>
+              <p className="text-3xl font-bold text-white">
+                {stats?.avg_coach_rating
+                  ? `${Number(stats.avg_coach_rating).toFixed(1)} / 5`
+                  : "—"}
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                {stats?.total_coach_reviews ?? 0} review{stats?.total_coach_reviews === 1 ? "" : "s"} platform-wide
+              </p>
+              <div className="absolute -bottom-4 -right-4 w-24 h-24 rounded-full opacity-5 bg-yellow-400 blur-2xl pointer-events-none" />
+            </div>
+          </DashboardCard>
+        </div>
+
         {/* Charts */}
         <div className="grid grid-cols-3 gap-4">
-          {/* Bar chart — 2 cols */}
-          <div className="col-span-2 bg-[#0E1628] rounded-2xl p-5">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <p className="text-white font-semibold">Active Users & Signups</p>
-                <p className="text-gray-500 text-xs mt-0.5">Platform engagement over time</p>
+          {/* Bar chart — 2 cols. DashboardCard for hover lift; the className
+              prop forwards the col-span. */}
+          <DashboardCard role={role} className="col-span-2">
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <p className="text-white font-semibold">Active Users & Signups</p>
+                  <p className="text-gray-500 text-xs mt-0.5">Platform engagement over time</p>
+                </div>
+                <div className="flex gap-1 bg-[#0A1020] rounded-lg p-0.5">
+                  {["daily", "weekly", "monthly"].map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => setAnalyticsPeriod(p)}
+                      className={`px-3 py-1.5 rounded-md text-[10px] font-semibold uppercase tracking-wide transition-colors ${
+                        analyticsPeriod === p
+                          ? "bg-red-500/20 text-red-400"
+                          : "text-gray-500 hover:text-gray-300"
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <div className="flex gap-1 bg-[#0A1020] rounded-lg p-0.5">
-                {["daily", "weekly", "monthly"].map((p) => (
-                  <button
-                    key={p}
-                    onClick={() => setAnalyticsPeriod(p)}
-                    className={`px-3 py-1.5 rounded-md text-[10px] font-semibold uppercase tracking-wide transition-colors ${
-                      analyticsPeriod === p
-                        ? "bg-red-500/20 text-red-400"
-                        : "text-gray-500 hover:text-gray-300"
-                    }`}
-                  >
-                    {p}
-                  </button>
+              <div className="flex items-center justify-between mb-3 text-[10px]">
+                <div className="flex gap-4">
+                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-red-500 inline-block" /> Active Users</span>
+                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-blue-500 inline-block" /> New Signups</span>
+                </div>
+                <span className="text-gray-600 italic">hover for exact counts</span>
+              </div>
+              <BarChart
+                data={activeAnalytics}
+                labelKey="label"
+                valueKey="active_users"
+                secondaryKey="new_signups"
+                color="#EF4444"
+                secondaryColor="#3B82F6"
+                height={140}
+              />
+            </div>
+          </DashboardCard>
+
+          {/* Donut — Clients & Coaches only. items-center on the card body so
+              DashboardCard centers the chart. */}
+          <DashboardCard role={role} className="items-center">
+            <div className="flex flex-col items-center">
+              <p className="text-white font-semibold mb-1">User Distribution</p>
+              <p className="text-gray-500 text-xs mb-4">Clients vs Coaches</p>
+              <DonutChart
+                segments={[
+                  { value: stats?.total_clients ?? 0, color: "#3B82F6", label: "Clients" },
+                  { value: stats?.total_coaches ?? 0, color: "#F97316", label: "Coaches" },
+                ]}
+                size={140}
+              />
+              <div className="flex gap-4 mt-4">
+                {[
+                  { color: "bg-blue-500", label: "Clients" },
+                  { color: "bg-orange-500", label: "Coaches" },
+                ].map((l) => (
+                  <span key={l.label} className="flex items-center gap-1.5 text-[10px] text-gray-400">
+                    <span className={`w-2 h-2 rounded-full ${l.color}`} />
+                    {l.label}
+                  </span>
                 ))}
               </div>
             </div>
-            <div className="flex gap-4 mb-3 text-[10px]">
-              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-red-500 inline-block" /> Active Users</span>
-              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-blue-500 inline-block" /> New Signups</span>
-            </div>
-            <BarChart
-              data={activeAnalytics}
-              labelKey="label"
-              valueKey="active_users"
-              secondaryKey="new_signups"
-              color="#EF4444"
-              secondaryColor="#3B82F6"
-              height={180}
-            />
-          </div>
-
-          {/* Donut — Clients & Coaches only */}
-          <div className="bg-[#0E1628] rounded-2xl p-5 flex flex-col items-center justify-center">
-            <p className="text-white font-semibold mb-1">User Distribution</p>
-            <p className="text-gray-500 text-xs mb-4">Clients vs Coaches</p>
-            <DonutChart
-              segments={[
-                { value: stats?.total_clients ?? 0, color: "#3B82F6", label: "Clients" },
-                { value: stats?.total_coaches ?? 0, color: "#F97316", label: "Coaches" },
-              ]}
-              size={140}
-            />
-            <div className="flex gap-4 mt-4">
-              {[
-                { color: "bg-blue-500", label: "Clients" },
-                { color: "bg-orange-500", label: "Coaches" },
-              ].map((l) => (
-                <span key={l.label} className="flex items-center gap-1.5 text-[10px] text-gray-400">
-                  <span className={`w-2 h-2 rounded-full ${l.color}`} />
-                  {l.label}
-                </span>
-              ))}
-            </div>
-          </div>
+          </DashboardCard>
         </div>
 
         {/* ═══════════════════════════════════════════════════════════════
@@ -687,7 +812,6 @@ export default function AdminDash() {
                 <option value="all">All Status</option>
                 <option value="active">Active</option>
                 <option value="suspended">Suspended</option>
-                <option value="deactivated">Deactivated</option>
               </select>
             </div>
             <p className="text-gray-500 text-xs">{filteredUsers.length} user{filteredUsers.length !== 1 ? "s" : ""} found</p>
@@ -742,27 +866,22 @@ export default function AdminDash() {
                   <div className="col-span-1">
                     <StatusBadge
                       label={user.status}
-                      variant={user.status === "active" ? "success" : user.status === "suspended" ? "warning" : "neutral"}
+                      variant={user.status === "active" ? "success" : "warning"}
                       dot
                     />
                   </div>
                   <span className="col-span-2 text-gray-500 text-xs">{user.last_active}</span>
                   <div className="col-span-2 flex justify-end gap-2">
-                    {user.status === "suspended" ? (
-                      <>
-                        <button
-                          onClick={() => handleUserStatusChange(user.id, "active")}
-                          className="text-[10px] px-3 py-1.5 rounded-lg border border-green-500/30 text-green-400 hover:bg-green-500/10 transition-colors"
-                        >
-                          Reactivate
-                        </button>
-                        <button
-                          onClick={() => handleUserStatusChange(user.id, "deactivated")}
-                          className="text-[10px] px-3 py-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors"
-                        >
-                          Deactivate
-                        </button>
-                      </>
+                    {/* Backend exposes only is_active (true|false). Active rows
+                        get a Suspend action (orange); suspended rows get
+                        Reactivate. Both are wired to /activate and /deactivate. */}
+                    {user.status === "active" ? (
+                      <button
+                        onClick={() => handleUserStatusChange(user.id, "suspended")}
+                        className="text-[10px] px-3 py-1.5 rounded-lg border border-orange-500/30 text-orange-400 hover:bg-orange-500/10 transition-colors"
+                      >
+                        Suspend
+                      </button>
                     ) : (
                       <button
                         onClick={() => handleUserStatusChange(user.id, "active")}
@@ -995,7 +1114,7 @@ export default function AdminDash() {
             <div className="space-y-2">
               {reports.map((report) => (
                 <ListRow
-                  key={report.id}
+                  key={`${report.kind}-${report.id}`}
                   label={`${report.reporter_name} reported ${report.reported_name}`}
                   sub={report.reason}
                   right={
@@ -1020,7 +1139,7 @@ export default function AdminDash() {
       </Overlay>
 
       <Overlay open={overlay === "reports"} onClose={closeOverlay} title="Active Reports" wide>
-        <ReportsDetail reports={reports} onDismiss={handleDismissReport} />
+        <ReportsDetail reports={reports} onDismiss={handleDismissReport} onEscalate={handleEscalateReport} />
       </Overlay>
     </div>
   );

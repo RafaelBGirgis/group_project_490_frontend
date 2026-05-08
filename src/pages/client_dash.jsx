@@ -46,7 +46,12 @@ import {
   isPendingCoachRequest,
   resolveActiveCoachRelationship,
 } from "../utils/coachRequests";
-import { rememberTerminatedRelationshipId } from "../utils/terminatedRelationships";
+import {
+  forgetTerminatedCoachId,
+  getRememberedTerminatedCoachIds,
+  rememberTerminatedCoachId,
+  rememberTerminatedRelationshipId,
+} from "../utils/terminatedRelationships";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
 
@@ -139,12 +144,24 @@ export default function ClientDash() {
       fetchMyCoach().catch(() => null),
     ]);
     const { activeCoach, byCoachId } = resolveActiveCoachRelationship(myCoach, requestList);
+    const terminatedCoachIds = new Set(getRememberedTerminatedCoachIds());
+    const activeCoachId = Number(activeCoach?.coach_id);
+
+    if (Number.isFinite(activeCoachId)) {
+      forgetTerminatedCoachId(activeCoachId);
+      terminatedCoachIds.delete(activeCoachId);
+    }
+
     const requestValues = Object.values(byCoachId);
     const nextApproved =
       requestValues
+        .filter((request) => {
+          const coachId = Number(request?.coach_id);
+          return !(terminatedCoachIds.has(coachId) && !activeCoach);
+        })
         .filter(isApprovedCoachRequest)
         .sort((a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime())[0]
-        || null;
+      || null;
     const nextPending =
       (!nextApproved
         ? requestValues
@@ -305,6 +322,9 @@ export default function ClientDash() {
     try {
       await terminateRelationship(relationshipId);
       rememberTerminatedRelationshipId(relationshipId);
+      if (coach?.coach_id != null) {
+        rememberTerminatedCoachId(coach.coach_id);
+      }
       await refreshCoachRelationshipState();
       setRequestStatusMessage("Coaching relationship ended.");
     } catch (error) {

@@ -226,7 +226,6 @@ export default function AvailabilityDetail({
         </div>
       </div>
 
-<<<<<<< HEAD
       {/*  Instructions  */}
       <div className="rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3">
         <p className="text-gray-400 text-xs leading-relaxed">
@@ -235,9 +234,6 @@ export default function AvailabilityDetail({
           Booked sessions are locked, and each saved slot is submitted as a `:00` hourly block.
         </p>
       </div>
-
-=======
->>>>>>> 30980fb4de99751b26ace972f6b40cc2bdc44b92
       {/*  Schedule Grid  */}
       <div className="rounded-xl border border-white/5 bg-[rgba(255,255,255,0.02)] p-4">
         {/* Header row with clickable day names */}
@@ -268,10 +264,7 @@ export default function AvailabilityDetail({
             </p>
             {onSave && (
               <button
-<<<<<<< HEAD
-=======
                 type="button"
->>>>>>> 30980fb4de99751b26ace972f6b40cc2bdc44b92
                 onClick={() => {
                   setSlots(createBlankRows());
                   setHasChanges(true);

@@ -6,11 +6,13 @@ import {
   buildCoachWorkoutActivities,
   buildCoachWorkoutPayload,
   createCoachRequest,
+  createSelfAvailability,
+  deleteSelfAvailability,
   denyClientRequest,
-  fetchCoachAvailability,
+  fetchCoachAvailabilityWindows,
   fetchCoachProfile,
   fetchCoachReviews,
-  saveCoachAvailability,
+  listSelfAvailability,
   updateCoachInformation,
 } from "../api/coach";
 
@@ -78,25 +80,44 @@ describe("coach request actions", () => {
   });
 });
 
-describe("saveCoachAvailability", () => {
-  it("uses the coach information patch route", async () => {
-    mockFetchOk({ coach_id: 7 });
-    await saveCoachAvailability(7, [{ time: "9AM", slots: Array(7).fill("available") }]);
-    const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toContain("/roles/coach/information");
-    expect(opts.method).toBe("PATCH");
-    expect(JSON.parse(opts.body).availabilities.length).toBeGreaterThan(0);
+describe("coach availability CRUD", () => {
+  it("lists availability windows in a date range", async () => {
+    mockFetchOk([]);
+    await listSelfAvailability("2026-05-01T00:00:00Z", "2026-05-08T00:00:00Z");
+    const [url] = global.fetch.mock.calls[0];
+    expect(url).toContain("/roles/coach/availability");
+    expect(url).toContain("from_dt=");
+    expect(url).toContain("to_dt=");
   });
-});
 
-describe("fetchCoachAvailability", () => {
-  it("returns an empty array when no backend or saved availability exists", async () => {
-    global.fetch = vi.fn(() =>
-      Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) })
-    );
-    localStorage.clear();
-    const result = await fetchCoachAvailability(7);
-    expect(result).toEqual([]);
+  it("posts a new availability window", async () => {
+    mockFetchOk({ id: 1 });
+    const payload = {
+      start_dt: "2026-05-04T15:00:00Z",
+      end_dt: "2026-05-04T17:00:00Z",
+      repeats_weekly: true,
+      recurrence_end_dt: null,
+    };
+    await createSelfAvailability(payload);
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toContain("/roles/coach/availability");
+    expect(opts.method).toBe("POST");
+    expect(JSON.parse(opts.body)).toEqual(payload);
+  });
+
+  it("deletes by availability id", async () => {
+    mockFetchOk({ details: "deleted" });
+    await deleteSelfAvailability(42);
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toContain("/roles/coach/availability/42");
+    expect(opts.method).toBe("DELETE");
+  });
+
+  it("fetches a public coach's availability", async () => {
+    mockFetchOk([]);
+    await fetchCoachAvailabilityWindows(7, "2026-05-01T00:00:00Z", "2026-05-08T00:00:00Z");
+    const [url] = global.fetch.mock.calls[0];
+    expect(url).toContain("/roles/coach/coach_availability/7");
   });
 });
 
@@ -131,23 +152,33 @@ describe("fetchCoachReviews", () => {
 });
 
 describe("coach payload builders", () => {
-  it("maps coach request form data to backend models", () => {
+  it("maps coach request form data to backend availability windows", () => {
     const payload = buildCoachRequestPayload(
       {
         certifications: [{ title: "CSCS", issuer: "NSCA", year: "2024", description: "Passed" }],
         experiences: [{ title: "Head Coach", organization: "Iron Gym", year: "2020-2024", description: "Led strength programs" }],
         specializations: ["Strength Training"],
+        paymentInterval: "monthly",
+        priceCents: 1000,
       },
-      { Mon: ["9AM"], Tue: [], Wed: [], Thu: [], Fri: [], Sat: [], Sun: [] }
+      [
+        {
+          start_dt: "2026-05-04T13:00:00.000Z",
+          end_dt: "2026-05-04T14:00:00.000Z",
+          repeats_weekly: true,
+          recurrence_end_dt: null,
+        },
+      ]
     );
-    expect(payload.availabilities[0].weekday).toBe("monday");
+    expect(payload.availabilities[0].start_dt).toBe("2026-05-04T13:00:00.000Z");
+    expect(payload.availabilities[0].end_dt).toBe("2026-05-04T14:00:00.000Z");
+    expect(payload.availabilities[0].repeats_weekly).toBe(true);
     expect(payload.certifications[0].certification_name).toBe("CSCS");
     expect(payload.experiences[0].experience_name).toBe("Iron Gym");
   });
 
-  it("maps coach profile updates to backend models", () => {
+  it("maps coach profile updates to backend models without availability", () => {
     const payload = buildCoachInformationPayload({
-      availability: { Mon: ["9AM"], Tue: [], Wed: [], Thu: [], Fri: [], Sat: [], Sun: [] },
       certifications: [{ title: "NASM CPT", issuer: "NASM", year: "2025", description: "" }],
       experiences: [{ title: "Trainer", organization: "Studio", year: "2023", description: "Coached clients" }],
       specializations: ["Weight Loss"],
@@ -155,6 +186,7 @@ describe("coach payload builders", () => {
     expect(payload.specialties).toEqual(["Weight Loss"]);
     expect(payload.certifications[0].certification_organization).toBe("NASM");
     expect(payload.experiences[0].experience_title).toBe("Trainer");
+    expect(payload.availabilities).toBeUndefined();
   });
 
   it("builds coach workout payloads and activities", () => {

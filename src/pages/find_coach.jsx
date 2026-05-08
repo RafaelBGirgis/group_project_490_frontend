@@ -5,6 +5,7 @@ import {
   fetchMe,
   fetchAvailableCoaches,
   fetchMyCoachRequests,
+  fetchMyCoach,
   requestCoach,
   deleteCoachRequest,
   fetchCoachReviews,
@@ -14,6 +15,10 @@ import {
 } from "../api/client";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
+import {
+  forgetTerminatedCoachId,
+  getRememberedTerminatedCoachIds,
+} from "../utils/terminatedRelationships";
 
 const role = "client";
 
@@ -31,6 +36,57 @@ function extractSpecialties(coaches) {
     (coach.specialties || []).forEach((specialty) => set.add(specialty));
   });
   return Array.from(set).sort();
+}
+
+function buildLatestRequestsByCoach(requests) {
+  const latestByCoachId = {};
+
+  (Array.isArray(requests) ? requests : []).forEach((item) => {
+    const coachId = Number(item?.coach_id);
+    if (!Number.isFinite(coachId)) return;
+
+    const previous = latestByCoachId[coachId];
+    const previousTime = new Date(previous?.updated_at || 0).getTime();
+    const currentTime = new Date(item?.updated_at || 0).getTime();
+
+    if (!previous || currentTime >= previousTime) {
+      latestByCoachId[coachId] = item;
+    }
+  });
+
+  return latestByCoachId;
+}
+
+function buildCoachRequestState(requests, myCoach) {
+  const latestByCoachId = buildLatestRequestsByCoach(requests);
+  const terminatedCoachIds = new Set(getRememberedTerminatedCoachIds());
+  const activeCoachId = Number(myCoach?.coach_id);
+  const hasActiveCoach = Number.isFinite(activeCoachId) && Number(myCoach?.relationship_id) > 0;
+  const actionableByCoachId = {};
+
+  Object.values(latestByCoachId).forEach((item) => {
+    const coachId = Number(item?.coach_id);
+    if (!Number.isFinite(coachId)) return;
+
+    const isHistoricalApproved =
+      item?.status === "approved" &&
+      (!hasActiveCoach || coachId !== activeCoachId);
+
+    if (terminatedCoachIds.has(coachId) && isHistoricalApproved) {
+      return;
+    }
+
+    if (isHistoricalApproved) {
+      return;
+    }
+
+    actionableByCoachId[coachId] = item;
+  });
+
+  return {
+    historyByCoachId: latestByCoachId,
+    actionableByCoachId,
+  };
 }
 
 function Stars({ rating }) {
@@ -84,6 +140,7 @@ export default function FindCoachPage() {
   const [requesting, setRequesting] = useState(null);
   const [requestedIds, setRequestedIds] = useState(new Set());
   const [pendingRequests, setPendingRequests] = useState({});
+  const [requestHistory, setRequestHistory] = useState({});
   const [requestError, setRequestError] = useState("");
   const [reviewError, setReviewError] = useState("");
   const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
@@ -114,19 +171,24 @@ export default function FindCoachPage() {
   useEffect(() => {
     if (!account?.id) return;
 
-    fetchMyCoachRequests()
-      .then((requests) => {
-        const byCoachId = Object.fromEntries(requests.map((item) => [item.coach_id, item]));
-        setPendingRequests(byCoachId);
+    Promise.all([
+      fetchMyCoachRequests(),
+      fetchMyCoach().catch(() => null),
+    ])
+      .then(([requests, myCoach]) => {
+        const { historyByCoachId, actionableByCoachId } = buildCoachRequestState(requests, myCoach);
+        setRequestHistory(historyByCoachId);
+        setPendingRequests(actionableByCoachId);
         setRequestedIds(
           new Set(
-            requests
+            Object.values(actionableByCoachId)
               .filter((item) => item?.status !== "rejected")
               .map((item) => Number(item.coach_id))
           )
         );
       })
       .catch(() => {
+        setRequestHistory({});
         setPendingRequests({});
         setRequestedIds(new Set());
       });
@@ -212,12 +274,17 @@ export default function FindCoachPage() {
     setRequesting(coachId);
     try {
       await requestCoach(account.client_id, coachId);
-      const requests = await fetchMyCoachRequests();
-      const byCoachId = Object.fromEntries(requests.map((item) => [item.coach_id, item]));
-      setPendingRequests(byCoachId);
+      forgetTerminatedCoachId(coachId);
+      const [requests, myCoach] = await Promise.all([
+        fetchMyCoachRequests(),
+        fetchMyCoach().catch(() => null),
+      ]);
+      const { historyByCoachId, actionableByCoachId } = buildCoachRequestState(requests, myCoach);
+      setRequestHistory(historyByCoachId);
+      setPendingRequests(actionableByCoachId);
       setRequestedIds(
         new Set(
-          requests
+          Object.values(actionableByCoachId)
             .filter((item) => item?.status !== "rejected")
             .map((item) => Number(item.coach_id))
         )
@@ -236,12 +303,16 @@ export default function FindCoachPage() {
     setRequesting(coachId);
     try {
       await deleteCoachRequest(requestId);
-      const requests = await fetchMyCoachRequests();
-      const byCoachId = Object.fromEntries(requests.map((item) => [item.coach_id, item]));
-      setPendingRequests(byCoachId);
+      const [requests, myCoach] = await Promise.all([
+        fetchMyCoachRequests(),
+        fetchMyCoach().catch(() => null),
+      ]);
+      const { historyByCoachId, actionableByCoachId } = buildCoachRequestState(requests, myCoach);
+      setRequestHistory(historyByCoachId);
+      setPendingRequests(actionableByCoachId);
       setRequestedIds(
         new Set(
-          requests
+          Object.values(actionableByCoachId)
             .filter((item) => item?.status !== "rejected")
             .map((item) => Number(item.coach_id))
         )
@@ -460,10 +531,11 @@ export default function FindCoachPage() {
               const isRequested = requestedIds.has(coach.coach_id);
               const isRequesting = requesting === coach.coach_id;
               const requestEntry = pendingRequests[coach.coach_id];
+              const historyEntry = requestHistory[coach.coach_id];
               const requestStatus = requestEntry?.status || null;
               const canReview = Boolean(
-                requestEntry?.relationship_id
-                || requestStatus === "approved"
+                historyEntry?.relationship_id
+                || historyEntry?.status === "approved"
               );
               const initials = coach.name?.split(" ").map((name) => name[0]).join("") ?? "?";
               const reviews = coachReviews[coach.coach_id] || [];
@@ -669,6 +741,14 @@ export default function FindCoachPage() {
                     >
                       View Profile
                     </button>
+                    {coach.account_id ? (
+                      <button
+                        onClick={() => navigate(`/client/messages?account=${coach.account_id}`)}
+                        className="flex-1 border border-white/10 text-gray-300 hover:bg-white/5 rounded-xl py-2.5 text-sm font-medium transition-colors"
+                      >
+                        Message
+                      </button>
+                    ) : null}
                     {isRequested ? (
                       <button
                         onClick={() => handleCancelRequest(coach.coach_id)}

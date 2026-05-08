@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Navbar } from "../components/navbar";
 import { fetchMe } from "../api/client";
-import { createCoachRequest, fetchCoachProfile } from "../api/coach";
+import { buildCoachRequestPayload, createCoachRequest, fetchCoachProfile } from "../api/coach";
+import AvailabilityCalendar from "../components/availability/AvailabilityCalendar";
 
 const SPECIALIZATION_OPTIONS = [
   "Strength Training",
@@ -16,7 +17,6 @@ const SPECIALIZATION_OPTIONS = [
   "CrossFit",
   "Rehabilitation",
 ];
-
 function CoachRequestFormPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -29,8 +29,6 @@ function CoachRequestFormPage() {
 
   const [form, setForm] = useState({
     name: "",
-    requestedDate: new Date().toISOString().slice(0, 10),
-    yearsExperience: "",
     reason: "",
     specializations: [],
     certifications: [],
@@ -52,6 +50,7 @@ function CoachRequestFormPage() {
   const [editingExperience, setEditingExperience] = useState(null);
   const [showCertForm, setShowCertForm] = useState(false);
   const [showExpForm, setShowExpForm] = useState(false);
+  const [availabilityWindows, setAvailabilityWindows] = useState([]);
 
   const initials = useMemo(() => {
     const parts = form.name.trim().split(/\s+/).filter(Boolean);
@@ -93,6 +92,7 @@ function CoachRequestFormPage() {
               }))
             : prev.experiences,
         }));
+        setAvailabilityWindows([]);
 
         if ((isViewMode || isEditMode) && !existingCoachProfile?.coach_account) {
           setSubmitMessage(
@@ -129,14 +129,6 @@ function CoachRequestFormPage() {
       setError("Name is required.");
       return;
     }
-    if (!form.requestedDate) {
-      setError("Date is required.");
-      return;
-    }
-    if (!form.yearsExperience || Number(form.yearsExperience) < 0) {
-      setError("Please enter valid years of experience.");
-      return;
-    }
     if (form.specializations.length === 0) {
       setError("Select at least one specialization.");
       return;
@@ -145,27 +137,15 @@ function CoachRequestFormPage() {
       setError("Please explain why you want to be a coach.");
       return;
     }
+    if (availabilityWindows.length === 0) {
+      setError("Add at least one availability slot.");
+      return;
+    }
 
     setError("");
     setSubmitting(true);
 
-    // Build backend-compatible payload
-    const backendPayload = {
-      availabilities: [],  // User can fill in availability later
-      experiences: form.experiences.map((exp) => ({
-        title: exp.title,
-        organization: exp.organization,
-        description: exp.description || "",
-      })),
-      certifications: form.certifications.map((cert) => ({
-        name: cert.title,
-        issuer: cert.issuer,
-        description: cert.description || "",
-      })),
-      payment_interval: "monthly",   // Default, can be made configurable
-      price_cents: 0,                // Default, admin can adjust later
-      specialties: form.specializations,
-    };
+    const backendPayload = buildCoachRequestPayload(form, availabilityWindows);
 
     try {
       await createCoachRequest(backendPayload);
@@ -305,39 +285,6 @@ function CoachRequestFormPage() {
               />
             </div>
 
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div>
-                <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
-                  Date
-                </label>
-                <input
-                  type="date"
-                  value={form.requestedDate}
-                  onChange={(e) => setForm((prev) => ({ ...prev, requestedDate: e.target.value }))}
-                  className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
-                  disabled={isViewMode}
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
-                  Total Years Of Experience
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={form.yearsExperience}
-                  onChange={(e) => setForm((prev) => ({ ...prev, yearsExperience: e.target.value }))}
-                  placeholder="e.g. 3"
-                  className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none placeholder:text-slate-600"
-                  disabled={isViewMode}
-                  required
-                />
-              </div>
-            </div>
-
             <div>
               <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
                 Specialties
@@ -361,6 +308,34 @@ function CoachRequestFormPage() {
                     </button>
                   );
                 })}
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                Availability
+              </label>
+              <div className="rounded-xl border border-white/6 bg-[#101827] p-4">
+                <AvailabilityCalendar
+                  availabilities={availabilityWindows.map((w, i) => ({
+                    id: `pending-${i}`,
+                    start_dt: w.start_dt,
+                    end_dt: w.end_dt,
+                    repeats_weekly: w.repeats_weekly,
+                    recurrence_end_dt: w.recurrence_end_dt,
+                  }))}
+                  busySlots={[]}
+                  role="coach"
+                  mode={isViewMode ? "view" : "edit"}
+                  onCreate={async (payload) => {
+                    setAvailabilityWindows((prev) => [...prev, payload]);
+                  }}
+                  onDelete={async (id) => {
+                    if (typeof id !== "string" || !id.startsWith("pending-")) return;
+                    const idx = Number(id.slice("pending-".length));
+                    setAvailabilityWindows((prev) => prev.filter((_, i) => i !== idx));
+                  }}
+                />
               </div>
             </div>
 

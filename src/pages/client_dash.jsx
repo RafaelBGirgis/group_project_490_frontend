@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Navbar,
   StatCard,
@@ -17,7 +17,6 @@ import {
   SkeletonAvailability,
 } from "../components";
 import WorkoutDetail from "../components/overlays/workout_detail";
-import AvailabilityDetail from "../components/overlays/availability_detail";
 import MealDetail from "../components/overlays/meal_detail";
 import DailySurvey from "../components/overlays/daily_survey";
 import StepsLog from "../components/overlays/steps_log";
@@ -27,10 +26,8 @@ import {
   fetchTelemetryToday,
   fetchWorkoutPlan,
   logWorkoutActivity,
-  fetchCoachInfo,
+  fetchMyCoach,
   fetchCoachRating,
-  fetchAvailability,
-  saveAvailability,
   fetchMealsToday,
   fetchAvailableOnDemandMeals,
   fetchMyCoachRequests,
@@ -44,6 +41,17 @@ import {
   fetchStepHistory,
 } from "../api/survey";
 import { getConversationWithAccount } from "../api/chat";
+import {
+  isApprovedCoachRequest,
+  isPendingCoachRequest,
+  resolveActiveCoachRelationship,
+} from "../utils/coachRequests";
+import {
+  forgetTerminatedCoachId,
+  getRememberedTerminatedCoachIds,
+  rememberTerminatedCoachId,
+  rememberTerminatedRelationshipId,
+} from "../utils/terminatedRelationships";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
 
@@ -51,18 +59,6 @@ const role = "client";
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const TODAY_IDX = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
 const pct = (val, max) => Math.min(100, Math.round((val / max) * 100));
-
-const SlotCell = ({ status, time }) => {
-  const base =
-    "rounded py-1 text-center text-[10px] font-medium transition-colors";
-  if (status === "booked")
-    return (
-      <div className={`${base} bg-orange-900/60 text-orange-300`}>{time}</div>
-    );
-  if (status === "available")
-    return <div className={`${base} bg-blue-900/60 text-blue-300`}>{time}</div>;
-  return <div className={`${base} bg-[#0A1020] text-gray-700`}>—</div>;
-};
 
 export default function ClientDash() {
   const navigate = useNavigate();
@@ -129,7 +125,6 @@ export default function ClientDash() {
   const [workoutActivities, setWorkoutActivities] = useState([]);
   const [coach, setCoach]               = useState(null);
   const [coachRating, setCoachRating]   = useState(null);
-  const [availabilitySlots, setAvailabilitySlots] = useState([]);
   const [prescribedMeals, setPrescribedMeals] = useState([]);
   const [availableMeals, setAvailableMeals] = useState([]);
   const [loading, setLoading]           = useState(true);
@@ -138,16 +133,59 @@ export default function ClientDash() {
   const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(false);
   const [pendingCoachRequest, setPendingCoachRequest] = useState(null);
   const [approvedCoachRequest, setApprovedCoachRequest] = useState(null);
+  // Tracks whether there's something worth polling for (pending request or active coach).
+  // Using a ref so the interval callback reads fresh state without needing to restart.
+  const shouldPollRef = useRef(false);
   const [requestStatusError, setRequestStatusError] = useState("");
+  const [requestStatusMessage, setRequestStatusMessage] = useState("");
   const [openingCoachChat, setOpeningCoachChat] = useState(false);
+  const [terminatingRelationship, setTerminatingRelationship] = useState(false);
 
-  const refreshCoachRequestState = useCallback(async () => {
-    const requestList = await fetchMyCoachRequests().catch(() => []);
-    const nextPending = requestList.find((item) => item?.is_accepted === null) || null;
-    const nextApproved = requestList.find((item) => item?.is_accepted === true) || null;
+  const refreshCoachRelationshipState = useCallback(async () => {
+    const [requestList, myCoach] = await Promise.all([
+      fetchMyCoachRequests().catch(() => null),
+      fetchMyCoach(),
+    ]);
+    const { activeCoach, byCoachId } = resolveActiveCoachRelationship(myCoach, requestList);
+    const terminatedCoachIds = new Set(getRememberedTerminatedCoachIds());
+    const activeCoachId = Number(activeCoach?.coach_id);
+
+    if (Number.isFinite(activeCoachId)) {
+      forgetTerminatedCoachId(activeCoachId);
+      terminatedCoachIds.delete(activeCoachId);
+    }
+
+    const requestValues = Object.values(byCoachId);
+    const nextApproved =
+      requestValues
+        .filter((request) => {
+          const coachId = Number(request?.coach_id);
+          return !(terminatedCoachIds.has(coachId) && !activeCoach);
+        })
+        .filter(isApprovedCoachRequest)
+        .sort((a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime())[0]
+      || null;
+    const nextPending =
+      (!nextApproved
+        ? requestValues
+            .filter(isPendingCoachRequest)
+            .sort((a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime())[0]
+        : null)
+      || null;
+
     setPendingCoachRequest(nextPending);
     setApprovedCoachRequest(nextApproved);
-    return { nextPending, nextApproved };
+    const nextCoach = activeCoach;
+    setCoach(nextCoach);
+    setRelationshipId(
+      nextCoach?.relationship_id != null ? Number(nextCoach.relationship_id) : null
+    );
+    if (!nextCoach) {
+      setCoachRating(null);
+    }
+    // Only keep polling if there's something that could change.
+    shouldPollRef.current = !!(nextCoach || nextPending);
+    return { nextPending, nextApproved, myCoach: nextCoach };
   }, []);
 
   /*  load account + client profile  */
@@ -162,21 +200,40 @@ export default function ClientDash() {
         setCanSwitchToAdmin(roleState.hasAdminRole);
         const coachAccess = await getCoachAccessState(me);
         setCanSwitchToCoach(roleState.hasAdminRole || coachAccess.canAccessCoach);
-        await refreshCoachRequestState();
 
         if (me.client_id) {
           setClientId(me.client_id);
+          await refreshCoachRelationshipState();
           try {
             await fetchClientProfile();
           } catch { /* profile fetch optional */ }
+        } else {
+          await refreshCoachRelationshipState();
         }
         setLoading(false);
       } catch {
         // fetchMe will redirect on 401 — keep loading=true so skeleton
         // stays visible during the redirect instead of flashing empty content
+        setLoading(false);
       }
     })();
-  }, [authed, refreshCoachRequestState]);
+  }, [authed, refreshCoachRelationshipState]);
+
+  useEffect(() => {
+    if (!clientId) return undefined;
+
+    const refreshRequests = () => {
+      if (shouldPollRef.current) void refreshCoachRelationshipState();
+    };
+
+    window.addEventListener("focus", refreshRequests);
+    const intervalId = window.setInterval(refreshRequests, 15000);
+
+    return () => {
+      window.removeEventListener("focus", refreshRequests);
+      window.clearInterval(intervalId);
+    };
+  }, [clientId, refreshCoachRelationshipState]);
 
   /*  load dashboard data once we have a clientId  */
   useEffect(() => {
@@ -185,13 +242,16 @@ export default function ClientDash() {
 
     (async () => {
       try {
-        const [telemetry, coachInfo, session, availability, meals, mealOptions] =
+        const [telemetry, meals, mealOptions] =
           await Promise.all([
-            fetchTelemetryToday(clientId),
-            fetchCoachInfo(clientId),
-            fetchAvailability(clientId),
-            fetchMealsToday(clientId),
-            fetchAvailableOnDemandMeals(clientId),
+            fetchTelemetryToday(clientId).catch(() => ({
+              step_count: 0,
+              calories_burned: 0,
+              calories_consumed: 0,
+              calories_goal: 2000,
+            })),
+            fetchMealsToday(clientId).catch(() => []),
+            fetchAvailableOnDemandMeals(clientId).catch(() => []),
           ]);
 
         setStepCount(telemetry.step_count);
@@ -199,28 +259,16 @@ export default function ClientDash() {
         setCaloriesConsumed(telemetry.calories_consumed);
         if (telemetry.calories_goal) setCaloriesGoal(telemetry.calories_goal);
 
-        setCoach(coachInfo);
-        setAvailabilitySlots(availability);
         setPrescribedMeals(meals);
         setAvailableMeals(mealOptions);
-        if (coachInfo?.coach_id) {
-          setRelationshipId(
-            coachInfo.relationship_id != null ? Number(coachInfo.relationship_id) : null
-          );
-        } else if (approvedCoachRequest?.relationship_id) {
-          setRelationshipId(Number(approvedCoachRequest.relationship_id));
-          setCoach({
-            coach_id: approvedCoachRequest.coach_id,
-            name: approvedCoachRequest.coach_name || `Coach #${approvedCoachRequest.coach_id}`,
-            specialty: "Approved coach",
-          });
-        }
       } catch {
-        // Individual fetchers have their own fallbacks; if something still
-        // throws (e.g. 401 redirect in progress) just stay on skeleton
+        // Leave the last known dashboard state in place if the refresh fails.
       }
     })();
-  }, [approvedCoachRequest, clientId, refreshSurveyStatus]);
+  }, [
+    clientId,
+    refreshSurveyStatus,
+  ]);
 
   /*  load coach rating when coach is known  */
   useEffect(() => {
@@ -267,16 +315,28 @@ export default function ClientDash() {
   };
 
   const handleTerminateRelationship = async () => {
-    if (!relationshipId) return;
-    if (!window.confirm("End your relationship with this coach?")) return;
+    if (!relationshipId || terminatingRelationship) return;
+    if (!window.confirm("End your coaching relationship with this coach?")) return;
 
+    setRequestStatusError("");
+    setRequestStatusMessage("");
+    setTerminatingRelationship(true);
+    setCoach(null);
+    setRelationshipId(null);
+    setApprovedCoachRequest(null);
     try {
       await terminateRelationship(relationshipId);
-      setCoach(null);
-      setRelationshipId(null);
-      await refreshCoachRequestState();
-    } catch {
-      // keep UI state unchanged on failure
+      rememberTerminatedRelationshipId(relationshipId);
+      if (coach?.coach_id != null) {
+        rememberTerminatedCoachId(coach.coach_id);
+      }
+      await refreshCoachRelationshipState();
+      setRequestStatusMessage("Coaching relationship ended.");
+    } catch (error) {
+      await refreshCoachRelationshipState();
+      setRequestStatusError(error?.message || "Unable to end this relationship.");
+    } finally {
+      setTerminatingRelationship(false);
     }
   };
 
@@ -286,9 +346,9 @@ export default function ClientDash() {
 
     try {
       await deleteCoachRequest(pendingCoachRequest.request_id);
-      await refreshCoachRequestState();
-    } catch {
-      // keep UI state unchanged on failure
+      await refreshCoachRelationshipState();
+    } catch (error) {
+      setRequestStatusError(error?.message || "Unable to cancel this coach request.");
     }
   };
 
@@ -322,6 +382,7 @@ export default function ClientDash() {
   const stepsPercent   = pct(stepCount ?? 0, 10000);
   const calPercent     = pct(caloriesConsumed ?? 0, caloriesGoal);
   const workoutPercent = pct(completedCount, totalCount || 1);
+  const hasActiveCoach = Boolean(coach?.coach_id && relationshipId);
 
   /*  greeting based on time of day  */
   const hour = new Date().getHours();
@@ -435,29 +496,25 @@ export default function ClientDash() {
           </div>
 
           <DashboardCard role={role} title="Calories" className="items-center">
-            <div className="flex justify-center">
-              <ProgressRing
-                role={role}
-                percent={calPercent}
-                size={120}
-                label={
-                  caloriesConsumed !== null ? caloriesConsumed.toString() : "—"
-                }
-                sublabel={`of ${caloriesGoal} kcal`}
-              />
-            </div>
+            <ProgressRing
+              role={role}
+              percent={calPercent}
+              size={120}
+              label={
+                caloriesConsumed !== null ? caloriesConsumed.toString() : "—"
+              }
+              sublabel={`of ${caloriesGoal} kcal`}
+            />
           </DashboardCard>
 
           <DashboardCard role={role} title="Progress" className="items-center">
-            <div className="flex justify-center">
-              <ProgressRing
-                role={role}
-                percent={workoutPercent}
-                size={120}
-                label={`${workoutPercent}%`}
-                sublabel="weekly goal"
-              />
-            </div>
+            <ProgressRing
+              role={role}
+              percent={workoutPercent}
+              size={120}
+              label={`${workoutPercent}%`}
+              sublabel="weekly goal"
+            />
             <div className="w-full bg-[#0A1020] rounded-xl px-4 py-2 text-center mt-2">
               <p className="text-[10px] text-gray-500 uppercase tracking-widest">
                 Workouts
@@ -477,6 +534,11 @@ export default function ClientDash() {
             {requestStatusError}
           </div>
         ) : null}
+        {requestStatusMessage ? (
+          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">
+            {requestStatusMessage}
+          </div>
+        ) : null}
 
         {pendingCoachRequest ? (
           <DashboardCard role={role} title="Coach Request Status">
@@ -485,28 +547,30 @@ export default function ClientDash() {
                 <p className="text-white font-semibold">
                   {pendingCoachRequest.coach_name || "Coach request pending"}
                 </p>
-                <p className="mt-1 text-sm text-amber-300">Pending approval</p>
+                <p className="mt-1 text-sm text-amber-300">Pending request</p>
                 <p className="mt-1 text-xs text-gray-500">
                   Your request is waiting for the coach to review it.
                 </p>
               </div>
-              <button
-                onClick={() => navigate("/find-coach")}
-                className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm font-medium text-amber-300"
-              >
-                View Request
-              </button>
-              <button
-                onClick={handleCancelCoachRequest}
-                className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-300"
-              >
-                Cancel Request
-              </button>
-            </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => navigate("/find-coach")}
+                  className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm font-medium text-amber-300"
+                >
+                  View Request
+                </button>
+                  <button
+                    onClick={handleCancelCoachRequest}
+                    className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-300"
+                  >
+                  Cancel Request
+                  </button>
+                </div>
+              </div>
           </DashboardCard>
         ) : null}
 
-        <div className="grid grid-cols-3 gap-4 items-stretch">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
           {/* Today's Workout */}
           <DashboardCard
             role={role}
@@ -517,10 +581,10 @@ export default function ClientDash() {
             }}
             footer={
               <button
-                onClick={() => navigate("/workouts?role=client")}
+                onClick={() => navigate("/plan-my-week?role=client")}
                 className="w-full py-2 rounded-xl border border-blue-500/30 text-blue-400 text-xs font-semibold hover:bg-blue-500/10 transition-colors"
               >
-                Browse & Build Workouts
+                Plan My Week
               </button>
             }
           >
@@ -561,7 +625,7 @@ export default function ClientDash() {
           </DashboardCard>
 
           {/* My Coach */}
-          {coach ? (
+          {hasActiveCoach ? (
             <DashboardCard
               role={role}
               title="My Coach"
@@ -582,8 +646,9 @@ export default function ClientDash() {
                     <button
                       className="flex-1 bg-red-600 hover:bg-red-700 text-white rounded-xl py-2 text-sm font-medium transition-colors"
                       onClick={handleTerminateRelationship}
+                      disabled={terminatingRelationship}
                     >
-                      Fire Coach
+                      {terminatingRelationship ? "Ending..." : "End Relationship"}
                     </button>
                   ) : null}
                 </div>
@@ -609,7 +674,14 @@ export default function ClientDash() {
             </DashboardCard>
           ) : (
             /*  No Coach — Find a Coach CTA  */
-            <DashboardCard role={role} title="My Coach">
+            <DashboardCard
+              role={role}
+              title="Find Coach"
+              action={{
+                label: "Browse coaches",
+                onClick: () => navigate("/find-coach"),
+              }}
+            >
               <div className="flex flex-col items-center justify-center py-4 text-center">
                 <div className="w-16 h-16 rounded-full bg-blue-900/20 flex items-center justify-center mb-4">
                   <svg className="w-8 h-8 text-blue-400/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -633,60 +705,6 @@ export default function ClientDash() {
             </DashboardCard>
           )}
 
-          {/* Availability */}
-          <DashboardCard
-            role={role}
-            title="Availability"
-            action={{
-              label: "Edit Schedule",
-              onClick: () => setOverlay("availability"),
-            }}
-          >
-            <div className="grid grid-cols-8 gap-1 mb-2">
-              <div />
-              {WEEKDAYS.map((d) => (
-                <div
-                  key={d}
-                  className="text-[10px] text-gray-500 text-center font-medium"
-                >
-                  {d}
-                </div>
-              ))}
-            </div>
-
-            {availabilitySlots.length === 0 ? (
-              <p className="text-gray-500 text-sm text-center py-6">
-                No availability set
-              </p>
-            ) : (
-              availabilitySlots.map(({ time, slots }) => (
-                <div key={time} className="grid grid-cols-8 gap-1 mb-1">
-                  <div className="text-[10px] text-gray-500 flex items-center">
-                    {time}
-                  </div>
-                  {slots.map((status, i) => (
-                    <SlotCell key={i} status={status} time={time} />
-                  ))}
-                </div>
-              ))
-            )}
-
-            <div className="flex gap-4 mt-3">
-              {[
-                { color: "bg-blue-400", label: "Available" },
-                { color: "bg-orange-400", label: "Booked" },
-                { color: "bg-gray-600", label: "Unavailable" },
-              ].map(({ color, label }) => (
-                <span
-                  key={label}
-                  className="flex items-center gap-1.5 text-[10px] text-gray-400"
-                >
-                  <span className={`w-2 h-2 rounded-full ${color}`} />
-                  {label}
-                </span>
-              ))}
-            </div>
-          </DashboardCard>
         </div>
 
         {/*  NUTRITION DETAIL  */}
@@ -758,25 +776,6 @@ export default function ClientDash() {
         />
       </Overlay>
 
-      {/* Coach Profile */}
-      {/* Availability */}
-      <Overlay
-        open={overlay === "availability"}
-        onClose={closeOverlay}
-        title="Your Availability"
-        wide
-      >
-        <AvailabilityDetail
-          slots={availabilitySlots}
-          weekdays={WEEKDAYS}
-          role="client"
-          onSave={async (updatedSlots) => {
-            const refreshedAvailability = await saveAvailability(clientId, updatedSlots);
-            setAvailabilitySlots(Array.isArray(refreshedAvailability) ? refreshedAvailability : updatedSlots);
-          }}
-        />
-      </Overlay>
-
       {/* Meals */}
       <Overlay
         open={overlay === "meals"}
@@ -797,7 +796,8 @@ export default function ClientDash() {
         title="Daily Check-in"
         wide
       >
-        <DailySurvey onCompleted={refreshSurveyStatus} />
+        <DailySurvey clientId={clientId} onCompleted={refreshSurveyStatus} />
+        
       </Overlay>
 
       {/* Steps Log */}

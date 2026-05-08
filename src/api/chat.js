@@ -169,6 +169,25 @@ export async function terminateRelationship(relationshipId) {
   }
 }
 
+/* blocks */
+
+export async function blockAccount(accountId) {
+  return apiPost(`/roles/shared/blocks/${accountId}`);
+}
+
+export async function unblockAccount(accountId) {
+  return apiDelete(`/roles/shared/blocks/${accountId}`);
+}
+
+export async function listBlockedAccounts() {
+  try {
+    const result = await apiGet(`/roles/shared/blocks`);
+    return Array.isArray(result?.blocked) ? result.blocked : [];
+  } catch {
+    return [];
+  }
+}
+
 /* shared account updates */
 
 export async function updateAccount(payload) {

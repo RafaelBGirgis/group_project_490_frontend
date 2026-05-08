@@ -63,7 +63,6 @@ export default function ClientChatPage() {
 
     loadConversations()
       .then(async (convos) => {
-        const myCoach = await fetchMyCoach().catch(() => null);
         let nextConversations = convos;
         let nextActiveChat = null;
 
@@ -73,13 +72,18 @@ export default function ClientChatPage() {
           nextActiveChat = convos.find((c) => String(c.partner_id) === preselectedClient) || null;
         }
 
-        if (!nextActiveChat && myCoach?.relationship_id && (preselectedAccount || preselectedClient)) {
-          const ensuredConversation = await getConversationWithAccount(coachAccountId, {
-            id: myCoach.coach_id,
-            account_id: myCoach.account_id ?? myCoach.accountId ?? null,
-            name: myCoach.name || `Coach #${myCoach.coach_id}`,
-            role: "coach",
-          }).catch(() => null);
+        // If a preselected account isn't already in the user's conversation list
+        // (e.g. messaging a coach from find_coach with no prior relationship),
+        // create-or-fetch it directly so the chat opens with real data.
+        if (!nextActiveChat && preselectedAccount) {
+          const ensuredConversation = await getConversationWithAccount(
+            Number(preselectedAccount),
+            {
+              account_id: Number(preselectedAccount),
+              name: "Coach",
+              role: "coach",
+            },
+          ).catch(() => null);
 
           if (ensuredConversation) {
             nextConversations = [

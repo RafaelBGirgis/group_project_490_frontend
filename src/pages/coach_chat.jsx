@@ -95,22 +95,36 @@ export default function CoachChatPage() {
           nextActiveChat = findPreferredConversation(convos, preselectedClient);
         }
 
-        if (!nextActiveChat && preselectedClient) {
+        // Always ensure a conversation when a preselected target is given but
+        // not present in the existing convo list (covers messaging a pending
+        // requester or any account without an existing relationship).
+        if (!nextActiveChat && preselectedAccount) {
+          const ensuredConversation = await getConversationWithAccount(
+            Number(preselectedAccount),
+            {
+              account_id: Number(preselectedAccount),
+              name: "Client",
+              role: "client",
+            },
+          ).catch(() => null);
+          if (ensuredConversation) {
+            nextConversations = [
+              ensuredConversation,
+              ...convos.filter((item) => item.id !== ensuredConversation.id),
+            ];
+            nextActiveChat = ensuredConversation;
+          }
+        } else if (!nextActiveChat && preselectedClient) {
           const selectedClient = clients.find((client) => String(client.id) === String(preselectedClient));
           const detail = selectedClient?.details || await lookupClient(preselectedClient).catch(() => null);
-          const relationshipId =
-            selectedClient?.relationship_id ??
-            detail?.relationship_id ??
-            detail?.client_coach_relationship?.id ??
-            null;
           const ensuredConversation = await getConversationWithAccount(
             detail?.base_account?.id ?? null,
             {
-            id: Number(preselectedClient),
-            account_id: detail?.base_account?.id ?? null,
-            name: detail?.base_account?.name || selectedClient?.name || `Client #${preselectedClient}`,
-            role: "client",
-            }
+              id: Number(preselectedClient),
+              account_id: detail?.base_account?.id ?? null,
+              name: detail?.base_account?.name || selectedClient?.name || `Client #${preselectedClient}`,
+              role: "client",
+            },
           ).catch(() => null);
 
           if (ensuredConversation) {

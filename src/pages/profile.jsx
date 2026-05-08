@@ -427,23 +427,23 @@ function ProfilePage({ role = "client" }) {
 
           nextCertifications = Array.isArray(coachDetails.certifications)
             ? coachDetails.certifications.map((c, i) => ({
-                  id: c.id || `cert-${i}`,
-                  title: c.certification_name || "",
-                  issuer: c.certification_organization || "",
-                  year: c.certification_date || "",
-                  description: c.certification_score || "",
-                }))
+              id: c.id || `cert-${i}`,
+              title: c.certification_name || "",
+              issuer: c.certification_organization || "",
+              year: c.certification_date || "",
+              description: c.certification_score || "",
+            }))
             : [];
           setCertifications(nextCertifications);
 
           nextExperiences = Array.isArray(coachDetails.experiences)
             ? coachDetails.experiences.map((e, i) => ({
-                  id: e.id || `exp-${i}`,
-                  title: e.experience_title || "",
-                  issuer: e.experience_name || "",
-                  year: e.experience_start || "",
-                  description: e.experience_description || "",
-                }))
+              id: e.id || `exp-${i}`,
+              title: e.experience_title || "",
+              issuer: e.experience_name || "",
+              year: e.experience_start || "",
+              description: e.experience_description || "",
+            }))
             : [];
           setExperiences(nextExperiences);
 
@@ -462,9 +462,9 @@ function ProfilePage({ role = "client" }) {
             nextCoachProfileData = coachProfile;
             setCoachProfileData(coachProfile);
             nextSpecializations = String(coachProfile?.coach_account?.specialties || "")
-                .split(",")
-                .map((item) => item.trim())
-                .filter(Boolean);
+              .split(",")
+              .map((item) => item.trim())
+              .filter(Boolean);
             setSpecializations(nextSpecializations);
           } catch {
             setCoachProfileData(null);
@@ -570,12 +570,12 @@ function ProfilePage({ role = "client" }) {
     runSectionSave("subscription", async () => {
       const latestPayment = paymentMethod
         ? {
-            ccnum: paymentMethod.ccnum || "",
-            cv: paymentMethod.cv || "",
-            exp_date:
-              paymentMethod.exp_date ||
-              `${paymentMethod.expiryYear}-${paymentMethod.expiryMonth}-01`,
-          }
+          ccnum: paymentMethod.ccnum || "",
+          cv: paymentMethod.cv || "",
+          exp_date:
+            paymentMethod.exp_date ||
+            `${paymentMethod.expiryYear}-${paymentMethod.expiryMonth}-01`,
+        }
         : null;
       const payload = buildClientInformationPayload({ paymentMethod: latestPayment });
       if (Object.keys(payload).length === 0) {
@@ -862,16 +862,16 @@ function ProfilePage({ role = "client" }) {
                 </p>
 
                 <label className={`mt-5 w-full rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] px-4 py-3 text-sm font-medium text-slate-200 hover:bg-[rgba(255,255,255,0.05)] ${profileInputsDisabled ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
-                    Upload / Change Profile Picture
-                    <input
+                  Upload / Change Profile Picture
+                  <input
                     type="file"
                     className="hidden"
                     accept="image/*"
                     disabled={profileInputsDisabled}
                     onChange={(e) =>
-                        handleProfileChange("profilePicture", e.target.files?.[0] || null)
+                      handleProfileChange("profilePicture", e.target.files?.[0] || null)
                     }
-                    />
+                  />
                 </label>
               </div>
             </SidebarCard>
@@ -1637,8 +1637,13 @@ function SidebarCard({ title, children }) {
   );
 }
 
+function PanelChildrenWrapper({ children }) {
+  return <div className="mt-4"> {children} </div>;
+}
+
 function Panel({ id, title, children, accent, collapsible = true, open = true, onToggle }) {
   const handleToggle = () => collapsible && onToggle?.();
+
   return (
     <section
       id={id}
@@ -1648,7 +1653,7 @@ function Panel({ id, title, children, accent, collapsible = true, open = true, o
         <button
           type="button"
           onClick={handleToggle}
-          className={`mb-4 flex w-full items-center justify-between gap-4 text-left ${collapsible ? "cursor-pointer" : "cursor-default"}`}
+          className={`mb-0 flex w-full items-center justify-between gap-4 text-left ${collapsible ? "cursor-pointer" : "cursor-default"}`}
           aria-expanded={open}
         >
           <h2 className="text-sm font-bold text-white">{title}</h2>
@@ -1663,7 +1668,9 @@ function Panel({ id, title, children, accent, collapsible = true, open = true, o
           )}
         </button>
       )}
-      {open && children}
+
+
+      {open && PanelChildrenWrapper({ children })}
     </section>
   );
 }

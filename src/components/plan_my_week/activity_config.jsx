@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { listWorkoutActivities } from "../../api/plan_my_week";
 import { estimateCalories, intensityLabel } from "../../contexts/plan_my_week_context";
+import { ROLE_THEMES } from "../theme";
+import { usePlanMyWeek } from "../../contexts/plan_my_week_context";
 
 /**
  * Lets the user pick an intensity option (one of the WorkoutActivity rows
@@ -12,6 +14,8 @@ import { estimateCalories, intensityLabel } from "../../contexts/plan_my_week_co
  *   onClose, onSubmit(activityDraft)
  */
 export default function ActivityConfig({ workout, editingDraft, onClose, onSubmit }) {
+  const { state } = usePlanMyWeek();
+  const theme = ROLE_THEMES[state.role] ?? ROLE_THEMES.client;
   const [activities, setActivities] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -120,7 +124,7 @@ export default function ActivityConfig({ workout, editingDraft, onClose, onSubmi
                     key={a.id}
                     className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border cursor-pointer ${
                       selectedActivityId === a.id
-                        ? "border-orange-400 bg-orange-500/10"
+                        ? `${theme.borderAccent} ${theme.tagBg}`
                         : "border-white/10 hover:border-white/20"
                     }`}
                   >
@@ -163,14 +167,14 @@ export default function ActivityConfig({ workout, editingDraft, onClose, onSubmi
 
             <div className="rounded-lg bg-[#0A1020] px-3 py-2 flex items-center justify-between">
               <span className="text-xs uppercase tracking-widest text-gray-500">Estimated calories</span>
-              <span className="text-sm font-semibold text-orange-300">{calories.toFixed(2)} cal</span>
+              <span className={`text-sm font-semibold ${theme.tagText}`}>{calories.toFixed(2)} cal</span>
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
               <button onClick={onClose} className="px-4 py-2 text-sm border border-white/10 rounded-lg">Cancel</button>
               <button
                 onClick={handleSubmit}
-                className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 rounded-lg font-semibold"
+                className={`px-4 py-2 text-sm rounded-lg font-semibold text-white ${theme.btnPrimary}`}
               >
                 {editingDraft ? "Update activity" : "Add to plan"}
               </button>

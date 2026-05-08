@@ -11,6 +11,7 @@ import {
 } from "../api/chat";
 import { ROLE_THEMES } from "../components/theme";
 import { getCoachAccessState } from "../utils/roleAccess";
+import { resolveRoleState } from "../utils/sessionAuth";
 import { fetchClientRequests, fetchMyClients, lookupClient } from "../api/coach";
 
 export default function CoachChatPage() {
@@ -22,16 +23,19 @@ export default function CoachChatPage() {
   const [account, setAccount] = useState(null);
   const [loading, setLoading] = useState(true);
   const [chatError, setChatError] = useState("");
+  const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(false);
 
   useEffect(() => {
     fetchMe()
       .then(async (me) => {
+        const roleState = await resolveRoleState().catch(() => null);
         const coachAccess = await getCoachAccessState(me);
         if (!coachAccess.canAccessCoach) {
           navigate("/client-chat");
           return;
         }
         setAccount(me);
+        setCanSwitchToAdmin(Boolean(roleState?.hasAdminRole));
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -254,7 +258,14 @@ export default function CoachChatPage() {
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: "#080D19" }}>
-      <Navbar role={role} userName={userInitials} />
+      <Navbar
+        role={role}
+        userName={userInitials}
+        switchOptions={[
+          { label: "Client", to: "/client" },
+          ...(canSwitchToAdmin ? [{ label: "Admin", to: "/admin" }] : []),
+        ]}
+      />
 
       <div className="max-w-7xl mx-auto px-6 py-6">
         {chatError ? (

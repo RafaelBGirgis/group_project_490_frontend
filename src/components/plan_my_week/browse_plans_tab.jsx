@@ -4,6 +4,7 @@ import {
   prescribePlanToClient,
   searchWorkoutPlans,
 } from "../../api/plan_my_week";
+import { ROLE_THEMES } from "../theme";
 import { usePlanMyWeek } from "../../contexts/plan_my_week_context";
 
 const PAGE_SIZE = 12;
@@ -29,12 +30,14 @@ function addDays(iso, days) {
 }
 
 export default function BrowsePlansTab() {
+  const { state } = usePlanMyWeek();
+  const theme = ROLE_THEMES[state.role] ?? ROLE_THEMES.client;
   const [text, setText] = useState("");
   const [skip, setSkip] = useState(0);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [scheduling, setScheduling] = useState(null); // plan being scheduled
+  const [scheduling, setScheduling] = useState(null);
 
   useEffect(() => {
     let alive = true;
@@ -58,7 +61,7 @@ export default function BrowsePlansTab() {
             setText(e.target.value);
             setSkip(0);
           }}
-          placeholder="Search plans by name…"
+          placeholder="Search plans by name..."
           className="w-full bg-[#0A1020] border border-white/10 rounded-lg px-3 py-2 text-sm"
         />
       </div>
@@ -68,7 +71,7 @@ export default function BrowsePlansTab() {
       ) : null}
 
       {loading ? (
-        <p className="text-sm text-gray-500 py-8 text-center">Loading…</p>
+        <p className="text-sm text-gray-500 py-8 text-center">Loading...</p>
       ) : items.length === 0 ? (
         <p className="text-sm text-gray-500 py-8 text-center">No plans yet.</p>
       ) : (
@@ -87,27 +90,27 @@ export default function BrowsePlansTab() {
               <ul className="flex-1 space-y-1 text-xs text-gray-400 mb-3">
                 {(plan.activities || []).slice(0, 4).map((a) => (
                   <li key={a.id}>
-                    • {a.workout_name || `Activity #${a.workout_activity_id}`}
-                    {" — "}
+                    - {a.workout_name || `Activity #${a.workout_activity_id}`}
+                    {" - "}
                     {a.intensity_value != null
-                      ? `${a.intensity_value}${a.intensity_measure ? " " + a.intensity_measure : ""}`
-                      : "—"}
+                      ? `${a.intensity_value}${a.intensity_measure ? ` ${a.intensity_measure}` : ""}`
+                      : "-"}
                     {a.planned_duration
                       ? ` · ${a.planned_duration}s`
                       : a.planned_reps && a.planned_sets
-                        ? ` · ${a.planned_reps}×${a.planned_sets}`
+                        ? ` · ${a.planned_reps}x${a.planned_sets}`
                         : ""}
                   </li>
                 ))}
                 {(plan.activities?.length || 0) > 4 ? (
-                  <li>+ {plan.activities.length - 4} more…</li>
+                  <li>+ {plan.activities.length - 4} more...</li>
                 ) : null}
               </ul>
               <button
                 onClick={() => setScheduling(plan)}
-                className="self-end px-3 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-400 text-xs font-semibold"
+                className={`self-end px-3 py-1.5 rounded-lg text-xs font-semibold text-white ${theme.btnPrimary}`}
               >
-                Schedule →
+                {"Schedule ->"}
               </button>
             </article>
           ))}
@@ -122,27 +125,28 @@ export default function BrowsePlansTab() {
             onClick={() => setSkip(Math.max(0, skip - PAGE_SIZE))}
             className="px-3 py-1 rounded border border-white/10 disabled:opacity-30"
           >
-            ← Prev
+            {"<- Prev"}
           </button>
           <button
             disabled={items.length < PAGE_SIZE}
             onClick={() => setSkip(skip + PAGE_SIZE)}
             className="px-3 py-1 rounded border border-white/10 disabled:opacity-30"
           >
-            Next →
+            {"Next ->"}
           </button>
         </div>
       </footer>
 
       {scheduling ? (
-        <ScheduleModal plan={scheduling} onClose={() => setScheduling(null)} />
+        <ScheduleModal plan={scheduling} onClose={() => setScheduling(null)} role={state.role} />
       ) : null}
     </div>
   );
 }
 
-function ScheduleModal({ plan, onClose }) {
+function ScheduleModal({ plan, onClose, role }) {
   const { state } = usePlanMyWeek();
+  const theme = ROLE_THEMES[role] ?? ROLE_THEMES.client;
   const [blocks, setBlocks] = useState([]);
   const [date, setDate] = useState(todayIso());
   const [startHour, setStartHour] = useState(8);
@@ -200,7 +204,7 @@ function ScheduleModal({ plan, onClose }) {
       <div className="bg-[#0F1729] rounded-2xl border border-white/10 max-w-md w-full p-5 space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-bold">Schedule "{plan.strata_name}"</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-white text-xl leading-none">×</button>
+          <button onClick={onClose} className="text-gray-400 hover:text-white text-xl leading-none">x</button>
         </div>
 
         <div className="grid grid-cols-3 gap-2">
@@ -241,7 +245,7 @@ function ScheduleModal({ plan, onClose }) {
 
         <button
           onClick={addBlock}
-          className="w-full py-2 rounded-lg border border-orange-500/30 text-orange-300 text-sm hover:bg-orange-500/10"
+          className={`w-full py-2 rounded-lg border text-sm ${theme.btnOutline}`}
         >
           + Add block
         </button>
@@ -251,7 +255,7 @@ function ScheduleModal({ plan, onClose }) {
             {blocks.map((b) => (
               <li key={b._id} className="flex items-center justify-between text-xs bg-[#0A1020] rounded px-2 py-1.5">
                 <span>
-                  {b.date_iso} · {fmtHour(b.start_hour)} → {fmtHour(b.end_hour)}
+                  {b.date_iso} · {fmtHour(b.start_hour)} {"->"} {fmtHour(b.end_hour)}
                 </span>
                 <button
                   onClick={() => setBlocks((prev) => prev.filter((x) => x._id !== b._id))}
@@ -272,9 +276,9 @@ function ScheduleModal({ plan, onClose }) {
           <button
             disabled={submitting}
             onClick={submit}
-            className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 disabled:bg-blue-900/40 rounded-lg font-semibold"
+            className={`px-4 py-2 text-sm rounded-lg font-semibold text-white disabled:opacity-50 ${theme.btnPrimary}`}
           >
-            {submitting ? "Scheduling…" : `Schedule ${blocks.length || ""}`.trim()}
+            {submitting ? "Scheduling..." : `Schedule ${blocks.length || ""}`.trim()}
           </button>
         </div>
       </div>

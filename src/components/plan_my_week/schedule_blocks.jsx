@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ROLE_THEMES } from "../theme";
 import { usePlanMyWeek } from "../../contexts/plan_my_week_context";
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
@@ -28,6 +29,7 @@ function weekdayLabel(iso) {
 
 export default function ScheduleBlocks() {
   const { state, dispatch } = usePlanMyWeek();
+  const theme = ROLE_THEMES[state.role] ?? ROLE_THEMES.client;
   const [date, setDate] = useState(todayIso());
   const [startHour, setStartHour] = useState(8);
   const [endHour, setEndHour] = useState(9);
@@ -86,7 +88,7 @@ export default function ScheduleBlocks() {
       {error ? <p className="text-xs text-red-300">{error}</p> : null}
       <button
         onClick={addBlock}
-        className="w-full py-2 rounded-lg border border-orange-500/30 text-orange-300 text-sm hover:bg-orange-500/10"
+        className={`w-full py-2 rounded-lg border text-sm ${theme.btnOutline}`}
       >
         + Add block
       </button>

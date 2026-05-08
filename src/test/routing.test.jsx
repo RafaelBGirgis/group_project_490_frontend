@@ -108,9 +108,9 @@ describe("Page smoke tests", () => {
     localStorage.setItem("jwt", "valid");
   });
 
-  it("plan page renders without crashing", async () => {
-    const PlanPage = (await import("../pages/plan")).default;
-    renderInRouter(PlanPage);
+  it("plan-my-week page renders without crashing", async () => {
+    const PlanMyWeekPage = (await import("../pages/plan_my_week")).default;
+    renderInRouter(PlanMyWeekPage);
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalled();
     });

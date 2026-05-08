@@ -1,14 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Navbar } from "../components/navbar";
-import AvailabilityDetail from "../components/overlays/availability_detail";
 import { fetchMe } from "../api/client";
 import { buildCoachRequestPayload, createCoachRequest, fetchCoachProfile } from "../api/coach";
-import {
-  convertGridToTrainingAvailability,
-  convertTrainingAvailabilityToGrid,
-  EMPTY_TRAINING_AVAILABILITY,
-} from "../utils/availabilityModel";
+import AvailabilityCalendar from "../components/availability/AvailabilityCalendar";
 
 const SPECIALIZATION_OPTIONS = [
   "Strength Training",
@@ -22,8 +17,6 @@ const SPECIALIZATION_OPTIONS = [
   "CrossFit",
   "Rehabilitation",
 ];
-const AVAILABILITY_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
 function CoachRequestFormPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -57,7 +50,7 @@ function CoachRequestFormPage() {
   const [editingExperience, setEditingExperience] = useState(null);
   const [showCertForm, setShowCertForm] = useState(false);
   const [showExpForm, setShowExpForm] = useState(false);
-  const [availability, setAvailability] = useState(EMPTY_TRAINING_AVAILABILITY);
+  const [availabilityWindows, setAvailabilityWindows] = useState([]);
 
   const initials = useMemo(() => {
     const parts = form.name.trim().split(/\s+/).filter(Boolean);
@@ -99,7 +92,7 @@ function CoachRequestFormPage() {
               }))
             : prev.experiences,
         }));
-        setAvailability({ ...EMPTY_TRAINING_AVAILABILITY });
+        setAvailabilityWindows([]);
 
         if ((isViewMode || isEditMode) && !existingCoachProfile?.coach_account) {
           setSubmitMessage(
@@ -144,7 +137,7 @@ function CoachRequestFormPage() {
       setError("Please explain why you want to be a coach.");
       return;
     }
-    if (!Object.values(availability).some((slots) => slots.length > 0)) {
+    if (availabilityWindows.length === 0) {
       setError("Add at least one availability slot.");
       return;
     }
@@ -152,7 +145,7 @@ function CoachRequestFormPage() {
     setError("");
     setSubmitting(true);
 
-    const backendPayload = buildCoachRequestPayload(form, availability);
+    const backendPayload = buildCoachRequestPayload(form, availabilityWindows);
 
     try {
       await createCoachRequest(backendPayload);
@@ -332,19 +325,28 @@ function CoachRequestFormPage() {
               <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
                 Availability
               </label>
-              <AvailabilityDetail
-                slots={convertTrainingAvailabilityToGrid(availability)}
-                weekdays={AVAILABILITY_DAYS}
-                role="coach"
-                onSave={
-                  isViewMode
-                    ? undefined
-                    : async (updatedSlots) => {
-                        setAvailability(convertGridToTrainingAvailability(updatedSlots));
-                      }
-                }
-                showDefaultRows={true}
-              />
+              <div className="rounded-xl border border-white/6 bg-[#101827] p-4">
+                <AvailabilityCalendar
+                  availabilities={availabilityWindows.map((w, i) => ({
+                    id: `pending-${i}`,
+                    start_dt: w.start_dt,
+                    end_dt: w.end_dt,
+                    repeats_weekly: w.repeats_weekly,
+                    recurrence_end_dt: w.recurrence_end_dt,
+                  }))}
+                  busySlots={[]}
+                  role="coach"
+                  mode={isViewMode ? "view" : "edit"}
+                  onCreate={async (payload) => {
+                    setAvailabilityWindows((prev) => [...prev, payload]);
+                  }}
+                  onDelete={async (id) => {
+                    if (typeof id !== "string" || !id.startsWith("pending-")) return;
+                    const idx = Number(id.slice("pending-".length));
+                    setAvailabilityWindows((prev) => prev.filter((_, i) => i !== idx));
+                  }}
+                />
+              </div>
             </div>
 
             <div className="space-y-3">

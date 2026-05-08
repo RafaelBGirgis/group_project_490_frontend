@@ -1,12 +1,5 @@
-import { apiDelete, apiFetch, apiGet, apiPatch, apiPost, withQuery } from "./api";
+import { apiDelete, apiFetch, apiGet, apiPatch, apiPost, apiPut, withQuery } from "./api";
 import { clearAuth } from "./auth";
-import {
-  convertBackendAvailabilitiesToGrid,
-  convertGridToBackendAvailabilities,
-  convertTrainingAvailabilityObjectToBackend,
-  extractBackendAvailabilities,
-  sanitizeBackendAvailabilities,
-} from "../utils/availabilityModel";
 
 const WEEKDAY_NAMES = [
   "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
@@ -247,36 +240,32 @@ export async function fetchNextSession(_clientId) {
   return null;
 }
 
-export async function fetchAvailability(clientId) {
-  void clientId;
-  try {
-    const unified = await fetchUnifiedProfile().catch(() => null);
-    const profile = unified ? null : await fetchClientProfile().catch(() => null);
-    const clientDetails =
-      unified?.client_details ||
-      unified?.client ||
-      profile?.client_account ||
-      profile?.client_details ||
-      profile ||
-      unified;
-    const availabilities = extractBackendAvailabilities(clientDetails) || [];
-    return convertBackendAvailabilitiesToGrid(availabilities);
-  } catch {
-    return [];
-  }
+export async function listClientAvailability(fromDt, toDt) {
+  return apiGet(withQuery("/roles/client/availability", { from_dt: fromDt, to_dt: toDt }));
 }
 
-export async function saveAvailability(clientId, slots) {
-  void clientId;
-  const availabilities = sanitizeBackendAvailabilities(
-    convertGridToBackendAvailabilities(slots)
-  );
-  const result = await updateClientInformation({ availabilities });
-  const updatedAvailabilities = extractRoleAvailabilities(result);
-  if (Array.isArray(updatedAvailabilities)) {
-    return convertBackendAvailabilitiesToGrid(updatedAvailabilities);
-  }
-  return fetchAvailability(clientId);
+export async function createClientAvailability(payload) {
+  return apiPost("/roles/client/availability", payload);
+}
+
+export async function updateClientAvailability(id, payload) {
+  return apiPut(`/roles/client/availability/${id}`, payload);
+}
+
+export async function deleteClientAvailability(id) {
+  return apiDelete(`/roles/client/availability/${id}`);
+}
+
+export async function listClientBusySlots(fromDt, toDt) {
+  return apiGet(withQuery("/roles/client/busy_slots", { from_dt: fromDt, to_dt: toDt }));
+}
+
+export async function createClientBusySlot(payload) {
+  return apiPost("/roles/client/busy_slots", payload);
+}
+
+export async function deleteClientBusySlot(id) {
+  return apiDelete(`/roles/client/busy_slots/${id}`);
 }
 
 /**
@@ -421,6 +410,13 @@ export async function fetchCoachReviews(coachId) {
 }
 
 export function buildInitialSurveyPayload(form) {
+  const availabilities = (Array.isArray(form.availabilityWindows) ? form.availabilityWindows : []).map((w) => ({
+    account_id: 0,
+    start_dt: w.start_dt,
+    end_dt: w.end_dt,
+    repeats_weekly: !!w.repeats_weekly,
+    recurrence_end_dt: w.recurrence_end_dt ?? null,
+  }));
   return {
     fitness_goals: {
       client_id: 0,
@@ -431,9 +427,7 @@ export function buildInitialSurveyPayload(form) {
       cv: String(form.cardCvv || ""),
       exp_date: form.cardExpiry || "",
     },
-    availabilities: sanitizeBackendAvailabilities(
-      convertTrainingAvailabilityObjectToBackend(form.trainingAvailability ?? {})
-    ),
+    availabilities,
     initial_health_metric: {
       weight: extractWeightNumber(form.weight),
       client_telemetry_id: 0,
@@ -444,7 +438,6 @@ export function buildInitialSurveyPayload(form) {
 export function buildClientInformationPayload({
   primaryGoal,
   weight,
-  trainingAvailability,
   paymentMethod,
 }) {
   const payload = {};
@@ -462,11 +455,6 @@ export function buildClientInformationPayload({
       weight: parsedWeight,
       client_telemetry_id: 0,
     };
-  }
-
-  if (trainingAvailability && typeof trainingAvailability === "object") {
-    const availabilities = convertTrainingAvailabilityObjectToBackend(trainingAvailability);
-    payload.availabilities = sanitizeBackendAvailabilities(availabilities);
   }
 
   const paymentInformation = buildPaymentInformation(paymentMethod);
@@ -674,10 +662,6 @@ function normalizeMyCoach(payload) {
       coachAccount?.specialties ||
       "Active coach",
   };
-}
-
-function extractRoleAvailabilities(payload) {
-  return extractBackendAvailabilities(payload);
 }
 
 function formatExperienceYear(start, end, fallback) {

@@ -17,7 +17,6 @@ import {
   SkeletonAvailability,
 } from "../components";
 import WorkoutDetail from "../components/overlays/workout_detail";
-import AvailabilityDetail from "../components/overlays/availability_detail";
 import MealDetail from "../components/overlays/meal_detail";
 import DailySurvey from "../components/overlays/daily_survey";
 import StepsLog from "../components/overlays/steps_log";
@@ -29,8 +28,6 @@ import {
   logWorkoutActivity,
   fetchMyCoach,
   fetchCoachRating,
-  fetchAvailability,
-  saveAvailability,
   fetchMealsToday,
   fetchAvailableOnDemandMeals,
   fetchMyCoachRequests,
@@ -57,35 +54,6 @@ const role = "client";
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const TODAY_IDX = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
 const pct = (val, max) => Math.min(100, Math.round((val / max) * 100));
-
-function summarizeAvailability(rows) {
-  const safeRows = Array.isArray(rows) ? rows : [];
-  const openSlots = safeRows.reduce(
-    (sum, row) => sum + (Array.isArray(row.slots) ? row.slots.filter((slot) => slot === "available").length : 0),
-    0
-  );
-  const bookedSlots = safeRows.reduce(
-    (sum, row) => sum + (Array.isArray(row.slots) ? row.slots.filter((slot) => slot === "booked").length : 0),
-    0
-  );
-  const activeDays = WEEKDAYS.reduce(
-    (sum, _, dayIdx) => sum + (safeRows.some((row) => row.slots?.[dayIdx] === "available") ? 1 : 0),
-    0
-  );
-  return { openSlots, bookedSlots, activeDays };
-}
-
-const SlotCell = ({ status, time }) => {
-  const base =
-    "rounded py-1 text-center text-[10px] font-medium transition-colors";
-  if (status === "booked")
-    return (
-      <div className={`${base} bg-orange-900/60 text-orange-300`}>{time}</div>
-    );
-  if (status === "available")
-    return <div className={`${base} bg-blue-900/60 text-blue-300`}>{time}</div>;
-  return <div className={`${base} bg-[#0A1020] text-gray-700`}>—</div>;
-};
 
 export default function ClientDash() {
   const navigate = useNavigate();
@@ -152,7 +120,6 @@ export default function ClientDash() {
   const [workoutActivities, setWorkoutActivities] = useState([]);
   const [coach, setCoach]               = useState(null);
   const [coachRating, setCoachRating]   = useState(null);
-  const [availabilitySlots, setAvailabilitySlots] = useState([]);
   const [prescribedMeals, setPrescribedMeals] = useState([]);
   const [availableMeals, setAvailableMeals] = useState([]);
   const [loading, setLoading]           = useState(true);
@@ -165,7 +132,6 @@ export default function ClientDash() {
   const [requestStatusMessage, setRequestStatusMessage] = useState("");
   const [openingCoachChat, setOpeningCoachChat] = useState(false);
   const [terminatingRelationship, setTerminatingRelationship] = useState(false);
-  const [availabilityMessage, setAvailabilityMessage] = useState("");
 
   const refreshCoachRelationshipState = useCallback(async () => {
     const [requestList, myCoach] = await Promise.all([
@@ -254,7 +220,7 @@ export default function ClientDash() {
 
     (async () => {
       try {
-        const [telemetry, availability, meals, mealOptions] =
+        const [telemetry, meals, mealOptions] =
           await Promise.all([
             fetchTelemetryToday(clientId).catch(() => ({
               step_count: 0,
@@ -262,7 +228,6 @@ export default function ClientDash() {
               calories_consumed: 0,
               calories_goal: 2000,
             })),
-            fetchAvailability(clientId).catch(() => []),
             fetchMealsToday(clientId).catch(() => []),
             fetchAvailableOnDemandMeals(clientId).catch(() => []),
           ]);
@@ -272,7 +237,6 @@ export default function ClientDash() {
         setCaloriesConsumed(telemetry.calories_consumed);
         if (telemetry.calories_goal) setCaloriesGoal(telemetry.calories_goal);
 
-        setAvailabilitySlots(Array.isArray(availability) ? availability : []);
         setPrescribedMeals(meals);
         setAvailableMeals(mealOptions);
       } catch {
@@ -393,7 +357,6 @@ export default function ClientDash() {
   const stepsPercent   = pct(stepCount ?? 0, 10000);
   const calPercent     = pct(caloriesConsumed ?? 0, caloriesGoal);
   const workoutPercent = pct(completedCount, totalCount || 1);
-  const availabilitySummary = summarizeAvailability(availabilitySlots);
   const hasActiveCoach = Boolean(coach?.coach_id && relationshipId);
 
   /*  greeting based on time of day  */
@@ -582,7 +545,7 @@ export default function ClientDash() {
           </DashboardCard>
         ) : null}
 
-        <div className="grid grid-cols-3 gap-4 items-stretch">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
           {/* Today's Workout */}
           <DashboardCard
             role={role}
@@ -593,7 +556,7 @@ export default function ClientDash() {
             }}
             footer={
               <button
-                onClick={() => navigate("/plan?role=client")}
+                onClick={() => navigate("/plan-my-week?role=client")}
                 className="w-full py-2 rounded-xl border border-blue-500/30 text-blue-400 text-xs font-semibold hover:bg-blue-500/10 transition-colors"
               >
                 Plan My Week
@@ -717,79 +680,6 @@ export default function ClientDash() {
             </DashboardCard>
           )}
 
-          {/* Availability */}
-          <DashboardCard
-            role={role}
-            title="Availability"
-            action={{
-              label: "Edit Schedule",
-              onClick: () => setOverlay("availability"),
-            }}
-          >
-            {availabilityMessage ? (
-              <div className="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">
-                {availabilityMessage}
-              </div>
-            ) : null}
-            <div className="mb-3 grid grid-cols-3 gap-2">
-              <div className="rounded-lg bg-[#0A1020] px-3 py-2 text-center">
-                <p className="text-lg font-bold text-blue-300">{availabilitySummary.openSlots}</p>
-                <p className="text-[10px] uppercase tracking-widest text-gray-500">Open Slots</p>
-              </div>
-              <div className="rounded-lg bg-[#0A1020] px-3 py-2 text-center">
-                <p className="text-lg font-bold text-white">{availabilitySummary.activeDays}</p>
-                <p className="text-[10px] uppercase tracking-widest text-gray-500">Active Days</p>
-              </div>
-              <div className="rounded-lg bg-[#0A1020] px-3 py-2 text-center">
-                <p className="text-lg font-bold text-orange-300">{availabilitySummary.bookedSlots}</p>
-                <p className="text-[10px] uppercase tracking-widest text-gray-500">Booked</p>
-              </div>
-            </div>
-            <div className="grid grid-cols-8 gap-1 mb-2">
-              <div />
-              {WEEKDAYS.map((d) => (
-                <div
-                  key={d}
-                  className="text-[10px] text-gray-500 text-center font-medium"
-                >
-                  {d}
-                </div>
-              ))}
-            </div>
-
-            {availabilitySlots.length === 0 ? (
-              <p className="text-gray-500 text-sm text-center py-6">
-                No availability set
-              </p>
-            ) : (
-              availabilitySlots.map(({ time, slots }) => (
-                <div key={time} className="grid grid-cols-8 gap-1 mb-1">
-                  <div className="text-[10px] text-gray-500 flex items-center">
-                    {time}
-                  </div>
-                  {slots.map((status, i) => (
-                    <SlotCell key={i} status={status} time={time} />
-                  ))}
-                </div>
-              ))
-            )}
-
-            <div className="flex gap-4 mt-3">
-              {[
-                { color: "bg-blue-400", label: "Available" },
-                { color: "bg-orange-400", label: "Booked" },
-                { color: "bg-gray-600", label: "Unavailable" },
-              ].map(({ color, label }) => (
-                <span
-                  key={label}
-                  className="flex items-center gap-1.5 text-[10px] text-gray-400"
-                >
-                  <span className={`w-2 h-2 rounded-full ${color}`} />
-                  {label}
-                </span>
-              ))}
-            </div>
-          </DashboardCard>
         </div>
 
         {/*  NUTRITION DETAIL  */}
@@ -858,27 +748,6 @@ export default function ClientDash() {
           activeDay={activeDay}
           onDayChange={setActiveDay}
           onLog={handleLogActivity}
-        />
-      </Overlay>
-
-      {/* Coach Profile */}
-      {/* Availability */}
-      <Overlay
-        open={overlay === "availability"}
-        onClose={closeOverlay}
-        title="Your Availability"
-        wide
-      >
-        <AvailabilityDetail
-          slots={availabilitySlots}
-          weekdays={WEEKDAYS}
-          role="client"
-          onSave={async (updatedSlots) => {
-            setAvailabilityMessage("");
-            const refreshedAvailability = await saveAvailability(clientId, updatedSlots);
-            setAvailabilitySlots(Array.isArray(refreshedAvailability) ? refreshedAvailability : []);
-            setAvailabilityMessage("Availability saved to your client profile.");
-          }}
         />
       </Overlay>
 

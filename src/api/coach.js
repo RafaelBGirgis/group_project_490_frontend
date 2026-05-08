@@ -1,14 +1,4 @@
-import { apiDelete, apiGet, apiPatch, apiPost, withQuery } from "./api";
-import { fetchUnifiedProfile } from "./client";
-import {
-  convertBackendAvailabilitiesToGrid,
-  convertGridToTrainingAvailability,
-  convertTrainingAvailabilityObjectToBackend,
-  extractBackendAvailabilities,
-  sanitizeBackendAvailabilities,
-} from "../utils/availabilityModel";
-
-const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut, withQuery } from "./api";
 
 function resolveClientName(source, fallbackId) {
   return (
@@ -311,56 +301,47 @@ export async function fetchClientReports(clientId) {
   return apiGet(`/roles/coach/reports/${clientId}`);
 }
 
-export async function fetchCoachAvailability(coachId) {
+// ─── Self-service availability + busy slot CRUD ──────────────────────────────
+
+export async function listSelfAvailability(fromDt, toDt) {
+  return apiGet(withQuery("/roles/coach/availability", { from_dt: fromDt, to_dt: toDt }));
+}
+
+export async function createSelfAvailability(payload) {
+  return apiPost("/roles/coach/availability", payload);
+}
+
+export async function updateSelfAvailability(id, payload) {
+  return apiPut(`/roles/coach/availability/${id}`, payload);
+}
+
+export async function deleteSelfAvailability(id) {
+  return apiDelete(`/roles/coach/availability/${id}`);
+}
+
+export async function listSelfBusySlots(fromDt, toDt) {
+  return apiGet(withQuery("/roles/coach/busy_slots", { from_dt: fromDt, to_dt: toDt }));
+}
+
+export async function createSelfBusySlot(payload) {
+  return apiPost("/roles/coach/busy_slots", payload);
+}
+
+export async function deleteSelfBusySlot(id) {
+  return apiDelete(`/roles/coach/busy_slots/${id}`);
+}
+
+// View a coach's availability as a client (for the booking UI)
+export async function fetchCoachAvailabilityWindows(coachId, fromDt, toDt) {
   if (!coachId) return [];
-
   try {
-    const unified = await fetchUnifiedProfile().catch(() => null);
-    const availabilities = extractRoleAvailabilities(
-      unified?.coach_details || unified
-    ) || [];
-    if (availabilities.length > 0) {
-      return convertBackendAvailabilitiesToGrid(availabilities);
-    }
-  } catch {
-    // Fall through to route/profile-based fallback below.
-  }
-
-  try {
-    const response = await apiGet(`/roles/coach/coach_availability/${coachId}`);
-    const availabilities = extractRoleAvailabilities(response) || [];
-    if (availabilities.length > 0) {
-      return convertBackendAvailabilitiesToGrid(availabilities);
-    }
-  } catch {
-    // Fall through to profile-based fallback below.
-  }
-
-  try {
-    const profile = await fetchCoachProfile();
-    const availabilities = extractRoleAvailabilities(profile) || [];
-    return convertBackendAvailabilitiesToGrid(availabilities);
+    const response = await apiGet(
+      withQuery(`/roles/coach/coach_availability/${coachId}`, { from_dt: fromDt, to_dt: toDt })
+    );
+    return Array.isArray(response) ? response : [];
   } catch {
     return [];
   }
-}
-
-export async function saveCoachAvailability(coachId, slots) {
-  if (!coachId) {
-    throw new Error("Missing coach id for availability update.");
-  }
-  const backendAvailabilities = convertTrainingAvailabilityObjectToBackend(
-    convertGridToTrainingAvailability(slots)
-  );
-
-  const result = await updateCoachInformation({
-    availabilities: sanitizeBackendAvailabilities(backendAvailabilities),
-  });
-  const updatedAvailabilities = extractRoleAvailabilities(result);
-  if (Array.isArray(updatedAvailabilities)) {
-    return convertBackendAvailabilitiesToGrid(updatedAvailabilities);
-  }
-  return fetchCoachAvailability(coachId);
 }
 
 export async function fetchCoachStats(coachId) {
@@ -500,11 +481,23 @@ export async function fetchClientWorkoutPlanByCoach(clientId, weekdayIdx) {
   return { strata_name: "", activities: [] };
 }
 
-export async function fetchClientAvailabilityByCoach(clientId) {
+export async function fetchClientAvailabilityByCoach(clientId, fromDt, toDt) {
   try {
-    const result = await apiGet(`/roles/coach/client_availability/${clientId}`);
-    const availabilities = extractBackendAvailabilities(result) || [];
-    return convertBackendAvailabilitiesToGrid(availabilities);
+    const result = await apiGet(
+      withQuery(`/roles/coach/client/${clientId}/availability`, { from_dt: fromDt, to_dt: toDt })
+    );
+    return Array.isArray(result) ? result : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchClientBusySlotsByCoach(clientId, fromDt, toDt) {
+  try {
+    const result = await apiGet(
+      withQuery(`/roles/coach/client/${clientId}/busy_slots`, { from_dt: fromDt, to_dt: toDt })
+    );
+    return Array.isArray(result) ? result : [];
   } catch {
     return [];
   }
@@ -512,11 +505,15 @@ export async function fetchClientAvailabilityByCoach(clientId) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function buildCoachRequestPayload(form, availability) {
+export function buildCoachRequestPayload(form, availabilityWindows) {
   return {
-    availabilities: sanitizeBackendAvailabilities(
-      convertTrainingAvailabilityObjectToBackend(availability)
-    ),
+    availabilities: (Array.isArray(availabilityWindows) ? availabilityWindows : []).map((w) => ({
+      account_id: 0,
+      start_dt: w.start_dt,
+      end_dt: w.end_dt,
+      repeats_weekly: !!w.repeats_weekly,
+      recurrence_end_dt: w.recurrence_end_dt ?? null,
+    })),
     experiences: (form.experiences || []).map(mapExperienceToBackend),
     certifications: (form.certifications || []).map(mapCertificationToBackend),
     specialties: form.specializations || [],
@@ -526,17 +523,12 @@ export function buildCoachRequestPayload(form, availability) {
 }
 
 export function buildCoachInformationPayload({
-  availability,
   certifications,
   experiences,
   specializations,
 }) {
   const payload = {};
 
-  if (availability && typeof availability === "object") {
-    const mappedAvailability = convertTrainingAvailabilityObjectToBackend(availability);
-    payload.availabilities = sanitizeBackendAvailabilities(mappedAvailability);
-  }
   if (Array.isArray(certifications) && certifications.length > 0) {
     payload.certifications = certifications.map(mapCertificationToBackend);
   }
@@ -655,6 +647,3 @@ function mergeClientsById(primaryClients, fallbackClients) {
   return merged;
 }
 
-function extractRoleAvailabilities(payload) {
-  return extractBackendAvailabilities(payload);
-}

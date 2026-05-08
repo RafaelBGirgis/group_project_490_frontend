@@ -10,8 +10,10 @@ import {
   fetchClientMealHistoryByCoach,
   fetchClientWorkoutPlanByCoach,
   fetchClientAvailabilityByCoach,
+  fetchClientBusySlotsByCoach,
   createClientReview,
 } from "../../api/coach";
+import AvailabilityCalendar from "../availability/AvailabilityCalendar";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const TODAY_IDX = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
@@ -33,15 +35,6 @@ function groupByDate(items, getDate) {
   });
   return [...groups.entries()].map(([date, entries]) => ({ date, entries }));
 }
-
-const SlotCell = ({ status, time }) => {
-  const base = "rounded py-1 text-center text-[10px] font-medium transition-colors";
-  if (status === "booked")
-    return <div className={`${base} bg-orange-900/60 text-orange-300`}>{time}</div>;
-  if (status === "available")
-    return <div className={`${base} bg-blue-900/60 text-blue-300`}>{time}</div>;
-  return <div className={`${base} bg-[#0A1020] text-gray-700`}>—</div>;
-};
 
 function TelemetryBlock({ title, items, hasMore, onLoadMore, children }) {
   return (
@@ -75,7 +68,9 @@ export default function ClientProfile({ clientId, detail }) {
   const [activeDay, setActiveDay] = useState(TODAY_IDX);
   const [workoutPlan, setWorkoutPlan] = useState(null);
   const [workoutActivities, setWorkoutActivities] = useState([]);
-  const [availabilitySlots, setAvailabilitySlots] = useState([]);
+  const [availabilityRows, setAvailabilityRows] = useState([]);
+  const [availabilityBusy, setAvailabilityBusy] = useState([]);
+  const [availabilityRange, setAvailabilityRange] = useState({ from: null, to: null });
 
   const [weights, setWeights]       = useState([]);
   const [weightsSkip, setWeightsSkip] = useState(0);
@@ -114,17 +109,26 @@ export default function ClientProfile({ clientId, detail }) {
       fetchClientWorkoutHistoryByCoach(clientId, { limit: PAGE_SIZE, skip: 0 }),
       fetchClientProgressPicturesByCoach(clientId, { limit: PAGE_SIZE, skip: 0 }),
       fetchClientMealHistoryByCoach(clientId, { limit: PAGE_SIZE, skip: 0 }),
-      fetchClientAvailabilityByCoach(clientId),
-    ]).then(([ws, ms, ss, whs, ps, mls, avail]) => {
+    ]).then(([ws, ms, ss, whs, ps, mls]) => {
       setWeights(ws);  setWeightsMore(ws.length === PAGE_SIZE);  setWeightsSkip(PAGE_SIZE);
       setMoods(ms);    setMoodsMore(ms.length === PAGE_SIZE);    setMoodsSkip(PAGE_SIZE);
       setSteps(ss);    setStepsMore(ss.length === PAGE_SIZE);    setStepsSkip(PAGE_SIZE);
       setWorkouts(whs); setWorkoutsMore(whs.length === PAGE_SIZE); setWorkoutsSkip(PAGE_SIZE);
       setPictures(ps); setPicturesMore(ps.length === PAGE_SIZE); setPicturesSkip(PAGE_SIZE);
       setMeals(mls);   setMealsMore(mls.length === PAGE_SIZE);   setMealsSkip(PAGE_SIZE);
-      setAvailabilitySlots(avail);
     });
   }, [clientId]);
+
+  useEffect(() => {
+    if (!clientId || !availabilityRange.from || !availabilityRange.to) return;
+    Promise.all([
+      fetchClientAvailabilityByCoach(clientId, availabilityRange.from, availabilityRange.to),
+      fetchClientBusySlotsByCoach(clientId, availabilityRange.from, availabilityRange.to),
+    ]).then(([rows, busy]) => {
+      setAvailabilityRows(Array.isArray(rows) ? rows : []);
+      setAvailabilityBusy(Array.isArray(busy) ? busy : []);
+    });
+  }, [clientId, availabilityRange]);
 
   const loadWorkoutPlan = useCallback(async () => {
     if (!clientId) return;
@@ -395,36 +399,13 @@ export default function ClientProfile({ clientId, detail }) {
       {/* ── Client Availability ───────────────────────────────────────────── */}
       <div className="rounded-2xl border border-white/6 bg-[#0B1120] p-4">
         <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-3">Client Availability</p>
-        <div className="grid grid-cols-8 gap-1 mb-2">
-          <div />
-          {WEEKDAYS.map((d) => (
-            <div key={d} className="text-[10px] text-gray-500 text-center font-medium">{d}</div>
-          ))}
-        </div>
-        {availabilitySlots.length === 0 ? (
-          <p className="text-gray-600 text-sm text-center py-4">No availability recorded</p>
-        ) : (
-          availabilitySlots.map(({ time, slots }) => (
-            <div key={time} className="grid grid-cols-8 gap-1 mb-1">
-              <div className="text-[10px] text-gray-500 flex items-center">{time}</div>
-              {slots.map((status, i) => (
-                <SlotCell key={i} status={status} time={time} />
-              ))}
-            </div>
-          ))
-        )}
-        <div className="flex gap-4 mt-3">
-          {[
-            { color: "bg-blue-400", label: "Available" },
-            { color: "bg-orange-400", label: "Booked" },
-            { color: "bg-gray-600", label: "Unavailable" },
-          ].map(({ color, label }) => (
-            <span key={label} className="flex items-center gap-1.5 text-[10px] text-gray-400">
-              <span className={`w-2 h-2 rounded-full ${color}`} />
-              {label}
-            </span>
-          ))}
-        </div>
+        <AvailabilityCalendar
+          availabilities={availabilityRows}
+          busySlots={availabilityBusy}
+          role="client"
+          mode="view"
+          onRangeChange={(from, to) => setAvailabilityRange({ from, to })}
+        />
       </div>
 
       {/* ── Report User ───────────────────────────────────────────────────── */}

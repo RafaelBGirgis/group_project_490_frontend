@@ -84,6 +84,23 @@ export async function fetchMessages(chatId, { skip = 0, limit = 100 } = {}) {
   }));
 }
 
+export async function markMessagesRead(chatId) {
+  try {
+    return await apiPost(`/roles/shared/chat/messages/${chatId}/read`);
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchUnreadMessageCount() {
+  try {
+    const result = await apiGet("/roles/shared/chat/unread_count");
+    return Number(result?.total_unread ?? 0);
+  } catch {
+    return 0;
+  }
+}
+
 export async function sendMessage(chatId, content) {
   const result = await apiPost(withQuery(`/roles/shared/chat/messages/${chatId}`, {
     message_text: content,

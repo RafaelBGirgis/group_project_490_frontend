@@ -84,13 +84,12 @@ export async function fetchMyCoachRequests() {
 export async function fetchMyCoach() {
   try {
     const result = await apiGet("/roles/client/my_coach");
+    if (!result || result.coach === null) return null;
     const normalized = normalizeMyCoach(result);
     if (!normalized?.relationship_id) return null;
     return normalized;
   } catch (error) {
-    if (error?.status === 404) {
-      return null;
-    }
+    if (error?.status === 404) return null;
     throw error;
   }
 }

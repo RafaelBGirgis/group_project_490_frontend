@@ -10,6 +10,7 @@ import {
   fetchPublicAccount,
   formatChatTimestamp,
   getConversationWithAccount,
+  markMessagesRead,
   sendMessage,
   unblockAccount,
 } from "../api/chat";
@@ -124,7 +125,11 @@ export default function MessagesPage() {
     const loadMessages = async ({ initial = false } = {}) => {
       try {
         const next = await fetchMessages(activeChat.id);
-        if (!cancelled) setMessages(next);
+        if (!cancelled) {
+          setMessages(next);
+          // Mark as read after the initial fetch so the unread badge clears.
+          if (initial) markMessagesRead(activeChat.id);
+        }
       } catch (error) {
         if (!cancelled && initial) {
           setMessages([]);
@@ -441,11 +446,13 @@ export default function MessagesPage() {
                   )}
                   <div className="flex-1 min-w-0">
                     <p className="text-white font-semibold text-sm truncate">{partnerProfile.name}</p>
-                    <p className="text-gray-500 text-[10px] uppercase tracking-wider">
-                      {partnerProfile.role}
-                      {partnerProfile.age != null ? <> · {partnerProfile.age}</> : null}
-                      {partnerProfile.gender ? <> · {partnerProfile.gender}</> : null}
-                    </p>
+                    {(partnerProfile.age != null || partnerProfile.gender) ? (
+                      <p className="text-gray-500 text-[10px] uppercase tracking-wider">
+                        {partnerProfile.age != null ? partnerProfile.age : null}
+                        {partnerProfile.age != null && partnerProfile.gender ? " · " : null}
+                        {partnerProfile.gender || null}
+                      </p>
+                    ) : null}
                   </div>
                   <div className="flex items-center gap-2">
                     {partnerProfile.role === "coach" && partnerProfile.id ? (

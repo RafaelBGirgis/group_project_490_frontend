@@ -136,7 +136,7 @@ export default function ClientDash() {
   const refreshCoachRelationshipState = useCallback(async () => {
     const [requestList, myCoach] = await Promise.all([
       fetchMyCoachRequests().catch(() => null),
-      fetchMyCoach().catch(() => null),
+      fetchMyCoach(),
     ]);
     const { activeCoach, byCoachId } = resolveActiveCoachRelationship(myCoach, requestList);
     const requestValues = Object.values(byCoachId);

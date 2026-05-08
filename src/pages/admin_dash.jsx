@@ -262,8 +262,6 @@ export default function AdminDash() {
   const [userRoleFilter, setUserRoleFilter] = useState("all");
   const [userStatusFilter, setUserStatusFilter] = useState("all");
   const [userPage, setUserPage] = useState(1);
-  const [userSortBy, setUserSortBy] = useState("name");
-  const [userSortDir, setUserSortDir] = useState("asc");
 
   /*  exercise bank state  */
   const [exSearch, setExSearch] = useState("");
@@ -298,7 +296,7 @@ export default function AdminDash() {
 
       const [s, u, ex, an, requests] = await Promise.all([
         fetchAdminStats(),
-        fetchAllUsers({ sortBy: userSortBy, sortDir: userSortDir }),
+        fetchAllUsers(),
         fetchExerciseBank(),
         fetchAnalytics(),
         fetchCoachRequests(),
@@ -317,7 +315,7 @@ export default function AdminDash() {
 
       setLoading(false);
     })();
-  }, [authed, userSortBy, userSortDir]);
+  }, [authed]);
 
   /*  handlers  */
   const handleApprove = async (id) => {
@@ -334,11 +332,6 @@ export default function AdminDash() {
   const handleUserStatusChange = async (userId, newStatus) => {
     await updateUserStatus(userId, newStatus);
     setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, status: newStatus } : u));
-  };
-
-  const handleUserSort = (sortBy) => {
-    setUserSortBy(sortBy);
-    setUserSortDir((prev) => userSortBy === sortBy && prev === "asc" ? "desc" : "asc");
   };
 
   const handleDeleteUser = async (userId) => {
@@ -693,20 +686,8 @@ export default function AdminDash() {
           <div className="divide-y divide-white/5">
             {/* Header row */}
             <div className="grid grid-cols-12 gap-4 px-5 py-2.5 text-[10px] text-gray-500 uppercase tracking-widest">
-              <button
-                type="button"
-                onClick={() => handleUserSort("name")}
-                className="col-span-3 text-left hover:text-gray-300 transition-colors"
-              >
-                User {userSortBy === "name" ? (userSortDir === "asc" ? "↑" : "↓") : ""}
-              </button>
-              <button
-                type="button"
-                onClick={() => handleUserSort("email")}
-                className="col-span-3 text-left hover:text-gray-300 transition-colors"
-              >
-                Email {userSortBy === "email" ? (userSortDir === "asc" ? "↑" : "↓") : ""}
-              </button>
+              <span className="col-span-3">User</span>
+              <span className="col-span-3">Email</span>
               <span className="col-span-1">Role</span>
               <span className="col-span-1">Status</span>
               <span className="col-span-2">Last Active</span>

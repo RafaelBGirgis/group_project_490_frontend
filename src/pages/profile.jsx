@@ -847,14 +847,14 @@ function ProfilePage({ role = "client" }) {
                     onClick={handleDeleteCoachAccount}
                     className="w-full rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-300"
                   >
-                    Delete Coach Account
+                    Delete Account
                   </button>
 
                   <button
                     onClick={handleDeactivateCoachAccount}
                     className="w-full rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm font-semibold text-orange-300"
                   >
-                    Deactivate Coach Account
+                    Deactivate Account
                   </button>
 
                   <button

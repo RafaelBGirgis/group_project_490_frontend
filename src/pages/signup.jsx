@@ -27,7 +27,6 @@ export default function SignupPage() {
     confirmPassword: "",
     age: "",
     gender: "",
-    pfpUrl: "",
     bio: "",
   });
   const [error, setError] = useState("");
@@ -86,7 +85,7 @@ export default function SignupPage() {
         formData.name,
         parsedAge,
         formData.gender,
-        formData.pfpUrl.trim() || undefined,
+        undefined,
         formData.bio.trim() || undefined
       );
       storeToken(data.access_token);
@@ -96,7 +95,6 @@ export default function SignupPage() {
         age: parsedAge,
         gender: formData.gender,
         bio: formData.bio.trim(),
-        pfpUrl: formData.pfpUrl.trim(),
       });
       const account = await fetchMe();
       window.location.href = await resolvePostSignupPath(account);
@@ -297,20 +295,6 @@ export default function SignupPage() {
 
               <div>
                 <label className="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-400">
-                  Profile Image URL (Optional)
-                </label>
-                <input
-                  type="url"
-                  name="pfpUrl"
-                  placeholder="https://example.com/avatar.png"
-                  value={formData.pfpUrl}
-                  onChange={handleChange}
-                  className="w-full rounded-xl border border-white/10 bg-[#0B1220] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-blue-400/60 focus:ring-2 focus:ring-blue-500/20"
-                />
-              </div>
-
-              <div>
-                <label className="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-400">
                   Bio (Optional)
                 </label>
                 <textarea
@@ -359,4 +343,3 @@ function FeatureCard({ emoji, title, text }) {
     </div>
   );
 }
-

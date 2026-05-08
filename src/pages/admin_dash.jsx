@@ -451,7 +451,6 @@ export default function AdminDash() {
   const paginatedExercises = filteredExercises.slice((exPage - 1) * EXERCISES_PER_PAGE, exPage * EXERCISES_PER_PAGE);
 
   const activeAnalytics = analytics?.[analyticsPeriod] ?? [];
-  const summary = analytics?.summary ?? {};
 
   /*  loading skeleton  */
   if (loading) {
@@ -588,57 +587,6 @@ export default function AdminDash() {
             ENGAGEMENT ANALYTICS
             ═══════════════════════════════════════════════════════════════ */}
         <SectionHeader label="ENGAGEMENT ANALYTICS" role={role} />
-
-        {/* KPI cards */}
-        <div className="grid grid-cols-3 gap-4">
-          {[
-            { label: "DAU", value: summary.dau, change: summary.dau_change, sub: "Daily Active Users" },
-            { label: "WAU", value: summary.wau, change: summary.wau_change, sub: "Weekly Active Users" },
-            { label: "MAU", value: summary.mau, change: summary.mau_change, sub: "Monthly Active Users" },
-          ].map((kpi) => (
-            <div key={kpi.label} className="bg-[#0E1628] rounded-2xl p-5 relative overflow-hidden">
-              <div className="flex items-center justify-between mb-1">
-                <p className="text-[10px] text-gray-500 uppercase tracking-widest">{kpi.label}</p>
-                {kpi.change != null && (
-                  <span className={`text-xs font-semibold ${kpi.change >= 0 ? "text-green-400" : "text-red-400"}`}>
-                    {kpi.change >= 0 ? "↑" : "↓"} {Math.abs(kpi.change)}%
-                  </span>
-                )}
-              </div>
-              <p className="text-3xl font-bold text-white">
-                <AnimatedNumber value={kpi.value ?? 0} duration={1500} />
-              </p>
-              <p className="text-xs text-gray-500 mt-1">{kpi.sub}</p>
-              {/* Background glow */}
-              <div className="absolute -bottom-4 -right-4 w-24 h-24 rounded-full opacity-5 bg-red-500 blur-2xl" />
-            </div>
-          ))}
-        </div>
-
-        {/* Extra stats row */}
-        <div className="grid grid-cols-3 gap-4">
-          <div className="bg-[#0E1628] rounded-2xl p-4 flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-red-500/10 flex items-center justify-center text-red-400 text-lg">📊</div>
-            <div>
-              <p className="text-white font-bold text-lg"><AnimatedNumber value={summary.total_signups_30d ?? 0} /></p>
-              <p className="text-gray-500 text-xs">New signups (30d)</p>
-            </div>
-          </div>
-          <div className="bg-[#0E1628] rounded-2xl p-4 flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400 text-lg">⏱</div>
-            <div>
-              <p className="text-white font-bold text-lg"><AnimatedNumber value={summary.avg_session_min ?? 0} /> min</p>
-              <p className="text-gray-500 text-xs">Avg session duration</p>
-            </div>
-          </div>
-          <div className="bg-[#0E1628] rounded-2xl p-4 flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-green-500/10 flex items-center justify-center text-green-400 text-lg">🔄</div>
-            <div>
-              <p className="text-white font-bold text-lg"><AnimatedNumber value={summary.retention_7d ?? 0} />%</p>
-              <p className="text-gray-500 text-xs">7-day retention</p>
-            </div>
-          </div>
-        </div>
 
         {/* Charts */}
         <div className="grid grid-cols-3 gap-4">
@@ -800,14 +748,7 @@ export default function AdminDash() {
                   </div>
                   <span className="col-span-2 text-gray-500 text-xs">{user.last_active}</span>
                   <div className="col-span-2 flex justify-end gap-2">
-                    {user.status === "active" ? (
-                      <button
-                        onClick={() => handleUserStatusChange(user.id, "suspended")}
-                        className="text-[10px] px-3 py-1.5 rounded-lg border border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/10 transition-colors"
-                      >
-                        Suspend
-                      </button>
-                    ) : user.status === "suspended" ? (
+                    {user.status === "suspended" ? (
                       <>
                         <button
                           onClick={() => handleUserStatusChange(user.id, "active")}

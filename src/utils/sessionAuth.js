@@ -1,5 +1,6 @@
 import { fetchAuthRoles } from "../api/auth";
 import { fetchMe } from "../api/client";
+import { cacheRoleState, getCachedRoleState } from "./sessionCache";
 
 const KNOWN_ROLE_NAMES = new Set(["client", "coach", "admin"]);
 const ROLE_KEY_MAP = {
@@ -93,7 +94,8 @@ export function normalizeRoleState(rolesResponse) {
 
 export async function resolveRoleState() {
   const rolesResponse = await fetchAuthRoles().catch(() => null);
-  return normalizeRoleState(rolesResponse);
+  const normalized = normalizeRoleState(rolesResponse);
+  return cacheRoleState(normalized) || normalized;
 }
 
 export async function resolveSessionState() {
@@ -105,3 +107,12 @@ export async function resolveSessionState() {
   };
 }
 
+export function getImmediateRoleState() {
+  return getCachedRoleState() || {
+    roleNames: [],
+    hasClientRole: false,
+    hasCoachRole: false,
+    hasAdminRole: false,
+    needsClientOnboarding: true,
+  };
+}

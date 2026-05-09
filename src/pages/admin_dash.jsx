@@ -293,6 +293,8 @@ export default function AdminDash() {
   const [userRoleFilter, setUserRoleFilter] = useState("all");
   const [userStatusFilter, setUserStatusFilter] = useState("all");
   const [userPage, setUserPage] = useState(1);
+  const [userSortBy, setUserSortBy] = useState("name");
+  const [userSortDir, setUserSortDir] = useState("asc");
 
   /*  exercise bank state  */
   const [exSearch, setExSearch] = useState("");
@@ -313,18 +315,45 @@ export default function AdminDash() {
       // Fetch account info — use a direct fetch to avoid the global 401
       // redirect in apiFetch (admin may not have a backend-valid JWT yet)
       try {
-        const token = getToken();
-        const API_BASE = import.meta.env.PROD ? "https://api.till-failure.us" : "";
-        const res = await fetch(`${API_BASE}/me`, {
-          credentials: "include",
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        });
-        if (res.ok) {
-          const me = await res.json();
-          if (me?.name) setInitials(me.name.split(" ").map((n) => n[0]).join("").toUpperCase());
+        setLoading(true);
+
+        // Fetch account info — use a direct fetch to avoid the global 401
+        // redirect in apiFetch (admin may not have a backend-valid JWT yet)
+        try {
+          const token = getToken();
+          const API_BASE = import.meta.env.PROD ? "https://api.till-failure.us" : "";
+          const res = await fetch(`${API_BASE}/me`, {
+            credentials: "include",
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          if (res.ok) {
+            const me = await res.json();
+            if (me?.name) setInitials(me.name.split(" ").map((n) => n[0]).join("").toUpperCase());
+          }
+        } catch {
+          // Initials are decorative; keep loading the dashboard if this request fails.
         }
-      } catch {
-        // Initials are decorative; keep loading the dashboard if this request fails.
+
+        const [s, u, ex, an, requests] = await Promise.all([
+          fetchAdminStats(),
+          fetchAllUsers({ sortBy: userSortBy, sortDir: userSortDir }),
+          fetchExerciseBank(),
+          fetchAnalytics(),
+          fetchCoachRequests(),
+        ]);
+        const transactions = await fetchTotalTransactions().catch(() => ({ total_transactions: 0 }));
+        setStats(s);
+        setUsers(u);
+        setExercises(ex);
+        setAnalytics(an);
+        setRoleRequests(requests);
+        setTotalTransactions(transactions.total_transactions || 0);
+        setReports([
+          { id: 1, reporter_name: "Aisha Patel",  reported_name: "Coach X", reason: "Inappropriate content", created_at: "1 hr ago" },
+          { id: 2, reporter_name: "Chris Nguyen", reported_name: "Coach Y", reason: "No show",               created_at: "3 hrs ago" },
+        ]);
+      } finally {
+        setLoading(false);
       }
 
       try {
@@ -363,7 +392,7 @@ export default function AdminDash() {
         setLoading(false);
       }
     })();
-  }, [authed]);
+  }, [authed, userSortBy, userSortDir]);
 
   /*  handlers  */
   const handleApprove = async (id) => {
@@ -430,6 +459,11 @@ export default function AdminDash() {
       // admin understands why nothing changed.
       window.alert(e?.message || "Action failed");
     }
+  };
+
+  const handleUserSort = (sortBy) => {
+    setUserSortBy(sortBy);
+    setUserSortDir((prev) => userSortBy === sortBy && prev === "asc" ? "desc" : "asc");
   };
 
   const handleDeleteUser = async (userId) => {
@@ -811,8 +845,20 @@ export default function AdminDash() {
           <div className="divide-y divide-white/5">
             {/* Header row */}
             <div className="grid grid-cols-12 gap-4 px-5 py-2.5 text-[10px] text-gray-500 uppercase tracking-widest">
-              <span className="col-span-3">User</span>
-              <span className="col-span-3">Email</span>
+              <button
+                type="button"
+                onClick={() => handleUserSort("name")}
+                className="col-span-3 text-left hover:text-gray-300 transition-colors"
+              >
+                User {userSortBy === "name" ? (userSortDir === "asc" ? "↑" : "↓") : ""}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleUserSort("email")}
+                className="col-span-3 text-left hover:text-gray-300 transition-colors"
+              >
+                Email {userSortBy === "email" ? (userSortDir === "asc" ? "↑" : "↓") : ""}
+              </button>
               <span className="col-span-1">Role</span>
               <span className="col-span-1">Status</span>
               <span className="col-span-2">Last Active</span>

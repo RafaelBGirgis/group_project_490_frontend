@@ -107,13 +107,23 @@ export async function deleteScheduledPlanAsCoach(planId) {
 
 export async function listAcceptedClients({ text, skip = 0, limit = 24 } = {}) {
   const result = await apiGet(
-    withQuery("/roles/coach/clients", {
-      text: text || undefined,
+    withQuery("/roles/coach/my_clients", {
       skip,
       limit,
     })
   );
-  return Array.isArray(result) ? result : [];
+  const clients = Array.isArray(result) ? result : [];
+  if (!text?.trim()) return clients;
+
+  const normalizedSearch = text.trim().toLowerCase();
+  return clients.filter((client) => {
+    const name =
+      client?.account?.name ||
+      client?.base_account?.name ||
+      client?.name ||
+      "";
+    return String(name).toLowerCase().includes(normalizedSearch);
+  });
 }
 
 export async function getClientAvailabilityAsCoach(clientId) {

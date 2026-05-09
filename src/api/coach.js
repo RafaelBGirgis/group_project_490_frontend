@@ -178,7 +178,7 @@ export async function deleteCoachAccount() {
 export async function fetchMyClients(_coachId) {
   try {
     // Fetch accepted clients from API and enrich with details
-    const acceptedClientsResponse = await apiGet("/roles/coach/clients");
+    const acceptedClientsResponse = await apiGet("/roles/coach/my_clients");
     const acceptedClients = await Promise.all(
       (Array.isArray(acceptedClientsResponse) ? acceptedClientsResponse : [])
         .map(normalizeAcceptedClientItem)

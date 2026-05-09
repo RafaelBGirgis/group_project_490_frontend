@@ -237,6 +237,16 @@ function CoachRequestFormPage() {
     setShowExpForm(true);
   };
 
+  const toggleAvailability = (day, time) => {
+    if (isViewMode) return;
+    setAvailability((prev) => ({
+      ...prev,
+      [day]: prev[day].includes(time)
+        ? prev[day].filter((slot) => slot !== time)
+        : [...prev[day], time],
+    }));
+  };
+
   return (
     <div className="min-h-screen bg-[#080D19] text-white">
       <Navbar role="client" userName={initials} onSwitch={() => navigate("/coach")} />

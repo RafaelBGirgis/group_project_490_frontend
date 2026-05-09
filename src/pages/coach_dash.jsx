@@ -27,6 +27,7 @@ import {
   lookupClient,
   acceptClientRequest,
   denyClientRequest,
+  terminateRelationship,
 } from "../api/coach";
 import { getConversationWithAccount } from "../api/chat";
 import { getCoachAccessState, getImmediateCoachAccessState } from "../utils/roleAccess";
@@ -181,6 +182,7 @@ export default function CoachDashboard() {
   const [requestActionId, setRequestActionId] = useState(null);
   const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(immediateRoleState.hasAdminRole);
   const [chatActionId, setChatActionId] = useState(null);
+  const [relationshipActionId, setRelationshipActionId] = useState(null);
   const [selectedClient, setSelectedClient] = useState(null);
   const [clientSearchTerm, setClientSearchTerm] = useState("");
 
@@ -431,6 +433,28 @@ export default function CoachDashboard() {
     }
   };
 
+  const handleTerminateClientRelationship = async (client) => {
+    const relationshipId = Number(client?.relationship_id);
+    if (!Number.isFinite(relationshipId)) return;
+    if (!window.confirm(`End your coaching relationship with ${client?.name || "this client"}?`)) {
+      return;
+    }
+
+    setRelationshipActionId(relationshipId);
+    try {
+      await terminateRelationship(relationshipId);
+      await refreshRelationshipData();
+      setSelectedClient((prev) =>
+        Number(prev?.id ?? prev?.client_id) === Number(client.id) ? null : prev
+      );
+      if (overlay === "client_profile") {
+        closeOverlay();
+      }
+    } finally {
+      setRelationshipActionId(null);
+    }
+  };
+
   /*  derived  */
   const initials = account?.name
     ? account.name.split(" ").map((n) => n[0]).join("").toUpperCase()
@@ -583,6 +607,18 @@ export default function CoachDashboard() {
                           <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
                         </svg>
                       </button>
+                      {c.relationship_id ? (
+                        <button
+                          onClick={() => handleTerminateClientRelationship(c)}
+                          disabled={relationshipActionId === c.relationship_id}
+                          className="shrink-0 rounded-lg text-red-300 hover:text-red-200 transition-colors p-1.5 hover:bg-red-500/10 disabled:opacity-50"
+                          title="End relationship"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                            <path d="M18 6L6 18M6 6l12 12" />
+                          </svg>
+                        </button>
+                      ) : null}
                     </div>
                   ))}
                   {activeClients.length === 0 && (
@@ -756,6 +792,8 @@ export default function CoachDashboard() {
           <ClientProfile
             clientId={selectedClient.id ?? selectedClient.client_id}
             detail={selectedClient.details || selectedClient.detail}
+            onTerminateRelationship={handleTerminateClientRelationship}
+            terminatingRelationshipId={relationshipActionId}
           />
         ) : null}
       </Overlay>

@@ -410,12 +410,13 @@ export default function CoachPublicProfilePage() {
         </button>
       );
     }
+    const fromDashboard = searchParams.get("from") === "dashboard";
     return (
       <button
-        onClick={() => navigate("/find-coach")}
+        onClick={() => navigate(fromDashboard ? "/client" : "/find-coach")}
         className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-4 py-2 text-sm font-medium text-blue-300"
       >
-        Back to Find Coach
+        {fromDashboard ? "Back to Dashboard" : "Back to Find Coach"}
       </button>
     );
   };

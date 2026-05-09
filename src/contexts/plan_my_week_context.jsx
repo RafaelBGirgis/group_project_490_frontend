@@ -25,6 +25,7 @@ import { createContext, useContext, useMemo, useReducer } from "react";
 const initialState = {
   role: "client",
   selectedClientId: null,
+  selectedClientName: null,
   activeTab: "build",
   draftPlan: { strata_name: "", activities: [] },
   pendingBlocks: [],
@@ -38,7 +39,7 @@ function reducer(state, action) {
     case "SET_ROLE":
       return { ...state, role: action.role };
     case "SELECT_CLIENT":
-      return { ...state, selectedClientId: action.clientId };
+      return { ...state, selectedClientId: action.clientId, selectedClientName: action.clientName ?? null };
     case "SET_TAB":
       return { ...state, activeTab: action.tab };
     case "SET_PLAN_NAME":

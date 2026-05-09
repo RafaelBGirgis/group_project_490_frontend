@@ -13,6 +13,7 @@ import { ROLE_THEMES } from "../theme";
 import WorkoutGrid from "./workout_grid";
 import ActivityConfig from "./activity_config";
 import ScheduleBlocks from "./schedule_blocks";
+import AvailabilityPanel from "./availability_panel";
 
 export default function BuildPlanTab() {
   const { state, dispatch } = usePlanMyWeek();
@@ -94,7 +95,7 @@ export default function BuildPlanTab() {
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+    <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
       {/* LEFT — plan details + activities */}
       <section className="lg:col-span-2 space-y-4">
         <div className="rounded-xl border border-white/10 bg-[#0F1729] p-4">
@@ -172,7 +173,7 @@ export default function BuildPlanTab() {
         </div>
       </section>
 
-      {/* RIGHT — schedule blocks + save */}
+      {/* MIDDLE — schedule blocks + save */}
       <aside className="space-y-4">
         <ScheduleBlocks />
 
@@ -200,6 +201,11 @@ export default function BuildPlanTab() {
           block falls outside your availability or overlaps an existing booking, the whole save fails.
         </p>
       </aside>
+
+      {/* RIGHT — availability panel */}
+      <div>
+        <AvailabilityPanel />
+      </div>
 
       {workoutGridOpen ? (
         <WorkoutGrid
@@ -234,15 +240,18 @@ export default function BuildPlanTab() {
     </div>
   );
 
-  // helper: convert local block representation → ISO datetimes for the API
+  // helper: convert local block representation → UTC ISO strings for the API
   function toApiBlock(b) {
-    const start = `${b.date_iso}T${String(b.start_hour).padStart(2, "0")}:00:00`;
-    const end =
-      b.end_hour >= 24
-        ? // shift to next day midnight
-          `${addDays(b.date_iso, 1)}T00:00:00`
-        : `${b.date_iso}T${String(b.end_hour).padStart(2, "0")}:00:00`;
-    return { start_dt: start, end_dt: end };
+    const [sh, sm] = (b.start_time || "00:00").split(":").map(Number);
+    const [eh, em] = (b.end_time || "00:00").split(":").map(Number);
+    const [y, mo, d] = b.date_iso.split("-").map(Number);
+    // Construct in local time then convert to UTC via toISOString()
+    const startLocal = new Date(y, mo - 1, d, sh, sm, 0);
+    const endTotalMin = eh * 60 + em;
+    const endLocal = endTotalMin >= 24 * 60
+      ? new Date(y, mo - 1, d + 1, Math.floor((endTotalMin - 1440) / 60), (endTotalMin - 1440) % 60, 0)
+      : new Date(y, mo - 1, d, eh, em, 0);
+    return { start_dt: startLocal.toISOString(), end_dt: endLocal.toISOString() };
   }
 }
 

@@ -124,7 +124,7 @@ function Tabs() {
         ))}
         {state.role === "coach" && state.selectedClientId != null ? (
           <div className="ml-auto flex items-center gap-2 text-xs text-gray-400">
-            <span>Client #{state.selectedClientId}</span>
+            <span>{state.selectedClientName || `Client #${state.selectedClientId}`}</span>
             <button
               className={`${theme.tagText} hover:underline`}
               onClick={() => dispatch({ type: "SELECT_CLIENT", clientId: null })}
@@ -201,7 +201,7 @@ function ClientPicker() {
           {clients.map((c) => (
             <button
               key={c.client_id}
-              onClick={() => dispatch({ type: "SELECT_CLIENT", clientId: c.client_id })}
+              onClick={() => dispatch({ type: "SELECT_CLIENT", clientId: c.client_id, clientName: c.name || null })}
               className="text-left rounded-xl border border-white/10 bg-[#0F1729] hover:bg-[#13192A] p-4 flex items-center gap-3 transition-colors"
             >
               <ProfileAvatar src={c.pfp_url} alt={c.name} name={c.name} size="lg" />

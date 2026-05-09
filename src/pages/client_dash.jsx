@@ -554,7 +554,7 @@ export default function ClientDash() {
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => navigate("/find-coach")}
+                  onClick={() => navigate(`/coaches/${pendingCoachRequest.coach_id}?from=dashboard`)}
                   className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm font-medium text-amber-300"
                 >
                   View Request

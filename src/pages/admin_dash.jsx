@@ -336,6 +336,7 @@ export default function AdminDash() {
             pending_role_requests: 0,
             active_accounts: 0,
             deactivated_accounts: 0,
+            suspended_accounts: 0,
             signups_30d: 0,
             avg_coach_rating: 0,
             total_coach_reviews: 0,
@@ -658,7 +659,7 @@ export default function AdminDash() {
               </p>
               <p className="text-xs text-gray-500 mt-1">
                 {stats?.deactivated_accounts != null
-                  ? `${stats.deactivated_accounts} suspended`
+                  ? `${stats.deactivated_accounts} inactive`
                   : "Users with an active account"}
               </p>
               <div className="absolute -bottom-4 -right-4 w-24 h-24 rounded-full opacity-5 bg-red-500 blur-2xl pointer-events-none" />
@@ -801,6 +802,7 @@ export default function AdminDash() {
               >
                 <option value="all">All Status</option>
                 <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
                 <option value="suspended">Suspended</option>
               </select>
             </div>
@@ -861,13 +863,18 @@ export default function AdminDash() {
                         Suspend
                       </button>
                     ) : (
-                      <button
-                        onClick={() => handleUserStatusChange(user.id, "active")}
-                        className="text-[10px] px-3 py-1.5 rounded-lg border border-green-500/30 text-green-400 hover:bg-green-500/10 transition-colors"
-                      >
-                        Reactivate
-                      </button>
-                    )}
+                      user.status === "inactive" ? (
+                        <button disabled className="text-[10px] px-3 py-1.5 rounded-lg border border-gray-500/30 text-gray-400 cursor-not-allowed" title="Cannot reactivate an inactive account">
+                          Inactive
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleUserStatusChange(user.id, "active")}
+                          className="text-[10px] px-3 py-1.5 rounded-lg border border-green-500/30 text-green-400 hover:bg-green-500/10 transition-colors"
+                        >
+                          Unsuspend
+                        </button>
+                      ))}
                     <button
                       onClick={() => handleDeleteUser(user.id)}
                       className="text-[10px] px-3 py-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors"

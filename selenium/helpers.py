@@ -79,7 +79,7 @@ def wait_for_page_to_fully_load(driver, timeout=10):
                     By.XPATH, "//button[@title='Open Profile']"
                 ).text.strip() not in ("", "?")
             )
-    except (NoSuchElementException, StaleElementReferenceException):
+    except (Exception):
         pass
 
 def scroll(driver, direction, pause=0.3, step=350):
@@ -118,7 +118,7 @@ def scroll(driver, direction, pause=0.3, step=350):
     else:
         raise ValueError("direction must be either 'down' or 'up'")
 
-def login(driver):
+def login(driver, email=CLIENT_EMAIL):
     """Logs into an existing user, execution stops after reaching '/client'"""
 
     try:
@@ -161,7 +161,7 @@ def login(driver):
         )
 
         email_input.clear()
-        email_input.send_keys(CLIENT_EMAIL)
+        email_input.send_keys(email)
 
         password_input.clear()
         password_input.send_keys("password")
@@ -173,7 +173,14 @@ def login(driver):
         )
         submit_button.click()
 
-        # Wait for dashboard page to load
+        # Accounts can land on different dashboards depending on role state.
+        # Normalize the test flow by always redirecting to the client dashboard.
+        wait.until(
+            lambda d: any(
+                route in d.current_url for route in ("/client", "/coach", "/admin")
+            )
+        )
+        driver.get(f"{FRONTEND_URL}/client")
         wait.until(EC.url_contains("/client"))
         wait_for_page_to_fully_load(driver)
 

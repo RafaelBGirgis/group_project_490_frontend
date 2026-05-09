@@ -21,6 +21,7 @@ from helpers import delete_account
 from helpers import printSuccess
 from helpers import printFailure
 
+
 def test_client_dashboard():
     """Navigate from login page to client dashboard"""
 
@@ -28,7 +29,7 @@ def test_client_dashboard():
 
     try:
         driver = createDriver()
-        login(driver)
+        login(driver, "johndoe_1778120878@email.com")
 
         time.sleep(2)
 
@@ -75,18 +76,7 @@ def test_daily_check_in(driver):
     
     # ===== MOOD & WELLBEING SECTION =====
     print("Testing Mood & Wellbeing section...")
-    
-    # Click on the "Mood & Wellbeing" section to expand it
-    mood_section_button = wait.until(
-        EC.element_to_be_clickable(
-            (By.XPATH, "//button[contains(., 'Mood') and contains(., 'Wellbeing')]")
-        )
-    )
-    mood_section_button.click()
-    print("[✓] Expanded Mood & Wellbeing section")
-    
-    time.sleep(0.5)
-    
+
     # Find and interact with the three range sliders (Happiness, Alertness, Healthiness)
     # Get all range inputs for the sliders
     sliders = wait.until(
@@ -96,19 +86,22 @@ def test_daily_check_in(driver):
     if len(sliders) < 3:
         raise AssertionError(f"Expected at least 3 sliders, found {len(sliders)}")
     
-    # Set Happiness slider to 8
+    # Set Happiness slider to 4
     sliders[0].send_keys("\t")  # Focus
-    driver.execute_script("arguments[0].value = 8; arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", sliders[0])
-    print("[✓] Set Happiness to 8")
-    
+    driver.execute_script("arguments[0].value = 4; arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", sliders[0])
+    print("[✓] Set Happiness to 4")
+    time.sleep(1)
+
     # Set Alertness slider to 7
     driver.execute_script("arguments[0].value = 7; arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", sliders[1])
     print("[✓] Set Alertness to 7")
-    
-    # Set Healthiness slider to 8
-    driver.execute_script("arguments[0].value = 8; arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", sliders[2])
-    print("[✓] Set Healthiness to 8")
-    
+    time.sleep(1)
+
+    # Set Healthiness slider to 3
+    driver.execute_script("arguments[0].value = 3; arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", sliders[2])
+    print("[✓] Set Healthiness to 3")
+    time.sleep(1)
+
     # Fill in "Today's goal" textarea
     today_goal_textarea = wait.until(
         EC.presence_of_element_located(
@@ -128,6 +121,7 @@ def test_daily_check_in(driver):
     gratitude_textarea.clear()
     gratitude_textarea.send_keys("I am grateful")
     print("[✓] Filled gratitude field")
+    time.sleep(1)
     
     # Submit Mood Check-in
     mood_submit_button = wait.until(
@@ -136,24 +130,19 @@ def test_daily_check_in(driver):
         )
     )
     mood_submit_button.click()
-    print("[✓] Submitted Mood Check-in")
     
-    # Wait for submission to complete
-    time.sleep(1)
-    
-    # ===== BODY METRICS SECTION =====
-    print("Testing Body Metrics section...")
-    
-    # Click on the "Body Metrics" section to expand it
-    body_section_button = wait.until(
-        EC.element_to_be_clickable(
-            (By.XPATH, "//button[contains(., 'Body Metrics')]")
+    wait.until(
+        EC.visibility_of_element_located(
+            (
+                By.XPATH,
+                f"//button[.//h3[contains(normalize-space(), 'Mood & Wellbeing')] "
+                f"and .//span[contains(normalize-space(), 'Done') and contains(@class, 'text-green-400')]]",
+            )
         )
     )
-    body_section_button.click()
-    print("[✓] Expanded Body Metrics section")
-    
-    time.sleep(0.5)
+    print("[✓] Submitted Mood Check-in")
+    # ===== BODY METRICS SECTION =====
+    print("Testing Body Metrics section...")
     
     # Fill in weight input
     weight_input = wait.until(
@@ -172,10 +161,33 @@ def test_daily_check_in(driver):
         )
     )
     body_submit_button.click()
-    print("[✓] Submitted Body Metrics")
     
-    # Wait for submission to complete
-    time.sleep(1)
+    wait.until(
+        EC.visibility_of_element_located(
+            (
+                By.XPATH,
+                f"//button[.//h3[contains(normalize-space(), 'Body Metrics')] "
+                f"and .//span[contains(normalize-space(), 'Done') and contains(@class, 'text-green-400')]]",
+            )
+        )
+    )
+    print("[✓] Submitted Body Metrics")
+
+    close_daily_check_in_button = wait.until(
+        EC.element_to_be_clickable(
+            (
+                By.XPATH,
+                "//h2[normalize-space()='Daily Check-in']/following-sibling::button[1]",
+            )
+        )
+    )
+    close_daily_check_in_button.click()
+
+    wait.until(
+        EC.invisibility_of_element_located(
+            (By.XPATH, "//h2[normalize-space()='Daily Check-in']")
+        )
+    )
     
     printSuccess("Daily check-in test completed successfully")
 

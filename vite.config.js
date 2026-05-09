@@ -21,10 +21,9 @@ export default defineConfig({
         target: 'http://localhost:9090',
         changeOrigin: true,
       },
-      '^/me$': {
+      '/me': {
         target: 'http://localhost:9090',
         changeOrigin: true,
-        rewrite: () => '/me',
       },
       '/roles': {
         target: 'http://localhost:9090',

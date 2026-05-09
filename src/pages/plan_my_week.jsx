@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Navbar } from "../components";
 import ProfileAvatar from "../components/profile_avatar";
 import { ROLE_THEMES } from "../components/theme";
-import { getCoachAccessState, getImmediateCoachAccessState } from "../utils/roleAccess";
-import { getImmediateRoleState, resolveRoleState } from "../utils/sessionAuth";
-import { setLastRoleContext } from "../utils/sessionCache";
+import { getCoachAccessState } from "../utils/roleAccess";
+import { resolveRoleState } from "../utils/sessionAuth";
 import {
   PlanMyWeekProvider,
   usePlanMyWeek,
@@ -29,44 +28,21 @@ export default function PlanMyWeekPage() {
 function Inner({ role }) {
   const navigate = useNavigate();
   const { state } = usePlanMyWeek();
-  const immediateRoleState = getImmediateRoleState();
-  const immediateCoachAccess = getImmediateCoachAccessState();
   const [account, setAccount] = useState(null);
-  const [canSwitchToCoach, setCanSwitchToCoach] = useState(
-    immediateCoachAccess.canAccessCoach
-  );
-  const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(immediateRoleState.hasAdminRole);
-
-  useEffect(() => {
-    setLastRoleContext({
-      role,
-      dashboardPath: role === "coach" ? "/coach" : "/client",
-    });
-  }, [role]);
+  const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
+  const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(false);
 
   useEffect(() => {
     fetchMe()
       .then(async (me) => {
         setAccount(me);
-        const roleState = await resolveRoleState().catch(() => immediateRoleState);
-        const coachAccess = await getCoachAccessState(me, roleState).catch(
-          () => immediateCoachAccess
-        );
+        const roleState = await resolveRoleState().catch(() => null);
+        const coachAccess = await getCoachAccessState(me);
         setCanSwitchToCoach(coachAccess.canAccessCoach);
         setCanSwitchToAdmin(Boolean(roleState?.hasAdminRole));
       })
       .catch(() => {});
   }, []);
-
-  const shouldBlockCoachPlanner =
-    role === "coach" &&
-    immediateRoleState.roleNames.length > 0 &&
-    !immediateRoleState.hasAdminRole &&
-    !immediateCoachAccess.canAccessCoach;
-
-  if (shouldBlockCoachPlanner) {
-    return <Navigate to="/profile" replace />;
-  }
 
   // Coach must select a client before tabs open.
   const needsClientPicker = role === "coach" && state.selectedClientId == null;

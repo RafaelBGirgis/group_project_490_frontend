@@ -542,13 +542,23 @@ export default function CoachPublicProfilePage() {
                 </div>
 
                 <div className="mt-4 space-y-3">
-                  {coach?.account_id ? (
+                  {isPending && !activeCoachRelationshipId ? (
                     <button
                       type="button"
-                      onClick={() => navigate(`/client/messages?account=${coach.account_id}`)}
-                      className="w-full rounded-2xl bg-blue-600 px-6 py-5 text-base font-bold text-white hover:bg-blue-700 transition-colors shadow-lg shadow-blue-900/30"
+                      onClick={handleCancelRequest}
+                      disabled={requesting}
+                      className="w-full rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-medium text-amber-300 disabled:opacity-60"
                     >
-                      Message Coach
+                      {requesting ? "Cancelling..." : "Cancel Request"}
+                    </button>
+                  ) : !isApproved && !activeCoachRelationshipId ? (
+                    <button
+                      type="button"
+                      onClick={handleRequestCoach}
+                      disabled={requesting}
+                      className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white disabled:bg-blue-900/40 hover:bg-blue-700 transition-colors"
+                    >
+                      {requesting ? "Sending..." : "Request Coach"}
                     </button>
                   ) : null}
 
@@ -565,40 +575,7 @@ export default function CoachPublicProfilePage() {
                     </button>
                   ) : null}
 
-                  {relationshipId ? (
-                    <button
-                      type="button"
-                      onClick={handleTerminateRelationship}
-                      disabled={terminating}
-                      className="w-full rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
-                    >
-                      {terminating ? "Ending..." : "Fire Coach"}
-                    </button>
-                  ) : null}
-
                   <div className="grid gap-3 md:grid-cols-2">
-                    {isPending && !activeCoachRelationshipId ? (
-                      <button
-                        type="button"
-                        onClick={handleCancelRequest}
-                        disabled={requesting}
-                        className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-medium text-amber-300 disabled:opacity-60"
-                      >
-                        {requesting ? "Cancelling..." : "Cancel Request"}
-                      </button>
-                    ) : !isApproved && !activeCoachRelationshipId ? (
-                      <button
-                        type="button"
-                        onClick={handleRequestCoach}
-                        disabled={requesting}
-                        className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white disabled:bg-blue-900/40 hover:bg-blue-700 transition-colors"
-                      >
-                        {requesting ? "Sending..." : "Request Coach"}
-                      </button>
-                    ) : (
-                      <div />
-                    )}
-
                     <button
                       type="button"
                       onClick={() => {
@@ -609,6 +586,17 @@ export default function CoachPublicProfilePage() {
                     >
                       Report Coach
                     </button>
+
+                    {relationshipId ? (
+                      <button
+                        type="button"
+                        onClick={handleTerminateRelationship}
+                        disabled={terminating}
+                        className="rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+                      >
+                        {terminating ? "Ending..." : "Fire Coach"}
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               </section>

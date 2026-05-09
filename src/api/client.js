@@ -1,6 +1,5 @@
 import { apiDelete, apiFetch, apiGet, apiPatch, apiPost, apiPut, withQuery } from "./api";
 import { clearAuth } from "./auth";
-import { cacheAccountSnapshot, cacheRoleHintsFromAccount } from "../utils/sessionCache";
 
 const WEEKDAY_NAMES = [
   "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
@@ -14,10 +13,7 @@ const GOAL_ENUM_MAP = {
 
 export async function fetchMe() {
   try {
-    const result = await apiGet("/me");
-    cacheAccountSnapshot(result);
-    cacheRoleHintsFromAccount(result);
-    return result;
+    return await apiGet("/me");
   } catch (error) {
     if (error?.status === 401) {
       clearAuth();
@@ -88,12 +84,13 @@ export async function fetchMyCoachRequests() {
 export async function fetchMyCoach() {
   try {
     const result = await apiGet("/roles/client/my_coach");
-    if (!result || result.coach === null) return null;
     const normalized = normalizeMyCoach(result);
     if (!normalized?.relationship_id) return null;
     return normalized;
   } catch (error) {
-    if (error?.status === 404) return null;
+    if (error?.status === 404) {
+      return null;
+    }
     throw error;
   }
 }

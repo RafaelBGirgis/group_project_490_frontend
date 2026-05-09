@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import {
   Navbar,
   StatCard,
@@ -29,8 +29,6 @@ import {
 } from "../api/admin";
 import RoleRequestsDetail from "../components/overlays/role_requests_detail";
 import ReportsDetail from "../components/overlays/reports_detail";
-import { getImmediateRoleState, resolveRoleState } from "../utils/sessionAuth";
-import { setLastRoleContext } from "../utils/sessionCache";
 
 const role = "admin";
 const MUSCLE_GROUPS = ["Chest", "Back", "Shoulders", "Legs", "Arms", "Core", "Cardio"];
@@ -252,26 +250,11 @@ function DonutChart({ segments, size = 120, strokeWidth = 14 }) {
 
 export default function AdminDash() {
   const navigate = useNavigate();
-  const immediateRoleState = getImmediateRoleState();
 
   /*  auth guard  */
   const [authed, setAuthed] = useState(false);
   useEffect(() => {
     setAuthed(true);
-  }, [navigate]);
-
-  useEffect(() => {
-    setLastRoleContext({ role: "admin", dashboardPath: "/admin" });
-  }, []);
-
-  useEffect(() => {
-    resolveRoleState()
-      .then((roleState) => {
-        if (!roleState.hasAdminRole) {
-          navigate("/client", { replace: true });
-        }
-      })
-      .catch(() => {});
   }, [navigate]);
 
   /*  state  */
@@ -336,7 +319,6 @@ export default function AdminDash() {
             pending_role_requests: 0,
             active_accounts: 0,
             deactivated_accounts: 0,
-            suspended_accounts: 0,
             signups_30d: 0,
             avg_coach_rating: 0,
             total_coach_reviews: 0,
@@ -491,18 +473,12 @@ export default function AdminDash() {
   const paginatedExercises = filteredExercises.slice((exPage - 1) * EXERCISES_PER_PAGE, exPage * EXERCISES_PER_PAGE);
 
   const activeAnalytics = analytics?.[analyticsPeriod] ?? [];
-  const shouldBlockAdminPage =
-    immediateRoleState.roleNames.length > 0 && !immediateRoleState.hasAdminRole;
-
-  if (shouldBlockAdminPage) {
-    return <Navigate to="/client" replace />;
-  }
 
   /*  loading skeleton  */
   if (loading) {
     return (
       <div className="min-h-screen bg-[#080D19]">
-        <Navbar role={role} userName="?" hideProfile />
+        <Navbar role={role} userName="?" />
         <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
           <div className="h-5 w-40 bg-white/5 rounded animate-pulse" />
           <div className="grid grid-cols-4 gap-4">
@@ -527,7 +503,6 @@ export default function AdminDash() {
       <Navbar
         role={role}
         userName={initials}
-        hideProfile
         switchOptions={[
           { label: "Client", to: "/client" },
           { label: "Coach", to: "/coach" },
@@ -659,7 +634,7 @@ export default function AdminDash() {
               </p>
               <p className="text-xs text-gray-500 mt-1">
                 {stats?.deactivated_accounts != null
-                  ? `${stats.deactivated_accounts} inactive`
+                  ? `${stats.deactivated_accounts} suspended`
                   : "Users with an active account"}
               </p>
               <div className="absolute -bottom-4 -right-4 w-24 h-24 rounded-full opacity-5 bg-red-500 blur-2xl pointer-events-none" />
@@ -802,7 +777,6 @@ export default function AdminDash() {
               >
                 <option value="all">All Status</option>
                 <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
                 <option value="suspended">Suspended</option>
               </select>
             </div>
@@ -863,18 +837,13 @@ export default function AdminDash() {
                         Suspend
                       </button>
                     ) : (
-                      user.status === "inactive" ? (
-                        <button disabled className="text-[10px] px-3 py-1.5 rounded-lg border border-gray-500/30 text-gray-400 cursor-not-allowed" title="Cannot reactivate an inactive account">
-                          Inactive
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => handleUserStatusChange(user.id, "active")}
-                          className="text-[10px] px-3 py-1.5 rounded-lg border border-green-500/30 text-green-400 hover:bg-green-500/10 transition-colors"
-                        >
-                          Unsuspend
-                        </button>
-                      ))}
+                      <button
+                        onClick={() => handleUserStatusChange(user.id, "active")}
+                        className="text-[10px] px-3 py-1.5 rounded-lg border border-green-500/30 text-green-400 hover:bg-green-500/10 transition-colors"
+                      >
+                        Reactivate
+                      </button>
+                    )}
                     <button
                       onClick={() => handleDeleteUser(user.id)}
                       className="text-[10px] px-3 py-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors"

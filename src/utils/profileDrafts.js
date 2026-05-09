@@ -31,6 +31,9 @@ export function saveSignupPrefill(prefill) {
   const payload = {
     name: prefill?.name || "",
     email: normalizedEmail,
+    age: prefill?.age != null ? String(prefill.age) : "",
+    gender: prefill?.gender || "",
+    bio: prefill?.bio || "",
     profilePicture: prefill?.pfpUrl || "",
   };
 

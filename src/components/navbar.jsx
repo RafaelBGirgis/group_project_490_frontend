@@ -9,14 +9,6 @@ import {
   readAllNotifications,
   readNotification,
 } from "../api/notifications";
-import { fetchUnreadMessageCount } from "../api/chat";
-import {
-  cacheNotificationCounts,
-  cacheNotifications,
-  getCachedAccountSnapshot,
-  getCachedNotificationCounts,
-  getCachedNotifications,
-} from "../utils/sessionCache";
 
 const NOTIFICATION_ICONS = {
   payment: CreditCard,
@@ -123,8 +115,6 @@ function MessageCircle(props) {
 }
 
 const NOTIFICATION_POLL_MS = 3000;
-const MESSAGE_POLL_MS = 5000;
-const RETRY_BACKOFF_MS = [15000, 30000, 60000];
 
 const formatNotificationTime = (value) => {
   if (!value) return "";
@@ -152,35 +142,18 @@ export function Navbar({
   onSwitch,
   canSwitchToCoach = false,
   switchOptions = null,
-  hideProfile = false,
-  contextAction = null,
 }) {
   const theme = ROLE_THEMES[role];
   const navigate = useNavigate();
   const dropdownRef = useRef(null);
-  const cachedAccount = getCachedAccountSnapshot();
-  const initialCachedNotifications = getCachedNotifications().map(normalizeNotification);
-  const initialCachedCounts = getCachedNotificationCounts();
   const [showNotifs, setShowNotifs] = useState(false);
-  const [notifs, setNotifs] = useState(() =>
-    externalNotifs ? externalNotifs.map(normalizeNotification) : initialCachedNotifications
-  );
-  const [notificationsLoading, setNotificationsLoading] = useState(
-    !externalNotifs && initialCachedNotifications.length === 0
-  );
+  const [notifs, setNotifs] = useState(() => (externalNotifs ?? []).map(normalizeNotification));
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [notificationsError, setNotificationsError] = useState("");
-  const [unreadMessages, setUnreadMessages] = useState(initialCachedCounts.unreadChatCount || 0);
-  const notifsRef = useRef(notifs);
-
-  const commitNotifications = (nextNotifications) => {
-    notifsRef.current = nextNotifications;
-    setNotifs(nextNotifications);
-    cacheNotifications(nextNotifications);
-  };
 
   useEffect(() => {
     if (externalNotifs) {
-      commitNotifications(externalNotifs.map(normalizeNotification));
+      setNotifs(externalNotifs.map(normalizeNotification));
     }
   }, [externalNotifs]);
 
@@ -189,69 +162,32 @@ export function Navbar({
 
     let isMounted = true;
     let isFetching = false;
-    let timeoutId = null;
-    let failureCount = 0;
 
-    const scheduleNext = (delay) => {
-      if (!isMounted) return;
-      window.clearTimeout(timeoutId);
-      timeoutId = window.setTimeout(() => {
-        void loadNotifications();
-      }, delay);
-    };
-
-    const loadNotifications = async ({ initial = false, force = false } = {}) => {
+    const loadNotifications = async ({ initial = false } = {}) => {
       if (isFetching) return;
-      if (!force && document.visibilityState === "hidden") {
-        scheduleNext(NOTIFICATION_POLL_MS);
-        return;
-      }
       isFetching = true;
       if (initial) {
         setNotificationsLoading(true);
       }
+      setNotificationsError("");
 
       try {
         const items = await queryNotifications();
-        if (isMounted) {
-          failureCount = 0;
-          setNotificationsError("");
-          commitNotifications(items.map(normalizeNotification));
-          scheduleNext(NOTIFICATION_POLL_MS);
-        }
+        if (isMounted) setNotifs(items.map(normalizeNotification));
       } catch {
-        if (isMounted) {
-          failureCount += 1;
-          if (notifsRef.current.length === 0) {
-            setNotificationsError("Unable to load notifications.");
-          }
-          scheduleNext(
-            RETRY_BACKOFF_MS[Math.min(failureCount - 1, RETRY_BACKOFF_MS.length - 1)]
-          );
-        }
+        if (isMounted) setNotificationsError("Unable to load notifications.");
       } finally {
         isFetching = false;
         if (isMounted && initial) setNotificationsLoading(false);
       }
     };
 
-    const handleResume = () => {
-      if (document.visibilityState === "hidden") return;
-      failureCount = 0;
-      void loadNotifications({ force: true });
-    };
-
-    void loadNotifications({ initial: true, force: true });
-    window.addEventListener("focus", handleResume);
-    window.addEventListener("online", handleResume);
-    document.addEventListener("visibilitychange", handleResume);
+    loadNotifications({ initial: true });
+    const intervalId = window.setInterval(loadNotifications, NOTIFICATION_POLL_MS);
 
     return () => {
       isMounted = false;
-      window.clearTimeout(timeoutId);
-      window.removeEventListener("focus", handleResume);
-      window.removeEventListener("online", handleResume);
-      document.removeEventListener("visibilitychange", handleResume);
+      window.clearInterval(intervalId);
     };
   }, [externalNotifs]);
 
@@ -273,115 +209,20 @@ export function Navbar({
     return () => window.removeEventListener("keydown", handler);
   }, [showNotifs]);
 
-  // Poll unread message count independently of the notification bell.
-  useEffect(() => {
-    let isMounted = true;
-    let timeoutId = null;
-    let failureCount = 0;
-
-    const scheduleNext = (delay) => {
-      if (!isMounted) return;
-      window.clearTimeout(timeoutId);
-      timeoutId = window.setTimeout(() => {
-        void load();
-      }, delay);
-    };
-
-    const load = async ({ force = false } = {}) => {
-      if (!force && document.visibilityState === "hidden") {
-        scheduleNext(MESSAGE_POLL_MS);
-        return;
-      }
-
-      const count = await fetchUnreadMessageCount();
-      if (count == null) {
-        failureCount += 1;
-        scheduleNext(
-          RETRY_BACKOFF_MS[Math.min(failureCount - 1, RETRY_BACKOFF_MS.length - 1)]
-        );
-        return;
-      }
-
-      if (!isMounted) return;
-      failureCount = 0;
-      setUnreadMessages(count);
-      cacheNotificationCounts({ unreadChatCount: count });
-      scheduleNext(MESSAGE_POLL_MS);
-    };
-
-    const handleResume = () => {
-      if (document.visibilityState === "hidden") return;
-      failureCount = 0;
-      void load({ force: true });
-    };
-
-    void load({ force: true });
-    window.addEventListener("focus", handleResume);
-    window.addEventListener("online", handleResume);
-    document.addEventListener("visibilitychange", handleResume);
-
-    return () => {
-      isMounted = false;
-      window.clearTimeout(timeoutId);
-      window.removeEventListener("focus", handleResume);
-      window.removeEventListener("online", handleResume);
-      document.removeEventListener("visibilitychange", handleResume);
-    };
-  }, []);
-
-  // Poll for account state changes (suspension) so admins can suspend users
-  // and clients are redirected immediately. This runs independently and is
-  // lightweight since `/me` is cached by `fetchMe`.
-  useEffect(() => {
-    let isMounted = true;
-    let timeoutId = null;
-
-    const checkAccountState = async () => {
-      try {
-        // dynamic import to avoid circular deps at module init
-        const { fetchMe } = await import("../api/client");
-        const account = await fetchMe().catch(() => null);
-        if (!isMounted || !account) return;
-        if (account.is_suspended) {
-          // Redirect suspended users to the suspended page immediately.
-          if (window.location.pathname !== "/suspended") {
-            window.location.href = "/suspended";
-          }
-        }
-      } catch {
-        // ignore network errors
-      } finally {
-        if (!isMounted) return;
-        timeoutId = window.setTimeout(checkAccountState, 30000);
-      }
-    };
-
-    // Start polling
-    void checkAccountState();
-
-    return () => {
-      isMounted = false;
-      window.clearTimeout(timeoutId);
-    };
-  }, []);
-
-  // Exclude chat_message from the bell — those surface on the messages button instead.
-  const bellNotifs = notifs.filter((n) => n.category !== "chat_message");
-  const unreadCount = bellNotifs.filter((n) => !n.read).length;
+  const unreadCount = notifs.filter((notification) => !notification.read).length;
 
   const markAllRead = async () => {
     if (unreadCount === 0) return;
 
     const previous = notifs;
-    const nextNotifications = notifs.map((notification) => ({ ...notification, read: true }));
-    commitNotifications(nextNotifications);
+    setNotifs((prev) => prev.map((notification) => ({ ...notification, read: true })));
 
     try {
       if (!externalNotifs) {
         await readAllNotifications();
       }
     } catch {
-      commitNotifications(previous);
+      setNotifs(previous);
       setNotificationsError("Unable to mark notifications as read.");
     }
   };
@@ -390,24 +231,29 @@ export function Navbar({
     const target = notifs.find((notification) => notification.id === id);
     if (!target || target.read) return;
 
-    const optimisticNotifications = notifs.map((notification) =>
-      notification.id === id ? { ...notification, read: true } : notification
+    setNotifs((prev) =>
+      prev.map((notification) =>
+        notification.id === id ? { ...notification, read: true } : notification
+      )
     );
-    commitNotifications(optimisticNotifications);
 
     try {
       if (!externalNotifs) {
         const updated = await readNotification(id);
         if (updated) {
-          commitNotifications(
-            optimisticNotifications.map((notification) =>
+          setNotifs((prev) =>
+            prev.map((notification) =>
               notification.id === id ? normalizeNotification(updated) : notification
             )
           );
         }
       }
     } catch {
-      commitNotifications(notifs);
+      setNotifs((prev) =>
+        prev.map((notification) =>
+          notification.id === id ? { ...notification, read: false } : notification
+        )
+      );
       setNotificationsError("Unable to mark notification as read.");
     }
   };
@@ -431,21 +277,6 @@ export function Navbar({
           ? { label: "Client", to: "/client" }
           : null,
       ].filter(Boolean);
-
-  const resolvedUserAvatar = userAvatar || cachedAccount?.pfp_url || "";
-  const resolvedUserName =
-    userName && !["JD", "?"].includes(userName)
-      ? userName
-      : cachedAccount?.name
-        ? cachedAccount.name
-            .split(" ")
-            .map((part) => part[0] || "")
-            .join("")
-            .slice(0, 2)
-            .toUpperCase()
-        : userName;
-  const messagesRoute =
-    role === "coach" ? "/coach/messages" : role === "client" ? "/client/messages" : "/messages";
 
   const handleProfileClick = () => {
     if (role === "coach") navigate("/coach-profile");
@@ -484,19 +315,6 @@ export function Navbar({
         </div>
 
         <div className="flex items-center gap-3">
-          {contextAction?.label && contextAction?.to ? (
-            <button
-              onClick={() => navigate(contextAction.to)}
-              className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors ${theme.btnOutline}`}
-            >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M15 19l-7-7 7-7" />
-              </svg>
-              {contextAction.label}
-            </button>
-          ) : null}
-
           {switchOptions == null && resolvedSwitchOptions.length === 1 && (
             <button
               onClick={handleSwitch}
@@ -506,7 +324,7 @@ export function Navbar({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                   d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
               </svg>
-              {`${resolvedSwitchOptions[0].label} Dash`}
+              {`Switch to ${resolvedSwitchOptions[0].label}`}
             </button>
           )}
 
@@ -514,7 +332,7 @@ export function Navbar({
             <div className="flex items-center gap-2">
               {resolvedSwitchOptions.map((option) => (
                 <button
-                  key={`${option.to}:${option.label}`}
+                  key={option.to}
                   onClick={() => navigate(option.to)}
                   className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${theme.btnOutline}`}
                 >
@@ -522,30 +340,24 @@ export function Navbar({
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                       d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
                   </svg>
-                  {option.label}
+                  {`Switch to ${option.label}`}
                 </button>
               ))}
             </div>
           )}
 
-          <button
-            onClick={onMessage || (() => navigate(messagesRoute))}
-            className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] text-slate-400 transition-colors hover:bg-[rgba(255,255,255,0.06)] hover:text-white"
-            aria-label={unreadMessages > 0 ? `Messages, ${unreadMessages} unread` : "Messages"}
-          >
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-            </svg>
-            {unreadMessages > 0 && (
-              <span
-                className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white"
-                style={{ backgroundColor: theme.accent, boxShadow: `0 0 10px ${theme.accent}60` }}
-              >
-                {unreadMessages > 99 ? "99+" : unreadMessages}
-              </span>
-            )}
-          </button>
+          {role !== "admin" && (
+            <button
+              onClick={onMessage || (() => navigate(`/${role}/messages`))}
+              className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-[rgba(255,255,255,0.03)] text-slate-400 transition-colors hover:bg-[rgba(255,255,255,0.06)] hover:text-white"
+              aria-label="Messages"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+            </button>
+          )}
 
           <div className="relative" ref={dropdownRef}>
             <button
@@ -586,10 +398,10 @@ export function Navbar({
                     <p className="py-8 text-center text-sm text-gray-500">Loading notifications...</p>
                   ) : notificationsError ? (
                     <p className="py-8 text-center text-sm text-rose-300">{notificationsError}</p>
-                  ) : bellNotifs.length === 0 ? (
+                  ) : notifs.length === 0 ? (
                     <p className="py-8 text-center text-sm text-gray-500">No notifications</p>
                   ) : (
-                    bellNotifs.map((notification) => {
+                    notifs.map((notification) => {
                       const Icon = NOTIFICATION_ICONS[notification.category] || Bell;
                       return (
                         <button
@@ -634,24 +446,22 @@ export function Navbar({
             )}
           </div>
 
-          {!hideProfile && (
-            <button
-              onClick={handleProfileClick}
-              className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full text-sm font-bold text-white transition-transform hover:scale-105"
-              style={{ backgroundColor: theme.accent, boxShadow: `0 0 20px ${theme.accent}50` }}
-              title="Open Profile"
-            >
-              {resolvedUserAvatar ? (
-                <img
-                  src={resolvedUserAvatar}
-                  alt="Open Profile"
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                resolvedUserName
-              )}
-            </button>
-          )}
+          <button
+            onClick={handleProfileClick}
+            className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full text-sm font-bold text-white transition-transform hover:scale-105"
+            style={{ backgroundColor: theme.accent, boxShadow: `0 0 20px ${theme.accent}50` }}
+            title="Open Profile"
+          >
+            {userAvatar ? (
+              <img
+                src={userAvatar}
+                alt="Open Profile"
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              userName
+            )}
+          </button>
         </div>
       </div>
     </nav>

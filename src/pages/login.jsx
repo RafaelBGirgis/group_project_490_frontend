@@ -25,9 +25,6 @@ async function handlePostLogin(email) {
     if (Array.isArray(roles) && roles.includes("deactivated")) {
       return "/deactivated";
     }
-    if (Array.isArray(roles) && roles.includes("suspended")) {
-      return "/suspended";
-    }
     throw err;
   }
 }

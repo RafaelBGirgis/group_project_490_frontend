@@ -217,12 +217,12 @@ describe("Navbar", () => {
 
   it("shows 'Switch to Coach' for approved client role", () => {
     renderWithRouter(<Navbar role="client" userName="JD" canSwitchToCoach />);
-    expect(screen.getByText("Coach Dash")).toBeInTheDocument();
+    expect(screen.getByText("Switch to Coach")).toBeInTheDocument();
   });
 
   it("shows 'Switch to Client' for coach role", () => {
     renderWithRouter(<Navbar role="coach" userName="AB" />);
-    expect(screen.getByText("Client Dash")).toBeInTheDocument();
+    expect(screen.getByText("Switch to Client")).toBeInTheDocument();
   });
 
   it("closes notification dropdown on Escape", async () => {

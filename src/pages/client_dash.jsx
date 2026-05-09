@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Navbar,
   StatCard,
@@ -52,9 +52,8 @@ import {
   rememberTerminatedCoachId,
   rememberTerminatedRelationshipId,
 } from "../utils/terminatedRelationships";
-import { getCoachAccessState, getImmediateCoachAccessState } from "../utils/roleAccess";
-import { getImmediateRoleState, resolveRoleState } from "../utils/sessionAuth";
-import { setLastRoleContext } from "../utils/sessionCache";
+import { getCoachAccessState } from "../utils/roleAccess";
+import { resolveRoleState } from "../utils/sessionAuth";
 
 const role = "client";
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -63,8 +62,6 @@ const pct = (val, max) => Math.min(100, Math.round((val / max) * 100));
 
 export default function ClientDash() {
   const navigate = useNavigate();
-  const immediateRoleState = getImmediateRoleState();
-  const immediateCoachAccess = getImmediateCoachAccessState();
 
   /*  auth guard  */
   const [authed, setAuthed] = useState(false);
@@ -72,10 +69,6 @@ export default function ClientDash() {
   useEffect(() => {
     setAuthed(true);
   }, [navigate]);
-
-  useEffect(() => {
-    setLastRoleContext({ role: "client", dashboardPath: "/client" });
-  }, []);
 
   /*  overlay state  */
   const [overlay, setOverlay] = useState(null); // "workout" | "coach" | "availability" | "meals" | "survey" | "steps" | null
@@ -136,15 +129,10 @@ export default function ClientDash() {
   const [availableMeals, setAvailableMeals] = useState([]);
   const [loading, setLoading]           = useState(true);
   const [relationshipId, setRelationshipId] = useState(null);
-  const [canSwitchToCoach, setCanSwitchToCoach] = useState(
-    immediateCoachAccess.canAccessCoach
-  );
-  const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(immediateRoleState.hasAdminRole);
+  const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
+  const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(false);
   const [pendingCoachRequest, setPendingCoachRequest] = useState(null);
   const [approvedCoachRequest, setApprovedCoachRequest] = useState(null);
-  // Tracks whether there's something worth polling for (pending request or active coach).
-  // Using a ref so the interval callback reads fresh state without needing to restart.
-  const shouldPollRef = useRef(false);
   const [requestStatusError, setRequestStatusError] = useState("");
   const [requestStatusMessage, setRequestStatusMessage] = useState("");
   const [openingCoachChat, setOpeningCoachChat] = useState(false);
@@ -153,7 +141,7 @@ export default function ClientDash() {
   const refreshCoachRelationshipState = useCallback(async () => {
     const [requestList, myCoach] = await Promise.all([
       fetchMyCoachRequests().catch(() => null),
-      fetchMyCoach(),
+      fetchMyCoach().catch(() => null),
     ]);
     const { activeCoach, byCoachId } = resolveActiveCoachRelationship(myCoach, requestList);
     const terminatedCoachIds = new Set(getRememberedTerminatedCoachIds());
@@ -192,8 +180,6 @@ export default function ClientDash() {
     if (!nextCoach) {
       setCoachRating(null);
     }
-    // Only keep polling if there's something that could change.
-    shouldPollRef.current = !!(nextCoach || nextPending);
     return { nextPending, nextApproved, myCoach: nextCoach };
   }, []);
 
@@ -207,8 +193,8 @@ export default function ClientDash() {
         setAccount(me);
         const roleState = await resolveRoleState();
         setCanSwitchToAdmin(roleState.hasAdminRole);
-        const coachAccess = await getCoachAccessState(me, roleState);
-        setCanSwitchToCoach(coachAccess.canAccessCoach);
+        const coachAccess = await getCoachAccessState(me);
+        setCanSwitchToCoach(roleState.hasAdminRole || coachAccess.canAccessCoach);
 
         if (me.client_id) {
           setClientId(me.client_id);
@@ -232,7 +218,7 @@ export default function ClientDash() {
     if (!clientId) return undefined;
 
     const refreshRequests = () => {
-      if (shouldPollRef.current) void refreshCoachRelationshipState();
+      void refreshCoachRelationshipState();
     };
 
     window.addEventListener("focus", refreshRequests);

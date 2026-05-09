@@ -352,7 +352,7 @@ export function Navbar({
         // ignore network errors
       } finally {
         if (!isMounted) return;
-        timeoutId = window.setTimeout(checkAccountState, 15000);
+        timeoutId = window.setTimeout(checkAccountState, 30000);
       }
     };
 

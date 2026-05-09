@@ -97,7 +97,7 @@ export async function fetchUnreadMessageCount() {
     const result = await apiGet("/roles/shared/chat/unread_count");
     return Number(result?.total_unread ?? 0);
   } catch {
-    return 0;
+    return null;
   }
 }
 

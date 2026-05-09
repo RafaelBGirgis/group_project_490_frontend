@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import {
   Navbar,
   StatCard,
@@ -29,6 +29,8 @@ import {
 } from "../api/admin";
 import RoleRequestsDetail from "../components/overlays/role_requests_detail";
 import ReportsDetail from "../components/overlays/reports_detail";
+import { getImmediateRoleState, resolveRoleState } from "../utils/sessionAuth";
+import { setLastRoleContext } from "../utils/sessionCache";
 
 const role = "admin";
 const MUSCLE_GROUPS = ["Chest", "Back", "Shoulders", "Legs", "Arms", "Core", "Cardio"];
@@ -250,11 +252,26 @@ function DonutChart({ segments, size = 120, strokeWidth = 14 }) {
 
 export default function AdminDash() {
   const navigate = useNavigate();
+  const immediateRoleState = getImmediateRoleState();
 
   /*  auth guard  */
   const [authed, setAuthed] = useState(false);
   useEffect(() => {
     setAuthed(true);
+  }, [navigate]);
+
+  useEffect(() => {
+    setLastRoleContext({ role: "admin", dashboardPath: "/admin" });
+  }, []);
+
+  useEffect(() => {
+    resolveRoleState()
+      .then((roleState) => {
+        if (!roleState.hasAdminRole) {
+          navigate("/client", { replace: true });
+        }
+      })
+      .catch(() => {});
   }, [navigate]);
 
   /*  state  */
@@ -473,6 +490,12 @@ export default function AdminDash() {
   const paginatedExercises = filteredExercises.slice((exPage - 1) * EXERCISES_PER_PAGE, exPage * EXERCISES_PER_PAGE);
 
   const activeAnalytics = analytics?.[analyticsPeriod] ?? [];
+  const shouldBlockAdminPage =
+    immediateRoleState.roleNames.length > 0 && !immediateRoleState.hasAdminRole;
+
+  if (shouldBlockAdminPage) {
+    return <Navigate to="/client" replace />;
+  }
 
   /*  loading skeleton  */
   if (loading) {

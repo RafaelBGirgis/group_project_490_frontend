@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import clientLogo from "../assets/Client Logo.svg";
 import coachLogo from "../assets/Coach Logo.svg";
-import { fetchPlatformStats } from "../api/public";
+import { fetchLeaderboard, fetchPlatformStats } from "../api/public";
 
 const leaderboard = {
   client: {
@@ -27,6 +27,7 @@ const leaderboard = {
     categories: [
       {
         id: "burn",
+        apiCategory: "man-of-burn",
         name: "Man of Burn",
         icon: Flame,
         caption: "Monthly calorie effort",
@@ -36,10 +37,12 @@ const leaderboard = {
           { name: "Jordan Vale", badge: "Cut phase", score: "45,890", delta: "+9%" },
           { name: "Sam Brooks", badge: "Conditioning", score: "42,640", delta: "+7%" },
           { name: "Nina Park", badge: "Strength block", score: "39,810", delta: "+6%" },
+          { name: "Theo James", badge: "Volume week", score: "37,540", delta: "+4%" },
         ],
       },
       {
         id: "steps",
+        apiCategory: "cardi-athletes",
         name: "Cardi-athletes",
         icon: Activity,
         caption: "Step leaders this month",
@@ -49,10 +52,12 @@ const leaderboard = {
           { name: "Theo James", badge: "Runner", score: "388k", delta: "+13%" },
           { name: "Andre Moss", badge: "Busy week", score: "351k", delta: "+10%" },
           { name: "Priya Shah", badge: "Zone 2", score: "328k", delta: "+8%" },
+          { name: "Maya Stone", badge: "Daily pace", score: "304k", delta: "+6%" },
         ],
       },
       {
         id: "consistency",
+        apiCategory: "consistency-kings",
         name: "Consistency Kings",
         icon: CalendarDays,
         caption: "Telemetry streaks",
@@ -62,6 +67,7 @@ const leaderboard = {
           { name: "Ari Kim", badge: "Never misses", score: "39", delta: "+4" },
           { name: "Leah Ford", badge: "AM logs", score: "37", delta: "+3" },
           { name: "Cam Ortiz", badge: "Locked in", score: "35", delta: "+2" },
+          { name: "Elena Cruz", badge: "Steady habits", score: "33", delta: "+2" },
         ],
       },
     ],
@@ -71,6 +77,7 @@ const leaderboard = {
     categories: [
       {
         id: "mvp",
+        apiCategory: "mvp",
         name: "MVP",
         icon: Trophy,
         caption: "Most valued professionals",
@@ -80,10 +87,12 @@ const leaderboard = {
           { name: "Sarah Chen", badge: "Powerlifting", score: "95.9", delta: "+10%" },
           { name: "Marcus Hale", badge: "Mobility", score: "91.7", delta: "+8%" },
           { name: "Dana Scott", badge: "Endurance", score: "88.2", delta: "+6%" },
+          { name: "Iris Morgan", badge: "Lifestyle", score: "85.6", delta: "+4%" },
         ],
       },
       {
         id: "liked",
+        apiCategory: "most-liked",
         name: "Most Liked",
         icon: Star,
         caption: "Review momentum",
@@ -93,10 +102,12 @@ const leaderboard = {
           { name: "Troy Baker", badge: "Strength", score: "1,144", delta: "+17%" },
           { name: "Mina Patel", badge: "Nutrition", score: "1,032", delta: "+14%" },
           { name: "Owen Lee", badge: "Athletic prep", score: "984", delta: "+11%" },
+          { name: "Reese Young", badge: "Team training", score: "942", delta: "+8%" },
         ],
       },
       {
         id: "wisest",
+        apiCategory: "wisest",
         name: "Wisest",
         icon: Sparkles,
         caption: "Retention and experience",
@@ -106,6 +117,7 @@ const leaderboard = {
           { name: "Ben Carter", badge: "Roster builder", score: "90.8", delta: "+8%" },
           { name: "Jules Hunt", badge: "Habit coach", score: "87.5", delta: "+6%" },
           { name: "Reese Young", badge: "Team training", score: "84.9", delta: "+5%" },
+          { name: "Troy Baker", badge: "10 seasons", score: "82.4", delta: "+4%" },
         ],
       },
     ],
@@ -141,6 +153,7 @@ export default function LandingPage() {
   const [boardMode, setBoardMode] = useState("client");
   const [categoryId, setCategoryId] = useState("burn");
   const [platformStats, setPlatformStats] = useState(null);
+  const [leaderboardData, setLeaderboardData] = useState({});
 
   const mode = leaderboard[boardMode];
   const activeCategory = useMemo(() => {
@@ -176,6 +189,57 @@ export default function LandingPage() {
       window.clearInterval(intervalId);
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const role = boardMode === "client" ? "clients" : "coaches";
+    const apiCategory = activeCategory.apiCategory;
+    const cacheKey = `${role}:${apiCategory}`;
+
+    const loadLeaderboard = async () => {
+      try {
+        const response = await fetchLeaderboard(role, apiCategory);
+        if (!cancelled) {
+          setLeaderboardData((current) => ({
+            ...current,
+            [cacheKey]: Array.isArray(response?.entries) ? response.entries : [],
+          }));
+        }
+      } catch {
+        if (!cancelled) {
+          setLeaderboardData((current) => ({
+            ...current,
+            [cacheKey]: current[cacheKey] || [],
+          }));
+        }
+      }
+    };
+
+    loadLeaderboard();
+    const intervalId = window.setInterval(loadLeaderboard, 30000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [activeCategory.apiCategory, boardMode]);
+
+  const activeLeaderboardRows = useMemo(() => {
+    const role = boardMode === "client" ? "clients" : "coaches";
+    const cacheKey = `${role}:${activeCategory.apiCategory}`;
+    const entries = leaderboardData[cacheKey] || [];
+
+    return [...entries]
+      .sort((a, b) => Number(b?.score ?? 0) - Number(a?.score ?? 0))
+      .slice(0, 5)
+      .map((entry) => ({
+        accountId: entry.account_id,
+        name: entry.name,
+        badge: entry.badge || activeCategory.caption,
+        score: entry.display_score || String(entry.score ?? ""),
+        delta: entry.detail || "",
+      }));
+  }, [activeCategory, boardMode, leaderboardData]);
 
   return (
     <main className="min-h-screen overflow-hidden bg-[#080D19] text-white">
@@ -265,6 +329,7 @@ export default function LandingPage() {
             mode={mode}
             boardMode={boardMode}
             activeCategory={activeCategory}
+            rows={activeLeaderboardRows}
             categoryId={categoryId}
             onModeChange={changeMode}
             onCategoryChange={setCategoryId}
@@ -434,7 +499,7 @@ function StatCard({ stat, value, index }) {
   );
 }
 
-function LeaderboardPanel({ mode, boardMode, activeCategory, categoryId, onModeChange, onCategoryChange }) {
+function LeaderboardPanel({ mode, boardMode, activeCategory, rows, categoryId, onModeChange, onCategoryChange }) {
   const ActiveIcon = activeCategory.icon;
 
   return (
@@ -477,7 +542,7 @@ function LeaderboardPanel({ mode, boardMode, activeCategory, categoryId, onModeC
           })}
         </aside>
 
-        <section className="rounded-2xl border border-white/10 bg-[#0D1424] p-5">
+        <section key={`${boardMode}-${activeCategory.id}`} className="rounded-2xl border border-white/10 bg-[#0D1424] p-5">
           <div className="mb-5 flex items-start justify-between gap-4">
             <div>
               <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-bold uppercase tracking-[0.12em] text-slate-400">
@@ -490,21 +555,28 @@ function LeaderboardPanel({ mode, boardMode, activeCategory, categoryId, onModeC
           </div>
 
           <div className="space-y-3">
-            {activeCategory.rows.map((row, index) => (
-              <div key={row.name} className="grid grid-cols-[44px_1fr_auto] items-center gap-3 rounded-xl border border-white/10 bg-white/[0.035] p-3 transition hover:border-blue-500/30">
-                <div className={`grid h-11 w-11 place-items-center rounded-xl text-lg font-extrabold ${index === 0 ? "bg-orange-600 text-white" : "bg-white/[0.05] text-white"}`}>
-                  {index + 1}
-                </div>
-                <div>
-                  <p className="font-bold text-white">{row.name}</p>
-                  <p className="text-xs text-slate-500">{row.badge}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-xl font-extrabold text-blue-400">{row.score}</p>
-                  <p className="text-xs font-bold text-orange-400">{row.delta}</p>
-                </div>
+            {rows.length === 0 ? (
+              <div className="rounded-xl border border-white/10 bg-white/[0.035] p-6 text-center">
+                <p className="font-bold text-white">No rankings yet</p>
+                <p className="mt-2 text-sm text-slate-500">This leaderboard will populate once real account activity is available.</p>
               </div>
-            ))}
+            ) : (
+              rows.slice(0, 5).map((row, index) => (
+                <div key={`${boardMode}-${activeCategory.id}-${row.accountId ?? row.name}-${index}`} className="grid grid-cols-[44px_1fr_auto] items-center gap-3 rounded-xl border border-white/10 bg-white/[0.035] p-3 transition hover:border-blue-500/30">
+                  <div className={`grid h-11 w-11 place-items-center rounded-xl text-lg font-extrabold ${index === 0 ? "bg-orange-600 text-white" : "bg-white/[0.05] text-white"}`}>
+                    {index + 1}
+                  </div>
+                  <div>
+                    <p className="font-bold text-white">{row.name}</p>
+                    <p className="text-xs text-slate-500">{row.badge}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xl font-extrabold text-blue-400">{row.score}</p>
+                    <p className="text-xs font-bold text-orange-400">{row.delta}</p>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </section>
       </div>

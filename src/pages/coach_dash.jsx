@@ -27,6 +27,7 @@ import {
   lookupClient,
   acceptClientRequest,
   denyClientRequest,
+  terminateRelationship,
 } from "../api/coach";
 import { getConversationWithAccount } from "../api/chat";
 import { getCoachAccessState } from "../utils/roleAccess";
@@ -174,6 +175,7 @@ export default function CoachDashboard() {
   const [requestActionId, setRequestActionId] = useState(null);
   const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(false);
   const [chatActionId, setChatActionId] = useState(null);
+  const [relationshipActionId, setRelationshipActionId] = useState(null);
   const [selectedClient, setSelectedClient] = useState(null);
   const [clientSearchTerm, setClientSearchTerm] = useState("");
 

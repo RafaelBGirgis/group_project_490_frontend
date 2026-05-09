@@ -431,6 +431,5 @@ def test_client_find_coach():
         client_driver.quit()
         print("Client browser closed \n")
 
-
 if __name__ == "__main__":
     test_client_find_coach()

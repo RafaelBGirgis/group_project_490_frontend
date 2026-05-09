@@ -242,9 +242,6 @@ def signup(
         confirm_password_input = wait.until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "input[name='confirmPassword']"))
         )
-        pfp_input = wait.until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "input[name='pfpUrl']"))
-        )
         bio_input = wait.until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "textarea[name='bio']"))
         )
@@ -268,9 +265,6 @@ def signup(
 
         confirm_password_input.clear()
         confirm_password_input.send_keys(password)
-
-        pfp_input.clear()
-        pfp_input.send_keys(DEFAULT_PFP_URL)
 
         bio_input.clear()
         bio_input.send_keys(DEFAULT_SIGNUP_BIO)
@@ -304,17 +298,9 @@ def signup(
                 (By.CSS_SELECTOR, "input[placeholder='Weight (e.g. 165 lbs)']")
             )
         )
-        height_input = wait.until(
-            EC.presence_of_element_located(
-                (By.CSS_SELECTOR, "input[placeholder='Height (e.g. 5 ft 10 in)']")
-            )
-        )
 
         weight_input.clear()
         weight_input.send_keys("165 lbs")
-
-        height_input.clear()
-        height_input.send_keys("5 ft 10 in")
 
         # Select gender
         gender_select = Select(
@@ -337,28 +323,49 @@ def signup(
 
         # --------------------------------------AVAILABILITY--------------------------------------
         try:
-            # The onboarding availability editor now renders the full weekly grid by default.
-            # Toggle the Monday cell in the 9AM row, then save the schedule.
-            time_cell = wait.until(
+            add_availability_button = wait.until(
                 EC.element_to_be_clickable(
+                    (By.XPATH, "//button[normalize-space()='+ Add availability']")
+                )
+            )
+            add_availability_button.click()
+
+            start_time_input = wait.until(
+                EC.presence_of_element_located(
+                    (By.XPATH, "(//input[@type='time'])[1]")
+                )
+            )
+            end_time_input = wait.until(
+                EC.presence_of_element_located(
+                    (By.XPATH, "(//input[@type='time'])[2]")
+                )
+            )
+
+            start_time_input.clear()
+            start_time_input.send_keys("09:00")
+
+            end_time_input.clear()
+            end_time_input.send_keys("10:00")
+
+            add_availability_submit = wait.until(
+                EC.element_to_be_clickable(
+                    (By.XPATH, "//button[normalize-space()='Add availability']")
+                )
+            )
+            add_availability_submit.click()
+
+            wait.until(
+                EC.presence_of_element_located(
                     (
                         By.XPATH,
-                        "//div[normalize-space()='9AM']/parent::div/div[2]",
+                        "//div[@role='button' and contains(@title, 'Click to delete')]",
                     )
                 )
             )
-            time_cell.click()
-
-            save_schedule_button = wait.until(
-                EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='Save Schedule']"))
-            )
-            save_schedule_button.click()
 
         except TimeoutException:
             raise AssertionError(
-                "Could not find a clickable training availability slot. "
-                "Check the AvailabilityDetail component and add a stable selector like "
-                "data-testid='availability-Mon-9AM'."
+                "Could not create an onboarding availability window in the calendar."
             )
 
         # Fill payment information
@@ -369,7 +376,7 @@ def signup(
             EC.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder='CVV']"))
         )
         card_expiry_input = wait.until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='date']"))
+            EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='month']"))
         )
 
         card_number_input.clear()
@@ -378,8 +385,26 @@ def signup(
         card_cvv_input.clear()
         card_cvv_input.send_keys("097")
 
-        card_expiry_input.clear()
-        card_expiry_input.send_keys("12/31/2027")
+        card_expiry_input.click()
+        driver.execute_script(
+            """
+            const input = arguments[0];
+            const nativeSetter = Object.getOwnPropertyDescriptor(
+              window.HTMLInputElement.prototype,
+              'value'
+            ).set;
+            nativeSetter.call(input, '2027-12');
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            input.blur();
+            """,
+            card_expiry_input,
+        )
+        wait.until(
+            lambda d: d.find_element(
+                By.CSS_SELECTOR, "input[type='month']"
+            ).get_attribute("value") == "2027-12"
+        )
 
         # Submit onboarding form
         submit_button = wait.until(
@@ -401,7 +426,47 @@ def signup(
     except Exception as e:
         printFailure(f"Test failed: {e} \n")
         raise
-    
+
+
+def delete_account(driver, timeout=10):
+    """Delete the current account and wait until the login page is visible."""
+
+    wait = WebDriverWait(driver, timeout)
+
+    print("Opening profile page...")
+    open_profile_button = wait.until(
+        EC.element_to_be_clickable(
+            (By.CSS_SELECTOR, "button[title='Open Profile']")
+        )
+    )
+    open_profile_button.click()
+
+    wait.until(EC.url_contains("/profile"))
+    wait_for_page_to_fully_load(driver, timeout=timeout)
+
+    print("Deleting account...")
+    delete_account_button = wait.until(
+        EC.element_to_be_clickable(
+            (By.XPATH, "//button[normalize-space()='Delete Account']")
+        )
+    )
+    delete_account_button.click()
+
+    delete_account_alert = wait.until(EC.alert_is_present())
+    delete_account_alert.accept()
+
+    account_deleted_alert = wait.until(EC.alert_is_present())
+    account_deleted_alert.accept()
+
+    wait.until(EC.url_contains("/login"))
+    wait_for_page_to_fully_load(driver, timeout=timeout)
+    wait.until(EC.presence_of_element_located((By.TAG_NAME, "form")))
+
+    printSuccess(
+        f"Successfully deleted account and returned to: {driver.current_url}"
+    )
+
+
 def printSuccess(string):
     GREEN = "\033[32m"
     RESET = "\033[0m"

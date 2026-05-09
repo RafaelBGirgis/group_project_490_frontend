@@ -15,28 +15,53 @@ export async function fetchConversationWithAccount(accountId, fallback = {}) {
   }
 }
 
-export async function fetchConversations(_accountId, _role = "client", options = {}) {
-  const partnerAccounts = Array.isArray(options.partnerAccounts)
-    ? options.partnerAccounts.filter((item) => item?.account_id)
-    : [];
-
-  if (partnerAccounts.length === 0) {
+/**
+ * Pull every conversation the caller participates in. Backend joins through
+ * account_chat → returns each chat with the partner's public profile populated.
+ */
+export async function fetchAllConversations() {
+  try {
+    const result = await apiGet(`/roles/shared/chat/conversations`);
+    const list = Array.isArray(result?.conversations) ? result.conversations : [];
+    return list.map((c) => ({
+      id: c.chat_id,
+      partner_account_id: c.partner?.id ?? null,
+      partner_name: c.partner?.name || `Account #${c.partner?.id ?? "?"}`,
+      partner_pfp_url: c.partner?.pfp_url || null,
+      partner_age: c.partner?.age ?? null,
+      partner_gender: c.partner?.gender || null,
+      partner_is_admin: !!c.partner?.is_admin,
+      partner_is_verified_coach: !!c.partner?.is_verified_coach,
+      partner_is_client: !!c.partner?.is_client,
+      partner_role: c.partner?.is_admin
+        ? "admin"
+        : c.partner?.is_verified_coach
+          ? "coach"
+          : c.partner?.is_client
+            ? "client"
+            : "user",
+      last_message: c.last_message || "",
+      last_message_at: c.last_message_at || null,
+      unread_count: Number(c.unread_count ?? 0),
+    }));
+  } catch {
     return [];
   }
+}
 
-  const conversations = await Promise.all(
-    partnerAccounts.map((partner) =>
-      getConversationWithAccount(partner.account_id, partner).catch(() => null)
-    )
-  );
+export async function fetchPublicAccount(accountId) {
+  if (!accountId) return null;
+  try {
+    return await apiGet(`/roles/shared/account/public/${accountId}`);
+  } catch {
+    return null;
+  }
+}
 
-  return conversations
-    .filter(Boolean)
-    .sort((a, b) => {
-      const aTime = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
-      const bTime = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
-      return bTime - aTime;
-    });
+// Legacy shim: older code paths still call fetchConversations. Route them at
+// the unified endpoint so they pick up the same data.
+export async function fetchConversations() {
+  return fetchAllConversations();
 }
 
 export async function getConversationWithAccount(accountId, partner = {}) {
@@ -59,6 +84,23 @@ export async function fetchMessages(chatId, { skip = 0, limit = 100 } = {}) {
   }));
 }
 
+export async function markMessagesRead(chatId) {
+  try {
+    return await apiPost(`/roles/shared/chat/messages/${chatId}/read`);
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchUnreadMessageCount() {
+  try {
+    const result = await apiGet("/roles/shared/chat/unread_count");
+    return Number(result?.total_unread ?? 0);
+  } catch {
+    return null;
+  }
+}
+
 export async function sendMessage(chatId, content) {
   const result = await apiPost(withQuery(`/roles/shared/chat/messages/${chatId}`, {
     message_text: content,
@@ -73,16 +115,35 @@ export async function sendMessage(chatId, content) {
   };
 }
 
+/**
+ * Parses a backend timestamp into a Date. If the string carries no timezone
+ * suffix (older rows from before the UTC normalization), assume UTC — the
+ * backend never stores anything else.
+ */
+function parseUtcDate(value) {
+  if (value instanceof Date) return value;
+  if (typeof value !== "string") return new Date(NaN);
+  const trimmed = value.trim();
+  const hasTz = /([+-]\d{2}:?\d{2}|Z)$/i.test(trimmed);
+  return new Date(hasTz ? trimmed : `${trimmed}Z`);
+}
+
 export function formatChatTimestamp(value, { includeZone = false } = {}) {
   if (!value) return "";
   try {
-    const date = new Date(value);
-    const formatted = date.toLocaleTimeString("en-US", {
+    const date = parseUtcDate(value);
+    if (Number.isNaN(date.getTime())) return "";
+    // Use the user's browser locale + timezone — no hardcoded ET.
+    const formatted = date.toLocaleTimeString(undefined, {
       hour: "numeric",
       minute: "2-digit",
-      timeZone: "America/New_York",
     });
-    return includeZone ? `${formatted} ET` : formatted;
+    if (!includeZone) return formatted;
+    const tzAbbr =
+      new Intl.DateTimeFormat(undefined, { timeZoneName: "short" })
+        .formatToParts(date)
+        .find((p) => p.type === "timeZoneName")?.value || "";
+    return tzAbbr ? `${formatted} ${tzAbbr}` : formatted;
   } catch {
     return "";
   }
@@ -166,6 +227,35 @@ export async function terminateRelationship(relationshipId) {
     );
   } catch {
     return { details: "success" };
+  }
+}
+
+/* blocks */
+
+export async function blockAccount(accountId) {
+  return apiPost(`/roles/shared/blocks/${accountId}`);
+}
+
+export async function unblockAccount(accountId) {
+  return apiDelete(`/roles/shared/blocks/${accountId}`);
+}
+
+export async function listBlockedAccounts() {
+  try {
+    const result = await apiGet(`/roles/shared/blocks`);
+    return Array.isArray(result?.blocked) ? result.blocked : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Authoritative directional block probe between caller and partner.
+ *  Returns { partner_id, i_blocked_them, they_blocked_me } */
+export async function fetchBlockStatus(accountId) {
+  try {
+    return await apiGet(`/roles/shared/blocks/status/${accountId}`);
+  } catch {
+    return { partner_id: accountId, i_blocked_them: false, they_blocked_me: false };
   }
 }
 

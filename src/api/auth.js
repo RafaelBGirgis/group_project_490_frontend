@@ -1,4 +1,5 @@
 import { apiFetch, apiGet, apiPost } from "./api";
+import { clearSessionCache } from "../utils/sessionCache";
 
 const SESSION_COOKIE_NAMES = ["jwt", "access_token", "token", "auth_token"];
 
@@ -36,15 +37,12 @@ export async function login(email, password) {
   });
 }
 
-export async function signup(email, password, name, age, gender, pfp_url, bio, gcp_user_id) {
+export async function signup(email, password, name, pfp_url, gcp_user_id) {
   return apiPost("/auth/signup", {
     email: String(email || "").trim(),
     password,
     name: String(name || "").trim(),
-    age,
-    gender,
     ...(pfp_url ? { pfp_url } : {}),
-    ...(bio ? { bio } : {}),
     ...(gcp_user_id ? { gcp_user_id } : {}),
   });
 }
@@ -67,16 +65,9 @@ export async function refreshToken(email, password) {
 export function clearAuth() {
   localStorage.removeItem("jwt");
   localStorage.removeItem("active_client_id");
-  // Delete cookies with and without domain to cover both local and production
-  const cookieConfigs = [
-    "path=/",
-    "path=/; domain=.till-failure.us",
-    "path=/; domain=till-failure.us",
-  ];
+  clearSessionCache();
   SESSION_COOKIE_NAMES.forEach((name) => {
-    cookieConfigs.forEach((config) => {
-      document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; ${config}`;
-    });
+    document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
   });
 }
 

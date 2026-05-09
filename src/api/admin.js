@@ -109,6 +109,8 @@ export async function fetchAdminStats() {
   const now = Date.now();
   const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
   const active_accounts = users.filter((u) => u.is_active).length;
+  const deactivated_accounts = users.filter((u) => u.status === "inactive").length;
+  const suspended_accounts = users.filter((u) => u.status === "suspended").length;
   const signups_30d = users.filter((u) => {
     if (!u.created_at) return false;
     const t = new Date(u.created_at).getTime();
@@ -120,8 +122,9 @@ export async function fetchAdminStats() {
     total_clients: users.filter((item) => item.role === "client").length,
     total_coaches: users.filter((item) => item.role === "coach").length,
     pending_role_requests: requests.length,
-    active_accounts,
-    deactivated_accounts: users.length - active_accounts,
+    active_accounts: active_accounts,
+    deactivated_accounts: deactivated_accounts,
+    suspended_accounts: suspended_accounts,
     signups_30d,
     avg_coach_rating: reviewStats.avg_coach_rating,
     total_coach_reviews: reviewStats.total_coach_reviews,
@@ -150,7 +153,8 @@ export async function fetchAllUsers({ sortBy = "name", sortDir = "asc", skip = 0
  * routes instead) or if the target is the last remaining active admin.
  */
 export async function updateUserStatus(userId, newStatus) {
-  const action = newStatus === "active" ? "activate" : "deactivate";
+  // Use explicit suspend/unsuspend admin endpoints
+  const action = newStatus === "active" ? "unsuspend" : "suspend";
   return apiPost(`/roles/admin/accounts/${userId}/${action}`, {});
 }
 
@@ -228,10 +232,10 @@ function normalizeAdminAccount(item) {
     name: item.name || "Unknown User",
     email: item.email || "",
     role: item.role || (Array.isArray(item.roles) && item.roles[0]) || "client",
-    // Backend only knows is_active (true|false). The admin UI surfaces the
-    // off-state as "suspended" (orange badge), so collapse any backend label
-    // for inactive accounts to that single value.
-    status: item.is_active === false ? "suspended" : "active",
+    // Backend provides `is_suspended`; prefer that. Fall back to legacy
+    // `is_active` when `is_suspended` is absent.
+    status: item.is_suspended ? "suspended" : (item.is_active ? "active" : "inactive"),
+    is_suspended: item.is_suspended !== false,
     is_active: item.is_active !== false,
     created_at: item.created_at ? String(item.created_at).slice(0, 10) : "",
     last_active: item.last_active || "",

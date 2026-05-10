@@ -436,9 +436,17 @@ export async function fetchClientProgressPicturesByCoach(clientId, { limit = 10,
   }
 }
 
-export async function fetchClientMealHistoryByCoach(clientId, { limit = 10, skip = 0 } = {}) {
+/**
+ * Coach view of a client's meal log. Backend returns enriched rows with
+ * meal_name, meal_kind, calories, and macros joined live from meal_food/food.
+ * Pass `onDate` (YYYY-MM-DD) to scope to a single day — used by the
+ * "what they ate today" section on the client-profile overlay.
+ */
+export async function fetchClientMealHistoryByCoach(clientId, { limit = 50, skip = 0, onDate } = {}) {
   try {
-    const result = await apiGet(withQuery(`/roles/coach/client_meals/${clientId}`, { limit, skip }));
+    const result = await apiGet(
+      withQuery(`/roles/coach/client_meals/${clientId}`, { limit, skip, on_date: onDate })
+    );
     return Array.isArray(result) ? result : [];
   } catch {
     return [];

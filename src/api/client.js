@@ -159,42 +159,33 @@ export async function deleteAccount() {
 }
 
 /**
- * Aggregated calorie summary for today, scoped to the authenticated client.
- * Backend joins through CompletedWorkoutActivity.estimated_calories (burned)
- * and MealIngredient.calories via CompletedMealActivity → Meal (consumed).
- *
- * Always returns a fully-populated object — nulls coerce to 0 — so callers can
- * read every field without optional-chaining or fallbacks.
+ * Today's calories+macros for the calories card on the client dashboard.
+ * Comes from the dedicated `/calories_today` aggregate route, which sums
+ * across all of today's `completed_meal_activity` rows joined to their
+ * meal definitions. Falls back to zeroes on failure so the card still
+ * renders (showing "—" or 0).
  */
 export async function fetchCaloriesToday() {
   try {
-    const r = await apiGet("/roles/client/telemetry/calories_today");
+    const result = await apiGet("/roles/client/telemetry/calories_today");
     return {
-      calories_consumed: Number(r?.calories_consumed ?? 0),
-      calories_burned: Number(r?.calories_burned ?? 0),
-      net_calories: Number(r?.net_calories ?? 0),
-      calories_goal: Number(r?.calories_goal ?? 2000),
-      meal_count: Number(r?.meal_count ?? 0),
-      workout_count: Number(r?.workout_count ?? 0),
+      calories_consumed: Number(result?.calories_consumed) || 0,
+      protein_g: Number(result?.protein_g) || 0,
+      carbs_g: Number(result?.carbs_g) || 0,
+      fat_g: Number(result?.fat_g) || 0,
+      meal_count: Number(result?.meal_count) || 0,
     };
   } catch {
-    return {
-      calories_consumed: 0,
-      calories_burned: 0,
-      net_calories: 0,
-      calories_goal: 2000,
-      meal_count: 0,
-      workout_count: 0,
-    };
+    return { calories_consumed: 0, protein_g: 0, carbs_g: 0, fat_g: 0, meal_count: 0 };
   }
 }
 
 export async function fetchTelemetryToday(_clientId) {
   try {
-    const [steps, workouts, meals, weights] = await Promise.all([
+    const [steps, workouts, calsToday, weights] = await Promise.all([
       apiGet(withQuery("/roles/client/telemetry/query/steps", { skip: 0, limit: 1 })).catch(() => []),
       apiGet(withQuery("/roles/client/telemetry/query/workouts", { skip: 0, limit: 100 })).catch(() => []),
-      apiGet(withQuery("/roles/client/telemetry/query/meals", { skip: 0, limit: 100 })).catch(() => []),
+      fetchCaloriesToday(),
       apiGet(withQuery("/roles/client/telemetry/query/weights", { skip: 0, limit: 1 })).catch(() => []),
     ]);
 
@@ -221,12 +212,13 @@ export async function fetchTelemetryToday(_clientId) {
         "estimated_calories_burned",
         "estimated_calories",
       ]),
-      calories_consumed: sumTelemetryValue(meals, [
-        "calories_consumed",
-        "calories",
-        "total_calories",
-      ]),
+      // Live aggregate from /calories_today — sums every meal logged today,
+      // joined to its meal_food/food rows, with macros computed per-100g.
+      calories_consumed: calsToday.calories_consumed,
       calories_goal: Number(latestWeight?.calories_goal ?? 2000),
+      protein_g: calsToday.protein_g,
+      carbs_g: calsToday.carbs_g,
+      fat_g: calsToday.fat_g,
     };
   } catch {
     return {
@@ -234,6 +226,9 @@ export async function fetchTelemetryToday(_clientId) {
       calories_burned: 0,
       calories_consumed: 0,
       calories_goal: 2000,
+      protein_g: 0,
+      carbs_g: 0,
+      fat_g: 0,
     };
   }
 }
@@ -294,7 +289,8 @@ export async function deleteClientBusySlot(id) {
 
 /**
  * Fetch the meals the client has logged via the daily survey (newest first).
- * Returns completed meal activity rows from the backend with meal_name.
+ * Backend now returns enriched rows with meal_name + per-meal macros joined
+ * from meal_food/food, so the dashboard can render without follow-up fetches.
  */
 export async function fetchMealsToday(_clientId, { skip = 0, limit = 100 } = {}) {
   try {
@@ -306,16 +302,34 @@ export async function fetchMealsToday(_clientId, { skip = 0, limit = 100 } = {})
       id: row.id,
       client_prescribed_meal_id: row.client_prescribed_meal_id ?? null,
       on_demand_meal_id: row.on_demand_meal_id ?? null,
-      logged_at: row.last_updated || null,
-      meal_name: row.meal_name ?? null,
+      meal_id: row.meal_id ?? null,
+      meal_name: row.meal_name ?? "Unnamed meal",
+      calories: Number(row.calories) || 0,
+      protein_g: Number(row.protein_g) || 0,
+      carbs_g: Number(row.carbs_g) || 0,
+      fat_g: Number(row.fat_g) || 0,
+      logged_at: row.logged_at || null,
     }));
   } catch {
     return [];
   }
 }
 
+/**
+ * Meals available to log on demand: includes the client's own custom meals
+ * plus any meals their coach has prescribed (since prescribed meals can be
+ * logged the same way). Backed by /api/meals/library, which scopes results
+ * by caller role on the server.
+ */
 export async function fetchAvailableOnDemandMeals(_clientId) {
-  return [];
+  try {
+    const result = await apiGet(
+      withQuery("/api/meals/library", { skip: 0, limit: 100 })
+    );
+    return Array.isArray(result) ? result : [];
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -355,7 +369,29 @@ export async function logMeal(_clientId, mealPayload = {}) {
   return apiPost("/roles/client/fitness/daily-survey/meal/submit", {
     on_demand_meal_id: Number.isFinite(onDemandId) ? onDemandId : null,
     client_prescribed_meal_id: Number.isFinite(prescribedId) ? prescribedId : null,
+    // Optional slot label so the dashboard can group breakfast/lunch/dinner.
+    // Plain string passes straight through; null = unlabeled.
+    meal_kind: mealPayload.meal_kind ?? null,
   });
+}
+
+/**
+ * Edit a logged meal. Send only the fields you want to change.
+ * Most common use: re-tagging the meal_kind (breakfast → lunch).
+ *
+ * @param {number} activityId  — id from completed_meal_activity (CompletedMealRow.id)
+ * @param {object} patch       — { meal_kind?, client_prescribed_meal_id?, on_demand_meal_id? }
+ */
+export async function updateLoggedMeal(activityId, patch) {
+  return apiPatch(`/roles/client/telemetry/meals/${encodeURIComponent(activityId)}`, patch);
+}
+
+/**
+ * Delete a logged meal. The calorie-card aggregate will recompute on next
+ * fetch so the dashboard auto-corrects.
+ */
+export async function deleteLoggedMeal(activityId) {
+  return apiDelete(`/roles/client/telemetry/meals/${encodeURIComponent(activityId)}`);
 }
 
 export async function fetchAvailableCoaches(filters = {}) {

@@ -28,7 +28,6 @@ import {
   fetchMyCoach,
   fetchCoachRating,
   fetchMealsToday,
-  fetchAvailableOnDemandMeals,
   fetchMyCoachRequests,
   logMeal,
   deleteCoachRequest,
@@ -176,8 +175,7 @@ export default function ClientDash() {
   const [coach, setCoach] = useState(null);
   const [coachRating, setCoachRating] = useState(null);
   const [prescribedMeals, setPrescribedMeals] = useState([]);
-  const [availableMeals, setAvailableMeals] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading]           = useState(true);
   const [relationshipId, setRelationshipId] = useState(null);
   const [canSwitchToCoach, setCanSwitchToCoach] = useState(
     immediateCoachAccess.canAccessCoach
@@ -300,12 +298,11 @@ export default function ClientDash() {
 
     (async () => {
       try {
-        const [telemetry, calories, meals, mealOptions] =
+        const [telemetry, meals] =
           await Promise.all([
             fetchTelemetryToday(clientId).catch(() => ({ step_count: 0 })),
             fetchCaloriesToday(),
             fetchMealsToday(clientId).catch(() => []),
-            fetchAvailableOnDemandMeals(clientId).catch(() => []),
           ]);
 
         setStepCount(telemetry.step_count);
@@ -320,7 +317,6 @@ export default function ClientDash() {
         }
 
         setPrescribedMeals(meals);
-        setAvailableMeals(mealOptions);
       } catch {
         // Leave the last known dashboard state in place if the refresh fails.
       }
@@ -425,14 +421,23 @@ export default function ClientDash() {
   /*  log a meal  */
   const handleLogMeal = async (mealPayload) => {
     // Backend throws if neither id is provided or the id is invalid; surface
-    // the failure so the overlay can show it. On success, refetch the list
-    // from telemetry so the new entry appears with its server id.
+    // the failure so the overlay can show it.
     await logMeal(clientId, mealPayload);
+  };
+
+  // Refetch meal list + calories card after the overlay logs something.
+  // Split from handleLogMeal so the overlay can decide when to call it
+  // (e.g. after building+logging a custom meal in two steps).
+  const handleAfterMealLog = async () => {
     try {
-      const refreshed = await fetchMealsToday(clientId);
+      const [refreshed, telemetry] = await Promise.all([
+        fetchMealsToday(clientId),
+        fetchTelemetryToday(clientId),
+      ]);
       setPrescribedMeals(refreshed);
+      setCaloriesConsumed(telemetry.calories_consumed);
     } catch {
-      // Refresh failure is non-fatal — list will pick up the new row on next mount.
+      // Non-fatal — next mount picks it up.
     }
   };
 
@@ -888,47 +893,51 @@ export default function ClientDash() {
         {/*  NUTRITION DETAIL  */}
         <SectionHeader label="NUTRITION DETAIL" role={role} />
 
+        {/* Today's Meals card — at-a-glance summary of what's been logged
+            grouped by meal kind, with a calorie-progress footer that mirrors
+            the calories ring at the top of the dashboard. The bigger
+            tracker (logging, building, plan-from-coach) lives in the
+            overlay; this card is just the quick view + entry point. */}
         <DashboardCard
           role={role}
           title="Today's Meals"
           action={{
-            label: "Log Meal +",
+            label: "Open Tracker",
             onClick: () => setOverlay("meals"),
           }}
           footer={
-            <div className="pt-3 border-t border-white/5 flex justify-between items-center">
-              <span className="text-xs text-gray-500 uppercase tracking-widest">
-                Logged
-              </span>
-              <span className="text-white font-bold">
-                {prescribedMeals.length}
-              </span>
+            <div className="pt-3 border-t border-white/5 space-y-2">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-gray-500 uppercase tracking-widest">
+                  Today's Calories
+                </span>
+                <span className="text-white font-semibold">
+                  <span className="text-blue-400">
+                    {Math.round(caloriesConsumed ?? 0)}
+                  </span>
+                  <span className="text-gray-500"> / {caloriesGoal} kcal</span>
+                </span>
+              </div>
+              <div className="h-1.5 bg-[#0A1020] rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-blue-500 to-blue-400 transition-all duration-700"
+                  style={{
+                    width: `${Math.min(100, Math.round(((caloriesConsumed ?? 0) / Math.max(1, caloriesGoal)) * 100))}%`,
+                  }}
+                />
+              </div>
             </div>
           }
         >
           {prescribedMeals.length === 0 ? (
-            <p className="text-gray-500 text-sm text-center py-4">
-              No meals logged yet
-            </p>
+            <button
+              onClick={() => setOverlay("meals")}
+              className="w-full border border-dashed border-blue-500/30 text-blue-400 rounded-xl py-6 text-sm font-medium hover:bg-blue-500/5 transition-colors"
+            >
+              + Log your first meal of the day
+            </button>
           ) : (
-            <div className="space-y-2">
-              {prescribedMeals.slice(0, 5).map((meal) => (
-                <ListRow
-                  key={meal.id}
-                  label={meal.meal_name || "Logged Meal"}
-                  right={
-                    <span className="text-[11px] text-gray-400">
-                      {meal.logged_at
-                        ? new Date(meal.logged_at).toLocaleDateString(undefined, {
-                          month: "short",
-                          day: "numeric",
-                        })
-                        : ""}
-                    </span>
-                  }
-                />
-              ))}
-            </div>
+            <MealsByKind meals={prescribedMeals} />
           )}
         </DashboardCard>
 
@@ -967,8 +976,8 @@ export default function ClientDash() {
       >
         <MealDetail
           meals={prescribedMeals}
-          availableMeals={availableMeals}
           onLogMeal={handleLogMeal}
+          onAfterLog={handleAfterMealLog}
         />
       </Overlay>
 
@@ -1010,24 +1019,66 @@ export default function ClientDash() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   APPRECIATION CARD — replaces calories burned, shows a gratitude quote
+   MEALS BY KIND — compact today's-meals breakdown for the dashboard card.
+   Groups logged meals into Breakfast/Lunch/Dinner/Snack rows so the user
+   sees structure at a glance instead of one long flat list.
    ═══════════════════════════════════════════════════════════════════════ */
 
-function AppreciationCard({ appreciation }) {
+const MEAL_KIND_ORDER = ["breakfast", "lunch", "dinner", "snack"];
+const MEAL_KIND_ICON = {
+  breakfast: "🍳",
+  lunch: "🥗",
+  dinner: "🍽️",
+  snack: "🍎",
+  anytime: "🍴",
+};
+
+function MealsByKind({ meals }) {
+  // Bucket logs by kind; meals without a tag drop into "anytime".
+  const grouped = MEAL_KIND_ORDER.reduce((acc, k) => ({ ...acc, [k]: [] }), { anytime: [] });
+  for (const m of meals) {
+    const k = m.meal_kind && grouped[m.meal_kind] ? m.meal_kind : "anytime";
+    grouped[k].push(m);
+  }
+  // Render only the kinds that actually have rows so empty sections don't
+  // pad the card.
+  const visibleKinds = [...MEAL_KIND_ORDER, "anytime"].filter((k) => grouped[k].length > 0);
+
   return (
-    <div className="rounded-2xl border border-white/6 bg-[#0F1729] p-4 flex flex-col justify-between min-h-[80px]">
-      <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-2">
-        Something I'm Grateful For
-      </p>
-      {appreciation ? (
-        <p className="text-sm text-white leading-relaxed italic">
-          &ldquo;{appreciation}&rdquo;
-        </p>
-      ) : (
-        <p className="text-xs text-gray-600 italic">
-          Fill in today&apos;s check-in to see your gratitude here.
-        </p>
-      )}
+    <div className="space-y-3">
+      {visibleKinds.map((kind) => {
+        const items = grouped[kind];
+        const sumKcal = items.reduce((acc, m) => acc + (m.calories || 0), 0);
+        return (
+          <div key={kind} className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] uppercase tracking-widest text-gray-400 flex items-center gap-1.5">
+                <span className="text-sm">{MEAL_KIND_ICON[kind]}</span>
+                {kind}
+              </span>
+              <span className="text-[10px] text-orange-400 font-semibold">
+                {Math.round(sumKcal)} kcal
+              </span>
+            </div>
+            {items.map((meal) => (
+              <div
+                key={meal.id}
+                className="flex items-center justify-between rounded-lg bg-[#0A1020] border border-white/5 px-3 py-2"
+              >
+                <span className="text-white text-sm truncate flex-1">
+                  {meal.meal_name || "Unnamed meal"}
+                </span>
+                <span className="text-gray-500 text-[10px] mx-2 whitespace-nowrap">
+                  P {Math.round(meal.protein_g || 0)}g · C {Math.round(meal.carbs_g || 0)}g · F {Math.round(meal.fat_g || 0)}g
+                </span>
+                <span className="text-orange-400 text-xs font-bold whitespace-nowrap">
+                  {Math.round(meal.calories || 0)} kcal
+                </span>
+              </div>
+            ))}
+          </div>
+        );
+      })}
     </div>
   );
 }

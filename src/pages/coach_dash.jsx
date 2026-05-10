@@ -35,6 +35,7 @@ import { setLastRoleContext } from "../utils/sessionCache";
 import SessionsDetail from "../components/overlays/sessions_detail";
 import ReviewsDetail from "../components/overlays/reviews_detail";
 import ClientProfile from "../components/overlays/client_profile";
+import CoachMealsOverlay from "../components/overlays/coach_meals";
 
 const role = "coach";
 
@@ -681,7 +682,30 @@ export default function CoachDashboard() {
         {/*  PLANS & REVIEWS  */}
         <SectionHeader label="PLANS & REVIEWS" role={role} />
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-3 gap-4">
+          {/* Meals — coach builds meals from USDA foods and prescribes to clients.
+              Backed by /api/foods (USDA proxy) and /api/meals (CRUD + prescribe).
+              The full builder UI lives in the overlay; this card is just an
+              entry point with a quick count of saved meals. */}
+          <DashboardCard
+            role={role}
+            title="Meals"
+            footer={
+              <button
+                onClick={() => setOverlay("coach_meals")}
+                className="w-full py-2 rounded-xl border border-orange-500/30 text-orange-400 text-xs font-semibold hover:bg-orange-500/10 transition-colors"
+              >
+                Manage Meals
+              </button>
+            }
+          >
+            <p className="text-gray-400 text-xs">
+              Build meals from the USDA food database and assign them to your
+              clients. Calories and macros are computed automatically from
+              ingredient grams.
+            </p>
+          </DashboardCard>
+
           {/* Workout Plans */}
           <DashboardCard
             role={role}
@@ -743,6 +767,20 @@ export default function CoachDashboard() {
           reviews={reviews}
           avgRating={stats?.avg_rating}
           totalCount={stats?.review_count}
+        />
+      </Overlay>
+
+      <Overlay
+        open={overlay === "coach_meals"}
+        onClose={closeOverlay}
+        title="Meals"
+        wide
+      >
+        <CoachMealsOverlay
+          clients={clients
+            .filter((c) => c.status === "active")
+            .map((c) => ({ id: c.id, name: c.name }))}
+          onClose={closeOverlay}
         />
       </Overlay>
 

@@ -45,7 +45,6 @@ import {
   fetchDailyStepsSurvey,
   fetchStepHistory,
   fetchWorkoutHistory,
-  fetchWorkoutHistoryEnriched,
   fetchRandomAppreciation,
 } from "../api/survey";
 import { getConversationWithAccount } from "../api/chat";
@@ -64,7 +63,6 @@ import {
 import { getCoachAccessState, getImmediateCoachAccessState } from "../utils/roleAccess";
 import { getImmediateRoleState, resolveRoleState } from "../utils/sessionAuth";
 import { setLastRoleContext } from "../utils/sessionCache";
-import WorkoutJournal from "../components/workout_journal";
 
 const role = "client";
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -172,6 +170,7 @@ export default function ClientDash() {
   const [todayPlans, setTodayPlans] = useState([]);
   const [planLookup, setPlanLookup] = useState({});
   const [selectedCwpData, setSelectedCwpData] = useState(null); // { cwp, plan, occurrenceStart, occurrenceEnd }
+  const [completedCount, setCompletedCount] = useState(0);
   const [crudReady, setCrudReady] = useState(false);
   const [coach, setCoach] = useState(null);
   const [coachRating, setCoachRating] = useState(null);
@@ -390,6 +389,9 @@ export default function ClientDash() {
     }
   }, [activeDay]);
 
+  // Reset completed count when day changes
+  useEffect(() => { setCompletedCount(0); }, [activeDay]);
+
   useEffect(() => { loadPlansForDay(); }, [loadPlansForDay]);
 
   /*  open workout plan popup  */
@@ -409,10 +411,23 @@ export default function ClientDash() {
     });
   }
 
-  /*  log a workout activity via popup  */
+  /*  log a workout activity via popup — refresh calories + progress ring  */
   const handleLogWorkoutActivity = async (activityData) => {
     const localDate = getWeekDateForIdx(activeDay);
     await logWorkoutActivityForCwp({ ...activityData, local_date: localDate });
+    // Increment local completed count immediately for the progress ring
+    setCompletedCount((prev) => prev + 1);
+    // Re-fetch calories so burned total + ring update without a page reload
+    try {
+      const calories = await fetchCaloriesToday();
+      setCaloriesBurned(calories.calories_burned);
+      setCaloriesConsumed(calories.calories_consumed);
+      if (Number.isFinite(calories.calories_goal) && calories.calories_goal > 0) {
+        setCaloriesGoal(calories.calories_goal);
+      }
+    } catch {
+      // Non-fatal — ring will update on next full refresh.
+    }
   };
 
   /*  delete a scheduled plan via popup  */
@@ -498,40 +513,11 @@ export default function ClientDash() {
     }
   };
 
-  /*  workout journal fetch callback  */
-  const journalFetchDayData = useCallback(async (isoDate) => {
-    const [y, mo, d] = isoDate.split("-").map(Number);
-    const from_dt = new Date(y, mo - 1, d, 0, 0, 0).toISOString();
-    const to_dt = new Date(y, mo - 1, d, 23, 59, 59).toISOString();
-
-    const [cwps, allPlans, allLogs] = await Promise.all([
-      listMyScheduledPlans({ from_dt, to_dt }).catch(() => []),
-      searchWorkoutPlans({ limit: 200 }).catch(() => []),
-      fetchWorkoutHistoryEnriched({ limit: 200 }).catch(() => []),
-    ]);
-
-    const lookup = {};
-    allPlans.forEach((p) => { lookup[p.id] = p; });
-
-    const logs = allLogs.filter((l) => {
-      const ts = l.last_updated || l.created_at;
-      if (!ts) return false;
-      try { return new Date(ts).toISOString().slice(0, 10) === isoDate; } catch { return false; }
-    });
-
-    const filtered = cwps.filter((cwp) =>
-      (cwp.occurrences ?? []).some((occ) => {
-        const s = new Date(occ.start_dt);
-        return `${s.getFullYear()}-${String(s.getMonth() + 1).padStart(2, "0")}-${String(s.getDate()).padStart(2, "0")}` === isoDate;
-      })
-    );
-
-    return { cwps: filtered, planLookup: lookup, logs };
-  }, []);
 
   /*  derived values  */
   const totalCount = todayPlans.reduce((sum, cwp) => sum + (planLookup[cwp.workout_plan_id]?.activities?.length ?? 0), 0);
-  const completedCount = 0; // tracked per-session inside WorkoutPlanPopup
+  // completedCount is incremented locally on each handleLogWorkoutActivity call.
+  // It resets to 0 when the day tab changes (different day = fresh state).
   const stepsGoal = account?.daily_steps_goal ?? 10000;
   const stepsPercent = pct(stepCount ?? 0, stepsGoal);
   // Net calories = consumed − burned. This is what counts toward the goal:
@@ -932,12 +918,6 @@ export default function ClientDash() {
           )}
         </DashboardCard>
 
-        {/*  WORKOUT JOURNAL  */}
-        <SectionHeader label="WORKOUT JOURNAL" role={role} />
-
-        <DashboardCard role={role} title="Workout Journal">
-          <WorkoutJournal fetchDayData={journalFetchDayData} accent="#3B82F6" />
-        </DashboardCard>
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════

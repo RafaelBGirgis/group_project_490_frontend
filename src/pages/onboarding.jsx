@@ -66,8 +66,8 @@ function OnboardingPage() {
     // Daily targets the dashboard's progress rings + calories card use.
     // Defaults match the Client model defaults so a user who skips both
     // fields still ends up with reasonable starting values.
-    dailyStepGoal: "10000",
-    dailyCalorieGoal: "2000",
+    dailyStepGoal: "",
+    dailyCalorieGoal: "",
     availabilityWindows: [],
     cardNumber: "",
     cardCvv: "",
@@ -77,13 +77,13 @@ function OnboardingPage() {
   const isFormValid = useMemo(() => {
     return Boolean(
       form.primaryGoal &&
-        form.weight &&
-        form.age &&
-        form.gender &&
-        form.cardNumber &&
-        form.cardCvv &&
-        form.cardExpiry &&
-        form.availabilityWindows.length > 0
+      form.weight &&
+      form.age &&
+      form.gender &&
+      form.cardNumber &&
+      form.cardCvv &&
+      form.cardExpiry &&
+      form.availabilityWindows.length > 0
     );
   }, [form]);
 
@@ -281,7 +281,7 @@ function OnboardingPage() {
                   value={form.dailyStepGoal}
                   onChange={(e) => setForm((prev) => ({ ...prev, dailyStepGoal: e.target.value }))}
                   className="rounded-lg border border-white/10 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
-                  placeholder="Daily step goal (default 10,000)"
+                  placeholder="Daily step goal"
                 />
                 <input
                   type="number"
@@ -291,7 +291,7 @@ function OnboardingPage() {
                   value={form.dailyCalorieGoal}
                   onChange={(e) => setForm((prev) => ({ ...prev, dailyCalorieGoal: e.target.value }))}
                   className="rounded-lg border border-white/10 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
-                  placeholder="Daily calorie goal (default 2,000)"
+                  placeholder="Daily calorie goal"
                 />
               </div>
               <textarea
@@ -299,7 +299,7 @@ function OnboardingPage() {
                 onChange={(e) => setForm((prev) => ({ ...prev, bio: e.target.value }))}
                 rows={3}
                 className="w-full rounded-lg border border-white/10 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
-                placeholder="Biography for coach (optional)"
+                placeholder="Tell us about yourself! (optional)"
               />
             </section>
 

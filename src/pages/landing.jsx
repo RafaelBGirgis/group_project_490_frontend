@@ -1,587 +1,681 @@
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import {
+  Activity,
+  ArrowRight,
+  CalendarDays,
+  Check,
+  ChevronRight,
+  Crown,
+  Dumbbell,
+  Flame,
+  Gauge,
+  HeartHandshake,
+  MessageCircle,
+  Sparkles,
+  Star,
+  Trophy,
+  Users,
+} from "lucide-react";
 import clientLogo from "../assets/Client Logo.svg";
+import coachLogo from "../assets/Coach Logo.svg";
+import { fetchLeaderboard, fetchPlatformStats } from "../api/public";
 
-const B  = "#3B82F6"; // blue core
-const B2 = "#60A5FA"; // blue light
-const B3 = "#2563EB"; // blue deep
-const B4 = "#93C5FD"; // blue pale
-const O  = "#F97316"; // orange core
-const O2 = "#FB923C"; // orange light
-const O3 = "#EA580C"; // orange deep
-const O4 = "#FDBA74"; // orange pale
-const M  = "#818CF8"; // midpoint — blue-leaning blend
-const W  = "#F59E0B"; // warm amber accent
-
-/*  hooks  */
-function useReveal(th = 0.15) {
-  const ref = useRef(null);
-  const [v, set] = useState(false);
-  useEffect(() => {
-    const o = new IntersectionObserver(([e]) => { if (e.isIntersecting) set(true); }, { threshold: th });
-    if (ref.current) o.observe(ref.current);
-    return () => o.disconnect();
-  }, []);
-  return [ref, v];
-}
-
-function CountUp({ to, suffix = "", dur = 1100 }) {
-  const [v, set] = useState(0);
-  const [ref, vis] = useReveal();
-  const ran = useRef(false);
-  useEffect(() => {
-    if (!vis || ran.current) return; ran.current = true;
-    let s = null;
-    const go = (t) => { if (!s) s = t; const p = Math.min((t - s) / dur, 1); set(Math.floor((1 - Math.pow(1 - p, 3)) * to)); if (p < 1) requestAnimationFrame(go); };
-    requestAnimationFrame(go);
-  }, [vis, to, dur]);
-  return <span ref={ref}>{v.toLocaleString()}{suffix}</span>;
-}
-
-/*  icons (SVG)  */
-const I = {
-  dumbbell: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
-      <path d="M6.5 6.5h11M6.5 17.5h11M3 10v4M21 10v4M5 8v8a1 1 0 001 1h1a1 1 0 001-1V8a1 1 0 00-1-1H6a1 1 0 00-1 1zM16 8v8a1 1 0 001 1h1a1 1 0 001-1V8a1 1 0 00-1-1h-1a1 1 0 00-1 1z" />
-    </svg>
-  ),
-  chart: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
-      <path d="M3 3v18h18" /><path d="M7 16l4-6 4 3 5-7" />
-    </svg>
-  ),
-  chat: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
-      <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-    </svg>
-  ),
-  users: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
-      <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
-    </svg>
-  ),
-  target: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
-      <circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" />
-    </svg>
-  ),
-  trend: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
-      <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" /><polyline points="17 6 23 6 23 12" />
-    </svg>
-  ),
-  fork: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
-      <path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 002-2V2M7 2v20M21 15V2a5 5 0 00-5 5v6c0 1.1.9 2 2 2h3zm0 0v7" />
-    </svg>
-  ),
-  heart: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
-      <path d="M20.42 4.58a5.4 5.4 0 00-7.65 0l-.77.78-.77-.78a5.4 5.4 0 00-7.65 0C1.46 6.7 1.33 10.28 4 13l8 8 8-8c2.67-2.72 2.54-6.3.42-8.42z" />
-    </svg>
-  ),
-  arrow: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
-      <path d="M5 12h14M12 5l7 7-7 7" />
-    </svg>
-  ),
+const leaderboard = {
+  client: {
+    label: "Client board",
+    categories: [
+      {
+        id: "burn",
+        apiCategory: "man-of-burn",
+        name: "Man of Burn",
+        icon: Flame,
+        caption: "Monthly calorie effort",
+        unit: "kcal",
+        rows: [
+          { name: "Maya Stone", badge: "Hybrid athlete", score: "48,220", delta: "+14%" },
+          { name: "Jordan Vale", badge: "Cut phase", score: "45,890", delta: "+9%" },
+          { name: "Sam Brooks", badge: "Conditioning", score: "42,640", delta: "+7%" },
+          { name: "Nina Park", badge: "Strength block", score: "39,810", delta: "+6%" },
+          { name: "Theo James", badge: "Volume week", score: "37,540", delta: "+4%" },
+        ],
+      },
+      {
+        id: "steps",
+        apiCategory: "cardi-athletes",
+        name: "Cardi-athletes",
+        icon: Activity,
+        caption: "Step leaders this month",
+        unit: "steps",
+        rows: [
+          { name: "Elena Cruz", badge: "Daily walker", score: "412k", delta: "+18%" },
+          { name: "Theo James", badge: "Runner", score: "388k", delta: "+13%" },
+          { name: "Andre Moss", badge: "Busy week", score: "351k", delta: "+10%" },
+          { name: "Priya Shah", badge: "Zone 2", score: "328k", delta: "+8%" },
+          { name: "Maya Stone", badge: "Daily pace", score: "304k", delta: "+6%" },
+        ],
+      },
+      {
+        id: "consistency",
+        apiCategory: "consistency-kings",
+        name: "Consistency Kings",
+        icon: CalendarDays,
+        caption: "Telemetry streaks",
+        unit: "check-ins",
+        rows: [
+          { name: "Noah Reed", badge: "Perfect week", score: "42", delta: "+5" },
+          { name: "Ari Kim", badge: "Never misses", score: "39", delta: "+4" },
+          { name: "Leah Ford", badge: "AM logs", score: "37", delta: "+3" },
+          { name: "Cam Ortiz", badge: "Locked in", score: "35", delta: "+2" },
+          { name: "Elena Cruz", badge: "Steady habits", score: "33", delta: "+2" },
+        ],
+      },
+    ],
+  },
+  coach: {
+    label: "Coach board",
+    categories: [
+      {
+        id: "mvp",
+        apiCategory: "mvp",
+        name: "MVP",
+        icon: Trophy,
+        caption: "Most valued professionals",
+        unit: "value",
+        rows: [
+          { name: "Alex Rivera", badge: "Bodybuilding", score: "98.4", delta: "+12%" },
+          { name: "Sarah Chen", badge: "Powerlifting", score: "95.9", delta: "+10%" },
+          { name: "Marcus Hale", badge: "Mobility", score: "91.7", delta: "+8%" },
+          { name: "Dana Scott", badge: "Endurance", score: "88.2", delta: "+6%" },
+          { name: "Iris Morgan", badge: "Lifestyle", score: "85.6", delta: "+4%" },
+        ],
+      },
+      {
+        id: "liked",
+        apiCategory: "most-liked",
+        name: "Most Liked",
+        icon: Star,
+        caption: "Review momentum",
+        unit: "love",
+        rows: [
+          { name: "Iris Morgan", badge: "Lifestyle", score: "1,280", delta: "+21%" },
+          { name: "Troy Baker", badge: "Strength", score: "1,144", delta: "+17%" },
+          { name: "Mina Patel", badge: "Nutrition", score: "1,032", delta: "+14%" },
+          { name: "Owen Lee", badge: "Athletic prep", score: "984", delta: "+11%" },
+          { name: "Reese Young", badge: "Team training", score: "942", delta: "+8%" },
+        ],
+      },
+      {
+        id: "wisest",
+        apiCategory: "wisest",
+        name: "Wisest",
+        icon: Sparkles,
+        caption: "Retention and experience",
+        unit: "wisdom",
+        rows: [
+          { name: "Camila Torres", badge: "6 years", score: "94.1", delta: "+9%" },
+          { name: "Ben Carter", badge: "Roster builder", score: "90.8", delta: "+8%" },
+          { name: "Jules Hunt", badge: "Habit coach", score: "87.5", delta: "+6%" },
+          { name: "Reese Young", badge: "Team training", score: "84.9", delta: "+5%" },
+          { name: "Troy Baker", badge: "10 seasons", score: "82.4", delta: "+4%" },
+        ],
+      },
+    ],
+  },
 };
 
-/* ═══════════════════════════════════════════════════════════════════════ */
+const stats = [
+  { key: "preset_workouts", fallback: "100+", label: "Preset workouts", icon: Dumbbell, tone: "blue" },
+  { key: "active_users", fallback: "12k+", label: "Active users", icon: Users, tone: "orange" },
+  { key: "verified_coaches", fallback: "500+", label: "Verified coaches", icon: Check, tone: "blue" },
+  { key: "average_coach_rating", fallback: "4.9/5", label: "Average coach rating", icon: Star, tone: "orange" },
+];
+
+const flowCards = [
+  {
+    title: "Hire the right coach",
+    copy: "Browse verified profiles, specialties, client fit, and training style before starting the relationship.",
+    icon: HeartHandshake,
+  },
+  {
+    title: "Plan around real availability",
+    copy: "Coaches prescribe programs while clients schedule training around the week they actually have.",
+    icon: CalendarDays,
+  },
+  {
+    title: "Message through the work",
+    copy: "Clients and coaches keep feedback, form notes, and accountability close to the training plan.",
+    icon: MessageCircle,
+  },
+];
 
 export default function LandingPage() {
-  const [loaded, setLoaded] = useState(false);
-  const [mouse, setMouse] = useState({ x: 0.5, y: 0.5 });
-  useEffect(() => { setTimeout(() => setLoaded(true), 60); }, []);
-  const onMouse = (e) => setMouse({ x: e.clientX / window.innerWidth, y: e.clientY / window.innerHeight });
+  const [boardMode, setBoardMode] = useState("client");
+  const [categoryId, setCategoryId] = useState("burn");
+  const [platformStats, setPlatformStats] = useState(null);
+  const [leaderboardData, setLeaderboardData] = useState({});
 
-  const [gRef, gVis] = useReveal(0.05);
-  const [sRef, sVis] = useReveal(0.12);
-  const [cRef, cVis] = useReveal(0.15);
+  const mode = leaderboard[boardMode];
+  const activeCategory = useMemo(() => {
+    return mode.categories.find((category) => category.id === categoryId) || mode.categories[0];
+  }, [categoryId, mode]);
+
+  function changeMode(nextMode) {
+    setBoardMode(nextMode);
+    setCategoryId(leaderboard[nextMode].categories[0].id);
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadStats = async () => {
+      try {
+        const nextStats = await fetchPlatformStats();
+        if (!cancelled) {
+          setPlatformStats(nextStats);
+        }
+      } catch {
+        if (!cancelled) {
+          setPlatformStats(null);
+        }
+      }
+    };
+
+    loadStats();
+    const intervalId = window.setInterval(loadStats, 30000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const role = boardMode === "client" ? "clients" : "coaches";
+    const apiCategory = activeCategory.apiCategory;
+    const cacheKey = `${role}:${apiCategory}`;
+
+    const loadLeaderboard = async () => {
+      try {
+        const response = await fetchLeaderboard(role, apiCategory);
+        if (!cancelled) {
+          setLeaderboardData((current) => ({
+            ...current,
+            [cacheKey]: Array.isArray(response?.entries) ? response.entries : [],
+          }));
+        }
+      } catch {
+        if (!cancelled) {
+          setLeaderboardData((current) => ({
+            ...current,
+            [cacheKey]: current[cacheKey] || [],
+          }));
+        }
+      }
+    };
+
+    loadLeaderboard();
+    const intervalId = window.setInterval(loadLeaderboard, 30000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [activeCategory.apiCategory, boardMode]);
+
+  const activeLeaderboardRows = useMemo(() => {
+    const role = boardMode === "client" ? "clients" : "coaches";
+    const cacheKey = `${role}:${activeCategory.apiCategory}`;
+    const entries = leaderboardData[cacheKey] || [];
+
+    return [...entries]
+      .sort((a, b) => Number(b?.score ?? 0) - Number(a?.score ?? 0))
+      .slice(0, 5)
+      .map((entry) => ({
+        accountId: entry.account_id,
+        name: entry.name,
+        badge: entry.badge || activeCategory.caption,
+        score: entry.display_score || String(entry.score ?? ""),
+        delta: entry.detail || "",
+        pfpUrl: entry.pfp_url || null,
+        age: entry.age ?? null,
+        gender: entry.gender || null,
+      }));
+  }, [activeCategory, boardMode, leaderboardData]);
 
   return (
-    <div className="min-h-screen text-white overflow-hidden relative" style={{ background: "#030712" }} onMouseMove={onMouse}>
+    <main className="min-h-screen overflow-hidden bg-[#080D19] text-white">
+      <div className="fixed inset-0 pointer-events-none bg-[radial-gradient(circle_at_12%_18%,rgba(59,130,246,0.16),transparent_30%),radial-gradient(circle_at_86%_10%,rgba(249,115,22,0.12),transparent_27%)]" />
+      <div className="fixed inset-0 pointer-events-none opacity-[0.06] [background-image:linear-gradient(rgba(255,255,255,0.8)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.8)_1px,transparent_1px)] [background-size:72px_72px]" />
 
-      <style>{`
-        @keyframes spin{to{transform:rotate(360deg)}}
-        @keyframes float-a{0%,100%{transform:translateY(0)}50%{transform:translateY(-18px)}}
-        @keyframes float-b{0%,100%{transform:translateX(0)}50%{transform:translateX(14px)}}
-        @keyframes breathe{0%,100%{opacity:.5}50%{opacity:.8}}
-        @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
-        @keyframes pulse-ring{0%{transform:scale(1);opacity:.6}100%{transform:scale(2.5);opacity:0}}
-        @keyframes wave-draw{from{stroke-dashoffset:400}to{stroke-dashoffset:0}}
-        @keyframes color-cycle{0%{stop-color:${B}}33%{stop-color:${M}}66%{stop-color:${O}}100%{stop-color:${B}}}
-        .spin-s{animation:spin 80s linear infinite}
-        .spin-r{animation:spin 55s linear infinite reverse}
-        .fa{animation:float-a 6s ease-in-out infinite}
-        .fb{animation:float-a 4.5s ease-in-out infinite 1s}
-        .fc{animation:float-b 5.5s ease-in-out infinite .5s}
-        .breathe{animation:breathe 4s ease-in-out infinite}
-        .shimmer-t{
-          background:linear-gradient(90deg,${B},${B2},${O},${O2},${B});
-          background-size:300% 100%;
-          -webkit-background-clip:text;-webkit-text-fill-color:transparent;
-          animation:shimmer 5s linear infinite;
-        }
-      `}</style>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          BACKGROUND — multiple vivid color layers
-          ══════════════════════════════════════════════════════════════════ */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        {/* Big rotating conic meshes */}
-        <div className="spin-s absolute w-[110vw] h-[110vh] -top-[30%] -left-[20%] blur-[130px]"
-          style={{ background: `conic-gradient(from 0deg, ${B}30, ${B2}20, transparent 25%, ${O}28, ${O2}18, transparent 50%, ${B3}20, ${B}15, transparent 75%, ${O}22, ${W}14, transparent)`,
-            transform: `translate(${(mouse.x - .5) * 20}px, ${(mouse.y - .5) * 20}px)`, transition: "transform .3s ease-out" }} />
-        <div className="spin-r absolute w-[90vw] h-[90vh] -bottom-[20%] -right-[10%] blur-[110px]"
-          style={{ background: `conic-gradient(from 180deg, ${O}28, ${O2}18, transparent 20%, ${B}22, ${B2}18, transparent 45%, ${W}20, ${O}14, transparent 70%, ${B}15, ${M}12, transparent)`,
-            animationDelay: "2s" }} />
-
-        {/* Color pools */}
-        <div className="absolute top-[5%] left-[10%] w-[400px] h-[400px] rounded-full blur-[90px]" style={{ background: `${B}18` }} />
-        <div className="absolute top-[8%] right-[12%] w-[350px] h-[350px] rounded-full blur-[90px]" style={{ background: `${O}16` }} />
-        <div className="absolute top-[40%] left-[50%] -translate-x-1/2 w-[500px] h-[300px] rounded-full blur-[100px]" style={{ background: `linear-gradient(135deg, ${B}0D, ${O}0D)` }} />
-        <div className="absolute bottom-[10%] left-[20%] w-[300px] h-[300px] rounded-full blur-[80px]" style={{ background: `${B2}10` }} />
-        <div className="absolute bottom-[15%] right-[15%] w-[350px] h-[350px] rounded-full blur-[80px]" style={{ background: `${O2}0E` }} />
-
-        {/* Grid */}
-        <svg className="absolute inset-0 w-full h-full opacity-[0.03]"><defs><pattern id="g" width="50" height="50" patternUnits="userSpaceOnUse"><path d="M50 0L0 0 0 50" fill="none" stroke="white" strokeWidth=".5"/></pattern></defs><rect width="100%" height="100%" fill="url(#g)"/></svg>
-
-        {/* Orbs */}
-        <div className="fa absolute top-[12%] left-[18%] w-3 h-3 rounded-full" style={{ background: `radial-gradient(${B}, transparent)`, boxShadow: `0 0 12px ${B}60` }} />
-        <div className="fb absolute top-[22%] right-[22%] w-3.5 h-3.5 rounded-full" style={{ background: `radial-gradient(${O}, transparent)`, boxShadow: `0 0 12px ${O}60` }} />
-        <div className="fc absolute top-[45%] left-[8%] w-2.5 h-2.5 rounded-full" style={{ background: `radial-gradient(${B2}, transparent)`, boxShadow: `0 0 10px ${B2}50` }} />
-        <div className="fa absolute top-[55%] right-[12%] w-2 h-2 rounded-full" style={{ background: `radial-gradient(${O2}, transparent)`, boxShadow: `0 0 10px ${O2}50` }} />
-        <div className="fb absolute top-[72%] left-[35%] w-3 h-3 rounded-full" style={{ background: `radial-gradient(${W}, transparent)`, boxShadow: `0 0 12px ${W}40` }} />
-        <div className="fc absolute top-[80%] right-[30%] w-2 h-2 rounded-full" style={{ background: `radial-gradient(${B}, transparent)`, boxShadow: `0 0 10px ${B}40` }} />
-      </div>
-
-      {/* ══════════════════════════════════════════════════════════════════
-          NAV
-          ══════════════════════════════════════════════════════════════════ */}
-      <nav className="relative z-30 backdrop-blur-2xl border-b border-white/[0.06]"
-        style={{ opacity: loaded ? 1 : 0, transform: loaded ? "translateY(0)" : "translateY(-14px)", transition: "all .6s cubic-bezier(.22,1,.36,1) .1s" }}>
-        <div className="mx-auto max-w-7xl flex items-center justify-between px-6 py-4">
-          <Link to="/" className="flex items-center gap-3 group">
-            <div className="relative">
-              <img src={clientLogo} alt="" className="h-10 w-10 rounded-xl bg-white/5 p-1.5 relative z-10 group-hover:scale-110 transition-transform" />
-              <div className="absolute inset-0 rounded-xl blur-lg opacity-0 group-hover:opacity-60 transition-opacity duration-500"
-                style={{ background: `linear-gradient(135deg, ${B}, ${O})` }} />
-            </div>
-            <div>
-              <p className="text-[15px] font-bold tracking-tight">Till Failure</p>
-              <p className="text-[9px] uppercase tracking-[0.35em] font-medium" style={{ color: `${B}90` }}>Fitness platform</p>
-            </div>
+      <nav className="fixed left-0 top-0 z-50 w-full border-b border-white/5 bg-[#0B1120] px-6 py-3">
+        <div className="mx-auto flex max-w-7xl items-center justify-between">
+          <Link to="/" className="flex items-center gap-3">
+            <img src={clientLogo} alt="Till Failure" className="h-9 transition hover:scale-105" />
+            <span className="text-base font-semibold text-blue-400 transition hover:opacity-80">Till Failure</span>
           </Link>
           <div className="flex items-center gap-3">
-            <Link to="/login" className="text-sm text-slate-400 hover:text-white transition px-3 py-1.5">Log in</Link>
-            <Link to="/signup"
-              className="text-sm font-semibold rounded-full px-5 py-2 text-white transition-all duration-300 hover:scale-105 hover:shadow-lg"
-              style={{ background: `linear-gradient(135deg, ${B}, ${M}, ${O})`, boxShadow: `0 4px 24px ${B}30, 0 4px 24px ${O}30` }}>
+            <Link to="/login" className="hidden rounded-lg px-4 py-2 text-sm font-medium text-slate-400 transition hover:text-white sm:block">
+              Log in
+            </Link>
+            <Link to="/signup" className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700">
               Get started
             </Link>
           </div>
         </div>
       </nav>
 
-      {/* ══════════════════════════════════════════════════════════════════
-          HERO
-          ══════════════════════════════════════════════════════════════════ */}
-      <section className="relative z-10 max-w-5xl mx-auto px-6 pt-28 pb-20 text-center">
-        {/* Decorative animated SVG arcs */}
-        <svg className="absolute top-8 left-1/2 -translate-x-1/2 w-[700px] h-[350px] pointer-events-none" viewBox="0 0 700 350" fill="none">
-          <defs>
-            <linearGradient id="hg1" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor={B} stopOpacity=".5"><animate attributeName="stop-color" values={`${B};${B2};${B}`} dur="6s" repeatCount="indefinite" /></stop>
-              <stop offset="100%" stopColor={O} stopOpacity=".5"><animate attributeName="stop-color" values={`${O};${O2};${O}`} dur="6s" repeatCount="indefinite" /></stop>
-            </linearGradient>
-          </defs>
-          <path d="M50 250 Q200 50 350 180 Q500 310 650 100" stroke="url(#hg1)" strokeWidth="1.5" strokeLinecap="round"
-            strokeDasharray="800" style={{ strokeDashoffset: loaded ? 0 : 800, transition: "stroke-dashoffset 2.5s ease-out .5s" }} />
-          <path d="M50 280 Q250 100 350 220 Q450 340 650 140" stroke={`${O2}35`} strokeWidth="1"
-            strokeDasharray="800" style={{ strokeDashoffset: loaded ? 0 : 800, transition: "stroke-dashoffset 2.5s ease-out .8s" }} />
-        </svg>
-
-        {/* Pill */}
-        <div style={{ opacity: loaded ? 1 : 0, transform: loaded ? "translateY(0)" : "translateY(18px)", transition: "all .7s cubic-bezier(.22,1,.36,1) .2s" }}>
-          <span className="inline-flex items-center gap-2.5 rounded-full px-5 py-2 text-[11px] font-semibold uppercase tracking-[0.2em]"
-            style={{ background: `linear-gradient(135deg, ${B}12, ${O}12)`, border: `1px solid ${B}20` }}>
-            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: B, boxShadow: `0 0 10px ${B}` }} />
-            <span className="text-slate-300">Athletes & Coaches</span>
-            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: O, boxShadow: `0 0 10px ${O}` }} />
-          </span>
+      <section id="workouts" className="relative z-10 mx-auto grid min-h-screen max-w-7xl items-center gap-12 px-5 pb-20 pt-32 lg:grid-cols-[0.9fr_1.1fr]">
+        <div className="animate-[landing-rise_800ms_ease-out_both]">
+          <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2">
+            <span className="h-2 w-2 rounded-full bg-blue-500 shadow-[0_0_18px_rgba(59,130,246,0.7)]" />
+            <span className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Performance and expertise</span>
+            <span className="h-2 w-2 rounded-full bg-orange-500 shadow-[0_0_18px_rgba(249,115,22,0.7)]" />
+          </div>
+          <h1 className="text-5xl font-extrabold leading-[1.02] text-white sm:text-6xl lg:text-[82px]">
+            Where <span className="text-blue-400 [text-shadow:0_0_28px_rgba(59,130,246,0.45)]">effort</span> meets{" "}
+            <span className="text-orange-400 [text-shadow:0_0_28px_rgba(249,115,22,0.42)]">expertise</span>
+          </h1>
+          <p className="mt-7 max-w-2xl text-lg leading-8 text-slate-400">
+            Hire verified coaches, receive tailored workout plans, schedule sessions around real availability, and keep every adjustment connected through built-in messaging.
+          </p>
+          <div className="mt-10 flex flex-col gap-4 sm:flex-row">
+            <Link to="/signup" className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-8 py-4 text-base font-bold text-white transition-colors hover:bg-blue-700">
+              Sign up now <ArrowRight size={19} />
+            </Link>
+            <Link to="/login" className="inline-flex items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] px-8 py-4 text-base font-bold text-white backdrop-blur-xl transition hover:bg-white/[0.08]">
+              Log in
+            </Link>
+          </div>
         </div>
 
-        {/* Headline */}
-        <h1 className="mt-10 text-5xl sm:text-6xl lg:text-[5.5rem] font-black leading-[1.02] tracking-tight"
-          style={{ opacity: loaded ? 1 : 0, transform: loaded ? "translateY(0)" : "translateY(28px)", transition: "all .9s cubic-bezier(.22,1,.36,1) .35s" }}>
-          <span className="text-white">Where </span>
-          <span className="relative inline-block">
-            <span style={{ background: `linear-gradient(135deg, ${B}, ${B2})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>effort</span>
-            <svg className="absolute -bottom-2 left-0 w-full h-3 overflow-visible" viewBox="0 0 100 10">
-              <path d="M0 5 Q25 0 50 5 Q75 10 100 5" fill="none" stroke={B} strokeWidth="3" strokeLinecap="round" opacity=".6"
-                strokeDasharray="120" style={{ strokeDashoffset: loaded ? 0 : 120, transition: "stroke-dashoffset 1.2s ease-out 1.2s" }} />
-            </svg>
-          </span>
-          <br className="hidden sm:block" />
-          <span className="text-white">meets </span>
-          <span className="relative inline-block">
-            <span style={{ background: `linear-gradient(135deg, ${O}, ${O2})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>expertise</span>
-            <svg className="absolute -bottom-2 left-0 w-full h-3 overflow-visible" viewBox="0 0 100 10">
-              <path d="M0 5 Q25 10 50 5 Q75 0 100 5" fill="none" stroke={O} strokeWidth="3" strokeLinecap="round" opacity=".6"
-                strokeDasharray="120" style={{ strokeDashoffset: loaded ? 0 : 120, transition: "stroke-dashoffset 1.2s ease-out 1.4s" }} />
-            </svg>
-          </span>
-        </h1>
+        <HeroWorkspace />
+      </section>
 
-        <p className="mt-8 text-lg sm:text-xl max-w-2xl mx-auto leading-relaxed"
-          style={{ color: "rgba(203,213,225,.8)", opacity: loaded ? 1 : 0, transform: loaded ? "translateY(0)" : "translateY(18px)", transition: "all .8s cubic-bezier(.22,1,.36,1) .55s" }}>
-          One platform for clients chasing PRs and coaches building empires.
-          Train, track, connect, and grow — together.
-        </p>
-
-        {/* CTAs */}
-        <div className="mt-12 flex flex-col sm:flex-row items-center justify-center gap-4"
-          style={{ opacity: loaded ? 1 : 0, transform: loaded ? "translateY(0)" : "translateY(14px)", transition: "all .8s cubic-bezier(.22,1,.36,1) .7s" }}>
-          <Link to="/signup"
-            className="group relative rounded-2xl px-9 py-4 text-base font-bold text-white overflow-hidden transition-all duration-300 hover:scale-105"
-            style={{ background: `linear-gradient(135deg, ${B}, ${M}dd, ${O})`, boxShadow: `0 8px 30px ${B}30, 0 8px 30px ${O}30` }}>
-            <span className="relative z-10 flex items-center gap-2">Start for free {I.arrow}</span>
-            <div className="absolute inset-0 bg-white/0 group-hover:bg-white/[0.12] transition duration-300" />
-          </Link>
-          <Link to="/login"
-            className="rounded-2xl px-8 py-4 text-base font-semibold text-slate-300 transition-all duration-300 hover:text-white"
-            style={{ background: "rgba(255,255,255,.03)", border: `1px solid rgba(255,255,255,.08)` }}>
-            I have an account
-          </Link>
-        </div>
-
-        {/* Colorful role pills */}
-        <div className="mt-14 flex items-center justify-center gap-6"
-          style={{ opacity: loaded ? 1 : 0, transition: "opacity 1s ease-out 1s" }}>
-          <div className="flex items-center gap-2 px-4 py-2 rounded-full" style={{ background: `${B}15`, border: `1px solid ${B}25` }}>
-            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: B, boxShadow: `0 0 8px ${B}` }} />
-            <span className="text-xs font-semibold" style={{ color: B2 }}>Client tools</span>
-          </div>
-          <div className="w-8 h-px" style={{ background: `linear-gradient(90deg, ${B}40, ${M}40, ${O}40)` }} />
-          <div className="flex items-center gap-2 px-4 py-2 rounded-full" style={{ background: `linear-gradient(135deg, ${B}08, ${O}08)`, border: `1px solid ${M}20` }}>
-            <div className="w-2.5 h-2.5 rounded-full" style={{ background: `linear-gradient(135deg, ${B}, ${O})`, boxShadow: `0 0 8px ${M}` }} />
-            <span className="text-xs font-semibold" style={{ color: M }}>Shared</span>
-          </div>
-          <div className="w-8 h-px" style={{ background: `linear-gradient(90deg, ${O}40, ${M}40, ${B}40)` }} />
-          <div className="flex items-center gap-2 px-4 py-2 rounded-full" style={{ background: `${O}15`, border: `1px solid ${O}25` }}>
-            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: O, boxShadow: `0 0 8px ${O}` }} />
-            <span className="text-xs font-semibold" style={{ color: O2 }}>Coach tools</span>
-          </div>
+      <section className="relative z-10 mx-auto max-w-7xl px-5 py-8">
+        <div className="grid gap-4 rounded-2xl border border-white/10 bg-white/[0.05] p-2 shadow-2xl sm:grid-cols-2 lg:grid-cols-4">
+          {stats.map((stat, index) => (
+            <StatCard key={stat.label} stat={stat} value={formatPlatformStat(stat, platformStats)} index={index} />
+          ))}
         </div>
       </section>
 
-      {/* ══════════════════════════════════════════════════════════════════
-          BENTO GRID
-          ══════════════════════════════════════════════════════════════════ */}
-      <section ref={gRef} className="relative z-10 max-w-6xl mx-auto px-6 pb-28">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-
-          {/* Workouts — client, tall */}
-          <GlowCard i={0} vis={gVis} color={B} span="lg:row-span-2" gradient={`linear-gradient(160deg, ${B}14 0%, ${B3}08 40%, transparent 70%)`}>
-            <Badge color={B}>Client</Badge>
-            <Ico color={B}>{I.dumbbell}</Ico>
-            <h3 className="text-lg font-bold text-white mt-4">Build your workouts</h3>
-            <p className="text-sm text-slate-400 mt-2 leading-relaxed">
-              Choose from 100+ presets or create custom routines. Every set, rep, and rest period — dialed in.
-            </p>
-            <div className="mt-5 flex gap-2 flex-wrap">
-              {["Push/Pull/Legs","Upper/Lower","Full Body","Custom"].map(t=>(
-                <span key={t} className="text-[10px] px-2.5 py-1 rounded-full font-medium"
-                  style={{ background:`${B}15`, color:B2, border:`1px solid ${B}20` }}>{t}</span>
-              ))}
-            </div>
-            {/* Colorful bars */}
-            <div className="mt-6 flex items-end gap-1.5 h-24">
-              {[35,55,45,70,60,85,50,72,80,48,65,90].map((h,i)=>{
-                const colors = [B,B2,B3,B,B4,B2,B3,B,B2,B4,B,B3];
-                return <div key={i} className="flex-1 rounded-t transition-all duration-700"
-                  style={{ height: gVis?`${h}%`:"0%", background:`linear-gradient(to top, ${colors[i]}70, ${colors[i]}25)`, transitionDelay:`${500+i*60}ms` }}/>;
-              })}
-            </div>
-          </GlowCard>
-
-          {/* Assign — coach */}
-          <GlowCard i={1} vis={gVis} color={O} gradient={`linear-gradient(160deg, ${O}12 0%, transparent 60%)`}>
-            <Badge color={O}>Coach</Badge>
-            <Ico color={O}>{I.target}</Ico>
-            <h3 className="text-lg font-bold text-white mt-4">Assign programs</h3>
-            <p className="text-sm text-slate-400 mt-2 leading-relaxed">
-              Push tailored workout plans to any client. Monitor compliance and adjust on the fly.
-            </p>
-            <div className="mt-4 flex items-center gap-2.5">
-              <div className="flex -space-x-2">
-                {[B,B2,O2,O].map((c,i)=>(
-                  <div key={i} className="w-8 h-8 rounded-full border-2 flex items-center justify-center text-[9px] font-bold"
-                    style={{ borderColor:"#0a0f1a", background:`${c}30`, color:`${c}`, boxShadow:`0 0 8px ${c}30` }}>
-                    {["AM","JK","SR","CT"][i]}
-                  </div>
-                ))}
+      <section id="coaches" className="relative z-10 mx-auto max-w-7xl px-5 py-24">
+        <div className="mb-12 max-w-3xl">
+          <h2 className="mt-4 text-4xl font-extrabold text-white md:text-6xl">Structured tools for accountable training.</h2>
+        </div>
+        <div className="grid gap-5 md:grid-cols-3">
+          {flowCards.map((card, index) => (
+            <article key={card.title} className="rounded-2xl border border-white/10 bg-white/[0.035] p-7 backdrop-blur-xl" style={{ animation: `landing-rise 700ms ${index * 120}ms ease-out both` }}>
+              <div className="mb-9 flex h-13 w-13 items-center justify-center rounded-xl border border-white/10 bg-[#0D1424] text-blue-400">
+                <card.icon size={25} />
               </div>
-              <span className="text-xs" style={{ color: O2 }}>4 assigned</span>
-            </div>
-          </GlowCard>
-
-          {/* Progress — client */}
-          <GlowCard i={2} vis={gVis} color={B} gradient={`linear-gradient(160deg, ${B2}0C 0%, ${B}0A 50%, transparent 80%)`}>
-            <Badge color={B}>Client</Badge>
-            <Ico color={B2}>{I.chart}</Ico>
-            <h3 className="text-lg font-bold text-white mt-4">Track everything</h3>
-            <p className="text-sm text-slate-400 mt-2 leading-relaxed">
-              Workouts, meals, body metrics — animated charts that make progress tangible.
-            </p>
-            <svg className="mt-4 w-full h-14" viewBox="0 0 200 56">
-              <defs>
-                <linearGradient id="af" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={B2} stopOpacity=".4" />
-                  <stop offset="100%" stopColor={B} stopOpacity="0" />
-                </linearGradient>
-              </defs>
-              <polygon points="0,56 10,44 30,40 50,26 70,30 90,16 110,20 130,10 150,18 170,8 190,14 200,6 200,56" fill="url(#af)" />
-              <polyline points="10,44 30,40 50,26 70,30 90,16 110,20 130,10 150,18 170,8 190,14 200,6" fill="none" stroke={B2} strokeWidth="2" strokeLinecap="round" />
-              <circle cx="200" cy="6" r="3.5" fill={B2}>
-                <animate attributeName="r" values="3.5;6;3.5" dur="2s" repeatCount="indefinite"/>
-                <animate attributeName="opacity" values="1;.4;1" dur="2s" repeatCount="indefinite"/>
-              </circle>
-            </svg>
-          </GlowCard>
-
-          {/* Roster — coach, tall */}
-          <GlowCard i={3} vis={gVis} color={O} span="lg:row-span-2" gradient={`linear-gradient(160deg, ${O}14 0%, ${O3}0A 40%, transparent 70%)`}>
-            <Badge color={O}>Coach</Badge>
-            <Ico color={O}>{I.users}</Ico>
-            <h3 className="text-lg font-bold text-white mt-4">Manage your roster</h3>
-            <p className="text-sm text-slate-400 mt-2 leading-relaxed">
-              Every client, their plans, and progress — one view. Scale without losing the personal touch.
-            </p>
-            <div className="mt-5 space-y-2">
-              {[
-                { n:"Alex M.", s:"On track", c:"#22C55E" },
-                { n:"Jordan K.", s:"Needs check-in", c:O },
-                { n:"Sam R.", s:"PR this week", c:B },
-                { n:"Casey T.", s:"New client", c:M },
-              ].map((u,i)=>(
-                <div key={u.n} className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-all duration-600"
-                  style={{ background:`${u.c}06`, border:`1px solid ${u.c}15`,
-                    opacity:gVis?1:0, transform:gVis?"translateX(0)":"translateX(20px)", transitionDelay:`${700+i*120}ms` }}>
-                  <div className="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold"
-                    style={{ background:`${u.c}18`, color:u.c, border:`1px solid ${u.c}30`, boxShadow:`0 0 8px ${u.c}20` }}>
-                    {u.n.split(" ").map(x=>x[0]).join("")}
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-xs font-medium text-white/80">{u.n}</p>
-                    <p className="text-[10px]" style={{ color:`${u.c}bb` }}>{u.s}</p>
-                  </div>
-                  <div className="w-2 h-2 rounded-full" style={{ background:u.c, boxShadow:`0 0 8px ${u.c}80` }}/>
-                </div>
-              ))}
-            </div>
-          </GlowCard>
-
-          {/* Messaging — shared */}
-          <GlowCard i={4} vis={gVis} color={M} gradient={`linear-gradient(135deg, ${B}0C, ${M}0A, ${O}0C)`}>
-            <div className="flex gap-1.5">
-              <Badge color={B}>Client</Badge>
-              <Badge color={O}>Coach</Badge>
-            </div>
-            <Ico color={M} dual>{I.chat}</Ico>
-            <h3 className="text-lg font-bold text-white mt-4">Real-time messaging</h3>
-            <p className="text-sm text-slate-400 mt-2 leading-relaxed">
-              Seamless chat between athletes and coaches. Form checks, questions, accountability.
-            </p>
-          </GlowCard>
-
-          {/* Analytics — coach */}
-          <GlowCard i={5} vis={gVis} color={O} gradient={`linear-gradient(160deg, ${O}0E 0%, ${W}0A 50%, transparent 80%)`}>
-            <Badge color={O}>Coach</Badge>
-            <Ico color={W}>{I.trend}</Ico>
-            <h3 className="text-lg font-bold text-white mt-4">Growth analytics</h3>
-            <p className="text-sm text-slate-400 mt-2 leading-relaxed">
-              Retention, engagement, revenue — the metrics that build your empire.
-            </p>
-            {/* Mini multi-color bar */}
-            <div className="mt-4 flex items-end gap-1 h-10">
-              {[50,70,40,85,60,75,90,55].map((h,i)=>{
-                const c = [O,W,O2,O,W,O2,O,W][i];
-                return <div key={i} className="flex-1 rounded-t transition-all duration-500"
-                  style={{ height:gVis?`${h}%`:"0%", background:`linear-gradient(to top,${c}60,${c}20)`, transitionDelay:`${800+i*50}ms` }}/>;
-              })}
-            </div>
-          </GlowCard>
-
-          {/* Nutrition — client */}
-          <GlowCard i={6} vis={gVis} color={B} gradient={`linear-gradient(160deg, ${B4}0C 0%, ${B}0A 50%, transparent 80%)`}>
-            <Badge color={B}>Client</Badge>
-            <Ico color={B4}>{I.fork}</Ico>
-            <h3 className="text-lg font-bold text-white mt-4">Log meals</h3>
-            <p className="text-sm text-slate-400 mt-2 leading-relaxed">
-              Track macros and meals alongside training for the complete picture.
-            </p>
-            {/* Donut ring */}
-            <svg className="mt-3 w-16 h-16" viewBox="0 0 36 36">
-              <circle cx="18" cy="18" r="14" fill="none" stroke={`${B}20`} strokeWidth="3" />
-              <circle cx="18" cy="18" r="14" fill="none" stroke={B} strokeWidth="3" strokeLinecap="round"
-                strokeDasharray={gVis?"55 33":"0 88"} transform="rotate(-90 18 18)"
-                style={{ transition:"stroke-dasharray 1.2s ease-out 1s" }} />
-              <circle cx="18" cy="18" r="14" fill="none" stroke={O} strokeWidth="3" strokeLinecap="round"
-                strokeDasharray={gVis?"22 66":"0 88"} strokeDashoffset="-55" transform="rotate(-90 18 18)"
-                style={{ transition:"stroke-dasharray 1.2s ease-out 1.2s" }} />
-              <circle cx="18" cy="18" r="14" fill="none" stroke={B2} strokeWidth="3" strokeLinecap="round"
-                strokeDasharray={gVis?"11 77":"0 88"} strokeDashoffset="-77" transform="rotate(-90 18 18)"
-                style={{ transition:"stroke-dasharray 1.2s ease-out 1.4s" }} />
-            </svg>
-          </GlowCard>
-
-          {/* Marketplace — shared, wide */}
-          <GlowCard i={7} vis={gVis} color={null} span="md:col-span-2" gradient={`linear-gradient(135deg, ${B}0C, ${M}08, ${O}0C)`}>
-            <div className="flex gap-1.5">
-              <Badge color={B}>Client</Badge>
-              <Badge color={O}>Coach</Badge>
-            </div>
-            <div className="flex flex-col sm:flex-row gap-6 mt-1">
-              <div className="flex-1">
-                <Ico color={O2}>{I.heart}</Ico>
-                <h3 className="text-lg font-bold text-white mt-4">Find your perfect match</h3>
-                <p className="text-sm text-slate-400 mt-2 leading-relaxed">
-                  Clients browse verified coaches. Coaches grow their roster. The marketplace for both.
-                </p>
-              </div>
-              <div className="flex items-center gap-3 shrink-0 self-center">
-                <div className="w-14 h-14 rounded-2xl flex items-center justify-center" style={{ background:`${B}15`, border:`1px solid ${B}25`, boxShadow:`0 0 20px ${B}15` }}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke={B2} strokeWidth="1.5" className="w-7 h-7"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                </div>
-                <div className="flex flex-col items-center gap-1">
-                  <div className="w-6 h-px" style={{ background:`linear-gradient(90deg, ${B}, ${M}, ${O})` }} />
-                  <div className="w-8 h-px" style={{ background:`linear-gradient(90deg, ${B}80, ${M}, ${O}80)` }} />
-                  <div className="w-6 h-px" style={{ background:`linear-gradient(90deg, ${B}, ${M}, ${O})` }} />
-                </div>
-                <div className="w-14 h-14 rounded-2xl flex items-center justify-center" style={{ background:`${O}15`, border:`1px solid ${O}25`, boxShadow:`0 0 20px ${O}15` }}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke={O2} strokeWidth="1.5" className="w-7 h-7"><path d="M12 15l-2-2m0 0l2-2m-2 2h12M19.071 4.929A10 10 0 003 12a10 10 0 0016.071 7.071"/></svg>
-                </div>
-              </div>
-            </div>
-          </GlowCard>
+              <h3 className="text-2xl font-bold text-white">{card.title}</h3>
+              <p className="mt-4 leading-7 text-slate-400">{card.copy}</p>
+            </article>
+          ))}
         </div>
       </section>
 
-      {/* ══════════════════════════════════════════════════════════════════
-          STATS
-          ══════════════════════════════════════════════════════════════════ */}
-      <section ref={sRef} className="relative z-10">
-        <div className="h-px" style={{ background:`linear-gradient(90deg, transparent 5%, ${B}40, ${B2}30, ${O2}30, ${O}40, transparent 95%)` }} />
-        <div className="max-w-6xl mx-auto px-6 py-20">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-10 text-center"
-            style={{ opacity:sVis?1:0, transform:sVis?"translateY(0)":"translateY(18px)", transition:"all .8s cubic-bezier(.22,1,.36,1)" }}>
+      <section id="leaderboards" className="relative z-10 mx-auto max-w-7xl px-5 py-10">
+        <div className="mx-auto mb-10 max-w-4xl text-center">
+          <h2 className="mt-4 text-4xl font-extrabold text-white md:text-6xl">Leaderboards with personality</h2>
+          <p className="mt-6 text-lg leading-8 text-slate-400">
+            Compare client consistency, training output, and coach reputation across focused categories designed to highlight progress, reliability, and impact.
+          </p>
+        </div>
+        <LeaderboardPanel
+          mode={mode}
+          boardMode={boardMode}
+          activeCategory={activeCategory}
+          rows={activeLeaderboardRows}
+          categoryId={categoryId}
+          onModeChange={changeMode}
+          onCategoryChange={setCategoryId}
+        />
+      </section>
+
+      <footer className="relative z-10 border-t border-white/10 px-5 py-10">
+        <div className="mx-auto flex max-w-7xl flex-col justify-between gap-4 text-sm text-slate-500 md:flex-row md:items-center">
+          <p className="text-xl font-bold text-white">Till Failure</p>
+        </div>
+      </footer>
+    </main>
+  );
+}
+
+function HeroWorkspace() {
+  return (
+    <div className="relative animate-[landing-float_7s_ease-in-out_infinite]">
+      <div className="relative rounded-[2rem] border border-white/15 bg-[#0D1424] p-3 shadow-[0_45px_130px_rgba(0,0,0,0.42)]">
+        <div className="rounded-[1.4rem] border border-black/60 bg-[#0B1120] p-4">
+          <div className="mb-4 flex items-center justify-between border-b border-white/5 pb-3">
+            <div className="flex items-center gap-2.5">
+              <img src={coachLogo} alt="" className="h-7" />
+              <span className="text-sm font-bold text-orange-400">Till Failure</span>
+              <span className="rounded bg-orange-600 px-2 py-0.5 text-[9px] font-bold text-white">COACH</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="rounded-lg border border-orange-500 px-3 py-1 text-[10px] font-bold text-orange-400">
+                Switch to Client
+              </span>
+              <span className="grid h-7 w-7 place-items-center rounded-lg border border-white/10 bg-white/[0.03] text-slate-400">
+                <svg viewBox="0 0 24 24" width={13} height={13} fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 0 0-4-5.7V5a2 2 0 1 0-4 0v.3A6 6 0 0 0 6 11v3.2c0 .5-.2 1-.6 1.4L4 17h5" />
+                  <path d="M9 17a3 3 0 0 0 6 0" />
+                </svg>
+              </span>
+              <span className="grid h-7 w-7 place-items-center rounded-lg border border-white/10 bg-white/[0.03] text-slate-400">
+                <svg viewBox="0 0 24 24" width={13} height={13} fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <path d="M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 0 1-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8Z" />
+                  <path d="M8 12h.01M12 12h.01M16 12h.01" />
+                </svg>
+              </span>
+              <span className="grid h-8 w-8 place-items-center rounded-full bg-orange-600 text-xs font-bold text-white">M</span>
+            </div>
+          </div>
+
+          <div className="mb-4 flex items-center gap-3">
+            <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-white">Overview</span>
+            <span className="h-px flex-1 bg-orange-500/20" />
+          </div>
+
+          <div className="mb-5 grid gap-3 md:grid-cols-4">
             {[
-              { v:100, s:"+", l:"Preset workouts", c:B },
-              { v:12, s:"k+", l:"Active users", c:B2 },
-              { v:500, s:"+", l:"Verified coaches", c:O },
-              { v:95, s:"%", l:"Satisfaction", c:O2 },
-            ].map((st,i)=>(
-              <div key={st.l} style={{ transitionDelay:`${i*100}ms` }}>
-                <p className="text-4xl lg:text-5xl font-black" style={{ color:st.c, textShadow:`0 0 30px ${st.c}30` }}>
-                  <CountUp to={st.v} suffix={st.s}/>
-                </p>
-                <p className="mt-2 text-[11px] uppercase tracking-[0.2em] text-slate-500 font-medium">{st.l}</p>
+              { label: "Good morning", value: "Mike", meta: "Coach Dashboard - Verified" },
+              { label: "Active clients", value: "9", meta: "3 new this month" },
+              { label: "Avg rating", value: "4.9", meta: "from 38 reviews" },
+              { label: "Earnings", value: "$4.8k", meta: "from paid invoices" },
+            ].map((stat) => (
+              <div key={stat.label} className="rounded-xl border border-white/10 bg-[#0D1424] p-4">
+                <p className="text-[10px] uppercase tracking-[0.16em] text-slate-500">{stat.label}</p>
+                <p className="mt-5 text-2xl font-extrabold text-white">{stat.value}</p>
+                <p className="mt-4 text-[10px] font-medium text-orange-400">{stat.meta}</p>
               </div>
             ))}
           </div>
-        </div>
-        <div className="h-px" style={{ background:`linear-gradient(90deg, transparent 5%, ${O}40, ${O2}30, ${B2}30, ${B}40, transparent 95%)` }} />
-      </section>
 
-      {/* ══════════════════════════════════════════════════════════════════
-          CTA
-          ══════════════════════════════════════════════════════════════════ */}
-      <section ref={cRef} className="relative z-10 max-w-4xl mx-auto px-6 py-28 text-center">
-        {/* Big glow behind CTA */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[300px] rounded-full blur-[100px] pointer-events-none"
-          style={{ background:`linear-gradient(135deg, ${B}1A, ${B2}10, ${O2}10, ${O}1A)` }} />
-
-        <div className="relative" style={{ opacity:cVis?1:0, transform:cVis?"translateY(0)":"translateY(22px)", transition:"all .8s cubic-bezier(.22,1,.36,1)" }}>
-          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-black leading-tight">
-            <span className="text-white">Ready to go </span>
-            <span className="shimmer-t">till failure</span>
-            <span className="text-white">?</span>
-          </h2>
-          <p className="mt-5 text-slate-400 text-lg max-w-lg mx-auto">
-            Join thousands already on the platform.
-          </p>
-          <div className="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
-            <Link to="/signup?role=client"
-              className="rounded-2xl px-8 py-4 text-base font-bold text-white transition-all duration-300 hover:scale-105 hover:brightness-110"
-              style={{ background:`linear-gradient(135deg, ${B}, ${B3})`, boxShadow:`0 10px 40px ${B}35` }}>
-              Join as Client
-            </Link>
-            <Link to="/signup?role=coach"
-              className="rounded-2xl px-8 py-4 text-base font-bold text-white transition-all duration-300 hover:scale-105 hover:brightness-110"
-              style={{ background:`linear-gradient(135deg, ${O}, ${O3})`, boxShadow:`0 10px 40px ${O}35` }}>
-              Become a Coach
-            </Link>
+          <div className="mb-4 flex items-center gap-3">
+            <span className="text-[10px] font-bold uppercase tracking-[0.22em] text-white">Clients & sessions</span>
+            <span className="h-px flex-1 bg-orange-500/20" />
           </div>
-          <p className="mt-10 text-slate-600 text-sm">
-            Already a member?{" "}
-            <Link to="/login" className="hover:text-white transition underline underline-offset-4 decoration-white/15 hover:decoration-white/50" style={{ color:B2 }}>Log in</Link>
-          </p>
-        </div>
-      </section>
 
-      <div className="h-px" style={{ background:`linear-gradient(90deg, transparent 10%, ${B}25, ${B2}20, ${O2}20, ${O}25, transparent 90%)` }} />
-      <div className="relative z-10 text-center py-6">
-        <p className="text-[11px] tracking-wide" style={{ color:"rgba(148,163,184,.4)" }}>Till Failure — Train without limits.</p>
+          <div className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
+            <div className="rounded-xl border border-white/10 bg-[#0D1424] p-4">
+              <div className="mb-4 flex items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-base font-bold text-white">My Clients (9)</h3>
+                  <p className="mt-1 text-xs text-slate-500">Active training roster</p>
+                </div>
+                <span className="rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-500">Search by name...</span>
+              </div>
+              <div className="space-y-2">
+                {[
+                  { name: "Maya Stone", goal: "Hypertrophy block", tag: "On track" },
+                  { name: "Jordan Vale", goal: "Strength rebuild", tag: "Check-in due" },
+                  { name: "Nina Park", goal: "Cut phase", tag: "New PR" },
+                ].map((client, index) => (
+                  <div key={client.name} className="grid grid-cols-[34px_1fr_auto] items-center gap-3 rounded-lg border border-white/5 bg-white/[0.025] p-2.5">
+                    <span className="grid h-8 w-8 place-items-center rounded-full bg-orange-600 text-[10px] font-bold text-white">
+                      {client.name.split(" ").map((part) => part[0]).join("")}
+                    </span>
+                    <span>
+                      <span className="block text-sm font-bold text-white">{client.name}</span>
+                      <span className="block text-[10px] text-slate-500">{client.goal}</span>
+                    </span>
+                    <span className={index === 1 ? "text-[10px] font-bold text-orange-400" : "text-[10px] font-bold text-blue-400"}>
+                      {client.tag}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="rounded-xl border border-white/10 bg-[#0D1424] p-4">
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="text-base font-bold text-white">Client Requests (3)</h3>
+                  <span className="text-xs font-bold text-orange-400">Review</span>
+                </div>
+                <div className="space-y-2">
+                  {["Andre Moss", "Priya Shah", "Cam Ortiz"].map((name) => (
+                    <div key={name} className="flex items-center justify-between rounded-lg bg-white/[0.025] px-3 py-2">
+                      <span className="text-sm font-semibold text-white">{name}</span>
+                      <span className="text-[10px] font-bold text-orange-400">Pending</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-[#0D1424] p-4">
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="text-base font-bold text-white">Workout Plans</h3>
+                  <span className="text-xs font-bold text-orange-400">View all</span>
+                </div>
+                <div className="rounded-lg border border-orange-500/30 px-4 py-3 text-center text-xs font-bold text-orange-400">
+                  Prescribe Plans
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="mx-auto h-8 w-36 bg-[#0D1424]" />
+        <div className="mx-auto h-4 w-72 rounded-full bg-slate-700" />
+      </div>
+      <div className="pointer-events-none absolute -bottom-8 left-1/2 flex -translate-x-1/2 items-center gap-3">
+        <div className="-rotate-12 rounded-full border border-white/10 bg-[#0D1424] px-7 py-3 shadow-2xl">
+          <Dumbbell className="text-blue-400" size={34} />
+        </div>
+        <div className="rotate-12 rounded-full border border-white/10 bg-[#0D1424] px-7 py-3 shadow-2xl">
+          <Dumbbell className="text-orange-400" size={34} />
+        </div>
       </div>
     </div>
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   SUB-COMPONENTS
-   ═══════════════════════════════════════════════════════════════════════ */
+function formatWholeNumber(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  return new Intl.NumberFormat().format(number);
+}
 
-function GlowCard({ children, i, vis, color, span = "", gradient }) {
-  const [h, setH] = useState(false);
+function formatPlatformStat(stat, platformStats) {
+  const value = platformStats?.[stat.key];
+  if (stat.key === "average_coach_rating") {
+    const rating = Number(value);
+    return Number.isFinite(rating) && rating > 0 ? `${rating.toFixed(1)}/5` : stat.fallback;
+  }
+  return formatWholeNumber(value) || stat.fallback;
+}
+
+function StatCard({ stat, value, index }) {
+  const Icon = stat.icon;
+  const tones = {
+    blue: "from-blue-500/20 text-blue-400",
+    orange: "from-orange-500/20 text-orange-400",
+  };
+
   return (
-    <div className={`group relative rounded-2xl p-6 overflow-hidden transition-all duration-500 cursor-default ${span}`}
-      style={{
-        background: gradient || "rgba(255,255,255,.02)",
-        border: `1px solid ${h && color ? `${color}30` : "rgba(255,255,255,.06)"}`,
-        opacity: vis ? 1 : 0, transform: vis ? "translateY(0)" : "translateY(26px)",
-        transitionDelay: vis ? `${i * 80}ms` : "0ms",
-        boxShadow: h ? `0 20px 60px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.04)` : "inset 0 1px 0 rgba(255,255,255,.03)",
-      }}
-      onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)}>
-      {color && <div className="absolute -top-20 -left-20 w-56 h-56 rounded-full pointer-events-none transition-opacity duration-700"
-        style={{ background: `radial-gradient(circle, ${color}15 0%, transparent 70%)`, opacity: h ? 1 : 0 }} />}
-      <div className="relative z-10">{children}</div>
+    <article className={`rounded-xl border border-white/10 bg-gradient-to-br ${tones[stat.tone]} to-white/[0.03] p-6 text-center backdrop-blur-xl transition hover:-translate-y-1`} style={{ animation: `landing-rise 650ms ${index * 90}ms ease-out both` }}>
+      <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-xl border border-white/10 bg-[#0D1424]">
+        <Icon size={23} />
+      </div>
+      <p className="text-4xl font-extrabold text-white">{value}</p>
+      <p className="mt-2 text-xs font-bold uppercase tracking-[0.14em] text-slate-400">{stat.label}</p>
+    </article>
+  );
+}
+
+// Mirrors the gender enum from onboarding.jsx: male | female | non-binary | prefer_not_to_say.
+// Normalized case-insensitively so backend variants ("Male", "FEMALE") also map.
+function genderSymbol(gender) {
+  if (!gender) return null;
+  const key = String(gender).trim().toLowerCase().replace(/\s+/g, "_").replace(/-/g, "_");
+  switch (key) {
+    case "male":
+      return { glyph: "♂", label: "Male", className: "text-blue-400" };
+    case "female":
+      return { glyph: "♀", label: "Female", className: "text-pink-400" };
+    case "non_binary":
+      return { glyph: "🜬", label: "Non-binary", className: "text-purple-300" };
+    case "prefer_not_to_say":
+      return null;
+    default:
+      return null;
+  }
+}
+
+function LeaderboardAvatar({ row, isFirst }) {
+  const initials = (row.name || "?")
+    .split(" ")
+    .map((part) => part[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+
+  return (
+    <div className="relative h-12 w-12 shrink-0">
+      {isFirst ? (
+        <Crown
+          size={20}
+          className="absolute -top-3 left-1/2 -translate-x-1/2 -rotate-12 fill-yellow-300 text-yellow-400 drop-shadow-[0_0_8px_rgba(250,204,21,0.6)]"
+        />
+      ) : null}
+      <div
+        className={`grid h-12 w-12 place-items-center overflow-hidden rounded-full border-2 ${isFirst ? "border-yellow-400 shadow-[0_0_18px_rgba(250,204,21,0.4)]" : "border-white/15"
+          } bg-white/[0.05]`}
+      >
+        {row.pfpUrl ? (
+          <img src={row.pfpUrl} alt={row.name} className="h-full w-full object-cover" />
+        ) : (
+          <span className="text-sm font-extrabold text-white">{initials}</span>
+        )}
+      </div>
     </div>
   );
 }
 
-function Badge({ color, children }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.15em] rounded-full px-2.5 py-1 mb-3"
-      style={{ background: `${color}14`, color, border: `1px solid ${color}22` }}>
-      <span className="w-1.5 h-1.5 rounded-full" style={{ background: color, boxShadow: `0 0 6px ${color}` }} />
-      {children}
-    </span>
-  );
-}
+function LeaderboardPanel({ mode, boardMode, activeCategory, rows, categoryId, onModeChange, onCategoryChange }) {
+  const ActiveIcon = activeCategory.icon;
 
-function Ico({ color, dual, children }) {
   return (
-    <div className="w-11 h-11 rounded-xl flex items-center justify-center"
-      style={{
-        background: dual ? `linear-gradient(135deg, ${B}18, ${M}14, ${O}18)` : `${color}14`,
-        border: `1px solid ${dual ? `${M}22` : `${color}25`}`,
-        color: color || "#fff",
-        boxShadow: `0 0 16px ${color || M}15`,
-      }}>
-      {children}
+    <div className="relative mx-auto w-full max-w-[640px]">
+      {/* Client/Coach toggle — right-justified directly above the leaderboard */}
+      <div className="mb-4 flex justify-end">
+        <div className="inline-grid grid-cols-2 rounded-xl border border-white/10 bg-[#0B1120] p-1">
+          {["client", "coach"].map((modeName) => (
+            <button
+              key={modeName}
+              type="button"
+              onClick={() => onModeChange(modeName)}
+              className={`rounded-lg px-4 py-2 text-sm font-bold transition ${boardMode === modeName ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"
+                }`}
+            >
+              {leaderboard[modeName].label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Floating leaderboard, centered. Category rail floats to its right via absolute positioning so it doesn't push the leaderboard off-center. */}
+      <section
+        key={`${boardMode}-${activeCategory.id}`}
+        className="rounded-2xl border border-white/10 bg-[#0D1424] p-5 shadow-2xl"
+      >
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-bold uppercase tracking-[0.12em] text-slate-400">
+              <ActiveIcon size={15} className="text-orange-400" /> {activeCategory.unit}
+            </div>
+            <h3 className="text-3xl font-extrabold text-white">{activeCategory.name}</h3>
+            <p className="mt-2 text-sm text-slate-400">{activeCategory.caption}</p>
+          </div>
+          <Trophy className="mt-2 text-blue-400" size={32} />
+        </div>
+
+        <div className="space-y-3">
+          {rows.length === 0 ? (
+            <div className="rounded-xl border border-white/10 bg-white/[0.035] p-6 text-center">
+              <p className="font-bold text-white">No rankings yet</p>
+              <p className="mt-2 text-sm text-slate-500">
+                This leaderboard will populate once real account activity is available.
+              </p>
+            </div>
+          ) : (
+            rows.slice(0, 5).map((row, index) => {
+              const isFirst = index === 0;
+              const sym = genderSymbol(row.gender);
+              return (
+                <div
+                  key={`${boardMode}-${activeCategory.id}-${row.accountId ?? row.name}-${index}`}
+                  className={`grid grid-cols-[36px_56px_1fr_auto] items-center gap-3 rounded-xl border p-3 transition hover:border-blue-500/30 ${isFirst
+                      ? "border-yellow-400/40 bg-yellow-400/[0.04]"
+                      : "border-white/10 bg-white/[0.035]"
+                    }`}
+                >
+                  <div
+                    className={`grid h-9 w-9 place-items-center rounded-lg text-base font-extrabold ${isFirst ? "bg-yellow-500/20 text-yellow-300" : "bg-white/[0.05] text-white"
+                      }`}
+                  >
+                    {index + 1}
+                  </div>
+                  <LeaderboardAvatar row={row} isFirst={isFirst} />
+                  <div className="min-w-0">
+                    <p className="flex items-center gap-2 truncate font-bold text-white">
+                      <span className="truncate">{row.name}</span>
+                      {row.age != null ? (
+                        <span className="shrink-0 text-xs font-semibold text-slate-400">· {row.age}</span>
+                      ) : null}
+                      {sym ? (
+                        <span
+                          className={`shrink-0 text-base font-bold leading-none ${sym.className}`}
+                          title={sym.label}
+                          aria-label={sym.label}
+                        >
+                          {sym.glyph}
+                        </span>
+                      ) : null}
+                    </p>
+                    <p className="truncate text-xs text-slate-500">{row.badge}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xl font-extrabold text-blue-400">{row.score}</p>
+                    <p className="text-xs font-bold text-orange-400">{row.delta}</p>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </section>
+
+      {/* Category switch rail — absolutely positioned to the right so the leaderboard stays centered.
+          Falls back below the leaderboard on narrow viewports. */}
+      <aside className="mt-4 flex flex-col gap-2 lg:absolute lg:left-[calc(100%+1.5rem)] lg:top-[64px] lg:mt-0 lg:w-[210px]">
+        {mode.categories.map((category) => {
+          const Icon = category.icon;
+          const active = category.id === categoryId;
+          return (
+            <button
+              key={category.id}
+              type="button"
+              onClick={() => onCategoryChange(category.id)}
+              className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition ${active
+                  ? "border-orange-500/40 bg-orange-500/10 text-white"
+                  : "border-white/10 bg-white/[0.03] text-slate-400 hover:bg-white/[0.06]"
+                }`}
+            >
+              <span className="flex items-center gap-3">
+                <Icon size={18} className={active ? "text-orange-400" : "text-slate-500"} />
+                <span className="text-sm font-bold">{category.name}</span>
+              </span>
+              <ChevronRight size={16} />
+            </button>
+          );
+        })}
+      </aside>
     </div>
   );
 }

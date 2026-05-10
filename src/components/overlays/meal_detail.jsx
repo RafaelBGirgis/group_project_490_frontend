@@ -592,7 +592,7 @@ function BuildCustomTab({ onLogMeal, onError }) {
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Meal name (e.g. 'Lunch')"
+          placeholder="Meal name (e.g. 'Chicken Soup')"
           className="flex-1 bg-[#0A1020] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none"
         />
         <select
@@ -610,7 +610,7 @@ function BuildCustomTab({ onLogMeal, onError }) {
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-          placeholder="Search USDA — e.g. 'eggs'"
+          placeholder="Search foods/ingredients, e.g. 'chicken breast' or 'carrots'"
           className="flex-1 bg-[#0A1020] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none"
         />
         <button

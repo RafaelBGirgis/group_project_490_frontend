@@ -38,6 +38,10 @@ export default defineConfig({
         target: 'http://localhost:9090',
         changeOrigin: true,
       },
+      '/public': {
+        target: 'http://localhost:9090',
+        changeOrigin: true,
+      },
     },
   },
 })

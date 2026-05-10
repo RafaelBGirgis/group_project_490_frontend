@@ -66,8 +66,8 @@ function OnboardingPage() {
     // Daily targets the dashboard's progress rings + calories card use.
     // Defaults match the Client model defaults so a user who skips both
     // fields still ends up with reasonable starting values.
-    dailyStepGoal: "10000",
-    dailyCalorieGoal: "2000",
+    dailyStepGoal: "",
+    dailyCalorieGoal: "",
     availabilityWindows: [],
     cardNumber: "",
     cardCvv: "",
@@ -98,15 +98,15 @@ function OnboardingPage() {
 
     return Boolean(
       form.primaryGoal &&
-        ageOk &&
-        weightOk &&
-        stepGoalOk &&
-        calorieGoalOk &&
-        form.gender &&
-        form.cardNumber &&
-        form.cardCvv &&
-        form.cardExpiry &&
-        form.availabilityWindows.length > 0
+      ageOk &&
+      weightOk &&
+      stepGoalOk &&
+      calorieGoalOk &&
+      form.gender &&
+      form.cardNumber &&
+      form.cardCvv &&
+      form.cardExpiry &&
+      form.availabilityWindows.length > 0
     );
   }, [form]);
 
@@ -340,7 +340,7 @@ function OnboardingPage() {
                 onChange={(e) => setForm((prev) => ({ ...prev, bio: e.target.value }))}
                 rows={3}
                 className="w-full rounded-lg border border-white/10 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
-                placeholder="Biography for coach (optional)"
+                placeholder="Tell us about yourself! (optional)"
               />
             </section>
 

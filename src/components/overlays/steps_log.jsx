@@ -27,8 +27,12 @@ export default function StepsLog({ status, recent = [], onSubmitted }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     const stepsNum = Number(steps);
-    if (!Number.isInteger(stepsNum) || stepsNum < 0 || stepsNum > 100000) {
-      setError("Steps must be a whole number between 0 and 100,000.");
+    // Upper bound mirrors the backend validator (StepCount.step_count
+    // rejects > 70000 — a marathon-runner extreme; anything higher is
+    // almost certainly a sensor glitch). Lower bound is 0 since rest days
+    // are valid logs.
+    if (!Number.isInteger(stepsNum) || stepsNum < 0 || stepsNum > 70000) {
+      setError("Steps must be a whole number between 0 and 70,000.");
       return;
     }
     setSubmitting(true);
@@ -68,10 +72,12 @@ export default function StepsLog({ status, recent = [], onSubmitted }) {
               <input
                 type="number"
                 min={0}
-                max={100000}
+                max={70000}
+                step={1}
+                inputMode="numeric"
                 value={steps}
                 onChange={(e) => setSteps(e.target.value)}
-                placeholder="e.g. 8500"
+                placeholder="e.g. 8500 (max 70,000)"
                 className="w-full bg-[#080D19] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none"
                 autoFocus
               />

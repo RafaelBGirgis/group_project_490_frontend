@@ -11,9 +11,12 @@ import {
   fetchClientWorkoutPlanByCoach,
   fetchClientAvailabilityByCoach,
   fetchClientBusySlotsByCoach,
-  createClientReview,
 } from "../../api/coach";
+import { reportAccount } from "../../api/client";
+import { getClientScheduledPlansAsCoach, searchWorkoutPlans } from "../../api/plan_my_week";
+import { fetchClientWorkoutHistoryEnrichedByCoach } from "../../api/coach";
 import AvailabilityCalendar from "../availability/AvailabilityCalendar";
+import WorkoutJournal from "../workout_journal";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const TODAY_IDX = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
@@ -96,12 +99,29 @@ export default function ClientProfile({ clientId, detail }) {
   const [mealsSkip, setMealsSkip]   = useState(0);
   const [mealsMore, setMealsMore]   = useState(false);
 
+  // Separate slice of meals scoped to today, used by the "What they ate
+  // today" panel at the top. Fetched alongside the page-1 history so
+  // there's no extra round-trip on overlay open.
+  const [todayMeals, setTodayMeals] = useState([]);
+
   const [reportDraft, setReportDraft] = useState("");
   const [submittingReport, setSubmittingReport] = useState(false);
   const [reportSubmitted, setReportSubmitted] = useState(false);
 
   useEffect(() => {
     if (!clientId) return;
+    // Today's date as YYYY-MM-DD in local time. Used to filter the
+    // meal-history endpoint server-side so the "today" panel only shows
+    // what the client logged today, not the most-recent N meals.
+    const today = (() => {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    })();
+
     Promise.all([
       fetchClientWeightHistory(clientId, { limit: PAGE_SIZE, skip: 0 }),
       fetchClientMoodHistory(clientId, { limit: PAGE_SIZE, skip: 0 }),
@@ -109,13 +129,15 @@ export default function ClientProfile({ clientId, detail }) {
       fetchClientWorkoutHistoryByCoach(clientId, { limit: PAGE_SIZE, skip: 0 }),
       fetchClientProgressPicturesByCoach(clientId, { limit: PAGE_SIZE, skip: 0 }),
       fetchClientMealHistoryByCoach(clientId, { limit: PAGE_SIZE, skip: 0 }),
-    ]).then(([ws, ms, ss, whs, ps, mls]) => {
+      fetchClientMealHistoryByCoach(clientId, { limit: 50, skip: 0, onDate: today }),
+    ]).then(([ws, ms, ss, whs, ps, mls, todayMls]) => {
       setWeights(ws);  setWeightsMore(ws.length === PAGE_SIZE);  setWeightsSkip(PAGE_SIZE);
       setMoods(ms);    setMoodsMore(ms.length === PAGE_SIZE);    setMoodsSkip(PAGE_SIZE);
       setSteps(ss);    setStepsMore(ss.length === PAGE_SIZE);    setStepsSkip(PAGE_SIZE);
       setWorkouts(whs); setWorkoutsMore(whs.length === PAGE_SIZE); setWorkoutsSkip(PAGE_SIZE);
       setPictures(ps); setPicturesMore(ps.length === PAGE_SIZE); setPicturesSkip(PAGE_SIZE);
       setMeals(mls);   setMealsMore(mls.length === PAGE_SIZE);   setMealsSkip(PAGE_SIZE);
+      setTodayMeals(todayMls);
     });
   }, [clientId]);
 
@@ -141,9 +163,17 @@ export default function ClientProfile({ clientId, detail }) {
 
   const handleSubmitReport = async () => {
     if (!reportDraft.trim()) return;
+    // The new endpoint takes the client's *account_id*, not their
+    // client_id. Pulled off the detail object the overlay was passed
+    // (lookupClient returns base_account.id).
+    const targetAccountId = detail?.base_account?.id;
+    if (!targetAccountId) {
+      alert("Couldn't identify this client's account to report.");
+      return;
+    }
     setSubmittingReport(true);
     try {
-      await createClientReview(clientId, reportDraft.trim());
+      await reportAccount(targetAccountId, reportDraft.trim());
       setReportDraft("");
       setReportSubmitted(true);
     } catch (e) {
@@ -191,6 +221,36 @@ export default function ClientProfile({ clientId, detail }) {
     setMealsSkip((s) => s + PAGE_SIZE);
   };
 
+  const journalFetchDayData = useCallback(async (isoDate) => {
+    const [y, mo, d] = isoDate.split("-").map(Number);
+    const from_dt = new Date(y, mo - 1, d, 0, 0, 0).toISOString();
+    const to_dt = new Date(y, mo - 1, d, 23, 59, 59).toISOString();
+
+    const [cwps, allPlans, allLogs] = await Promise.all([
+      getClientScheduledPlansAsCoach(clientId, { from_dt, to_dt }).catch(() => []),
+      searchWorkoutPlans({ limit: 200 }).catch(() => []),
+      fetchClientWorkoutHistoryEnrichedByCoach(clientId, { limit: 200, skip: 0 }).catch(() => []),
+    ]);
+
+    const lookup = {};
+    allPlans.forEach((p) => { lookup[p.id] = p; });
+
+    const logs = allLogs.filter((l) => {
+      const ts = l.last_updated || l.created_at;
+      if (!ts) return false;
+      try { return new Date(ts).toISOString().slice(0, 10) === isoDate; } catch { return false; }
+    });
+
+    const filtered = cwps.filter((cwp) =>
+      (cwp.occurrences ?? []).some((occ) => {
+        const s = new Date(occ.start_dt);
+        return `${s.getFullYear()}-${String(s.getMonth() + 1).padStart(2, "0")}-${String(s.getDate()).padStart(2, "0")}` === isoDate;
+      })
+    );
+
+    return { cwps: filtered, planLookup: lookup, logs };
+  }, [clientId]);
+
   const name         = detail?.base_account?.name || "—";
   const age          = detail?.base_account?.age || "—";
   const gender       = detail?.base_account?.gender || "—";
@@ -221,6 +281,52 @@ export default function ClientProfile({ clientId, detail }) {
             <p className="text-gray-500 text-sm mt-2 leading-relaxed">{bio}</p>
           ) : null}
         </div>
+      </div>
+
+      {/* ── What They Ate Today ──────────────────────────────────────────────
+          Quick view scoped to today only, separate from the full history block
+          below. Calories, macros, and meal name come pre-joined from the
+          enriched /roles/coach/client_meals/{id}?on_date= endpoint. */}
+      <div className="rounded-2xl border border-white/6 bg-[#0B1120] p-4">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-[10px] uppercase tracking-widest text-gray-500">
+            What {name === "—" ? "they" : name.split(" ")[0]} ate today
+          </p>
+          <p className="text-[10px] text-orange-400 font-semibold">
+            {todayMeals.reduce((acc, m) => acc + Math.round(m.calories || 0), 0)} kcal · {todayMeals.length} meal{todayMeals.length === 1 ? "" : "s"}
+          </p>
+        </div>
+        {todayMeals.length === 0 ? (
+          <p className="text-gray-600 text-sm text-center py-3">
+            Nothing logged yet today.
+          </p>
+        ) : (
+          <div className="space-y-1.5">
+            {todayMeals.map((m) => (
+              <div
+                key={m.id}
+                className="flex items-center justify-between rounded-lg bg-[#0A1020] border border-white/5 px-3 py-2"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-white text-sm truncate">
+                    {m.meal_name || "Unnamed meal"}
+                    {m.meal_kind && (
+                      <span className="ml-2 text-[10px] uppercase tracking-widest text-gray-500">
+                        · {m.meal_kind}
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-gray-500 text-[10px]">
+                    P {Math.round(m.protein_g || 0)}g · C {Math.round(m.carbs_g || 0)}g · F {Math.round(m.fat_g || 0)}g
+                  </p>
+                </div>
+                <p className="text-orange-400 font-bold text-xs whitespace-nowrap ml-3">
+                  {Math.round(m.calories || 0)} kcal
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* ── Body Weight Progression ────────────────────────────────────────── */}
@@ -345,29 +451,46 @@ export default function ClientProfile({ clientId, detail }) {
         </div>
       </TelemetryBlock>
 
-      {/* ── Meals ────────────────────────────────────────────────────────── */}
+      {/* ── Meal History ─────────────────────────────────────────────────── */}
       <TelemetryBlock
-        title="Meals"
+        title="Meal History"
         items={meals}
         hasMore={mealsMore}
         onLoadMore={loadMoreMeals}
       >
-        {groupByDate(meals, (m) => m.created_at || m.logged_at || m.last_updated).map(({ date, entries }) => (
-          <div key={date} className="mb-3 last:mb-0">
-            <p className="text-[10px] text-orange-400/70 uppercase tracking-widest mb-1.5">{date}</p>
-            <div className="space-y-1">
-              {entries.map((m, i) => (
-                <div key={m.id ?? i} className="rounded-lg bg-[#0A1020] px-3 py-2 text-xs text-gray-300">
-                  {m.client_prescribed_meal_id != null
-                    ? `Prescribed #${m.client_prescribed_meal_id}`
-                    : m.on_demand_meal_id != null
-                      ? `On-demand #${m.on_demand_meal_id}`
-                      : `Meal #${m.id || i + 1}`}
-                </div>
-              ))}
+        {groupByDate(meals, (m) => m.logged_at || m.last_updated).map(({ date, entries }) => {
+          const dayKcal = entries.reduce((acc, m) => acc + (m.calories || 0), 0);
+          return (
+            <div key={date} className="mb-3 last:mb-0">
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-[10px] text-orange-400/70 uppercase tracking-widest">{date}</p>
+                <p className="text-[10px] text-gray-500">{Math.round(dayKcal)} kcal</p>
+              </div>
+              <div className="space-y-1">
+                {entries.map((m, i) => (
+                  <div
+                    key={m.id ?? i}
+                    className="rounded-lg bg-[#0A1020] px-3 py-2 flex items-center justify-between"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <span className="text-xs text-white truncate block">
+                        {m.meal_name || `Meal #${m.id || i + 1}`}
+                        {m.meal_kind && (
+                          <span className="ml-2 text-[9px] uppercase tracking-widest text-gray-500">
+                            · {m.meal_kind}
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-orange-400 font-semibold whitespace-nowrap ml-2">
+                      {Math.round(m.calories || 0)} kcal
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </TelemetryBlock>
 
       {/* ── Weekly Workout Schedule ───────────────────────────────────────── */}
@@ -394,6 +517,12 @@ export default function ClientProfile({ clientId, detail }) {
             ))
           )}
         </div>
+      </div>
+
+      {/* ── Workout Journal ───────────────────────────────────────────────── */}
+      <div className="rounded-2xl border border-white/6 bg-[#0B1120] p-4">
+        <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-3">Workout Journal</p>
+        <WorkoutJournal fetchDayData={journalFetchDayData} accent="#F59E0B" />
       </div>
 
       {/* ── Client Availability ───────────────────────────────────────────── */}

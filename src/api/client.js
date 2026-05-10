@@ -33,6 +33,29 @@ export async function fetchClientProfile() {
   return apiPost("/roles/client/me", {});
 }
 
+/**
+ * Single-call dashboard payload for the client dashboard.
+ *
+ * Replaces the cluster of (`/me` + `/roles/client/me` + `/calories_today`
+ * + `/query/steps` + `/query/workouts` + `/query/weights` + `/my_coach`
+ * + `/my_coach_requests` + `/review/<coach>`) with one round trip. The
+ * server inlines the coach's avg_rating + review_count alongside `coach`
+ * so we don't need a follow-up `fetchCoachRating(coach.coach_id)` once
+ * the coach is known.
+ *
+ * Returns null on failure so the page can fall back to its individual
+ * fetches if the bundle endpoint is unavailable (e.g. older backend).
+ */
+export async function fetchClientDashboardBundle() {
+  try {
+    const data = await apiGet("/roles/client/dashboard_bundle");
+    if (!data || typeof data !== "object") return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchUnifiedProfile() {
   try {
     const result = await apiGet("/roles/shared/account/me");
@@ -158,31 +181,85 @@ export async function deleteAccount() {
   return apiDelete("/roles/shared/account/delete");
 }
 
+/**
+ * Today's calories+macros for the calories card on the client dashboard.
+ * Comes from the dedicated `/calories_today` aggregate route, which sums
+ * across all of today's `completed_meal_activity` rows joined to their
+ * meal definitions. Falls back to zeroes on failure so the card still
+ * renders (showing "—" or 0).
+ */
+export async function fetchCaloriesToday() {
+  try {
+    const result = await apiGet("/roles/client/telemetry/calories_today");
+    return {
+      calories_consumed: Number(result?.calories_consumed) || 0,
+      // calories_burned + workout_count come from CompletedWorkoutActivity
+      // joined to today's CompletedWorkout rows. The dashboard's Calories
+      // card reads `calories_burned` directly, so missing this here is what
+      // caused "undefined kcal" to render after a workout log.
+      calories_burned: Number(result?.calories_burned) || 0,
+      net_calories: Number(result?.net_calories) || 0,
+      calories_goal: Number(result?.calories_goal) || 2000,
+      protein_g: Number(result?.protein_g) || 0,
+      carbs_g: Number(result?.carbs_g) || 0,
+      fat_g: Number(result?.fat_g) || 0,
+      meal_count: Number(result?.meal_count) || 0,
+      workout_count: Number(result?.workout_count) || 0,
+    };
+  } catch {
+    return {
+      calories_consumed: 0,
+      calories_burned: 0,
+      net_calories: 0,
+      calories_goal: 2000,
+      protein_g: 0,
+      carbs_g: 0,
+      fat_g: 0,
+      meal_count: 0,
+      workout_count: 0,
+    };
+  }
+}
+
 export async function fetchTelemetryToday(_clientId) {
   try {
-    const [steps, workouts, meals, weights] = await Promise.all([
+    const [steps, workouts, calsToday, weights] = await Promise.all([
       apiGet(withQuery("/roles/client/telemetry/query/steps", { skip: 0, limit: 1 })).catch(() => []),
       apiGet(withQuery("/roles/client/telemetry/query/workouts", { skip: 0, limit: 100 })).catch(() => []),
-      apiGet(withQuery("/roles/client/telemetry/query/meals", { skip: 0, limit: 100 })).catch(() => []),
+      fetchCaloriesToday(),
       apiGet(withQuery("/roles/client/telemetry/query/weights", { skip: 0, limit: 1 })).catch(() => []),
     ]);
 
     const latestSteps = Array.isArray(steps) ? steps[0] : null;
     const latestWeight = Array.isArray(weights) ? weights[0] : null;
 
+    // Only surface today's step count — yesterday's reading shouldn't appear as today's.
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    const stepDateStr = (() => {
+      const ts = latestSteps?.last_updated || latestSteps?.created_at;
+      if (!ts) return null;
+      try {
+        const d = new Date(ts);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      } catch { return null; }
+    })();
+    const todayStepCount = stepDateStr === todayStr ? Number(latestSteps?.step_count ?? 0) : 0;
+
     return {
-      step_count: Number(latestSteps?.step_count ?? 0),
+      step_count: todayStepCount,
       calories_burned: sumTelemetryValue(workouts, [
         "calories_burned",
         "estimated_calories_burned",
         "estimated_calories",
       ]),
-      calories_consumed: sumTelemetryValue(meals, [
-        "calories_consumed",
-        "calories",
-        "total_calories",
-      ]),
+      // Live aggregate from /calories_today — sums every meal logged today,
+      // joined to its meal_food/food rows, with macros computed per-100g.
+      calories_consumed: calsToday.calories_consumed,
       calories_goal: Number(latestWeight?.calories_goal ?? 2000),
+      protein_g: calsToday.protein_g,
+      carbs_g: calsToday.carbs_g,
+      fat_g: calsToday.fat_g,
     };
   } catch {
     return {
@@ -190,33 +267,13 @@ export async function fetchTelemetryToday(_clientId) {
       calories_burned: 0,
       calories_consumed: 0,
       calories_goal: 2000,
+      protein_g: 0,
+      carbs_g: 0,
+      fat_g: 0,
     };
   }
 }
 
-export async function fetchClientWorkoutPlans({ skip = 0, limit = 100 } = {}) {
-  const result = await apiGet(withQuery("/roles/client/fitness/query/plans", { skip, limit }));
-  if (Array.isArray(result)) return result;
-  if (Array.isArray(result?.plans)) return result.plans;
-  return [];
-}
-
-export async function fetchWorkoutPlan(_clientId, weekdayIdx) {
-  try {
-    const plans = await fetchClientWorkoutPlans();
-    const adapted = adaptWorkoutPlansForDay(plans, weekdayIdx);
-    if (adapted) return adapted;
-  } catch {
-    // Fall through to empty-state plan below.
-  }
-
-  void weekdayIdx;
-  return { strata_name: "", activities: [] };
-}
-
-export async function logWorkoutActivity(_clientId, _activityId) {
-  throw new Error("The backend route list does not include a workout activity logging endpoint.");
-}
 
 export async function fetchCoachInfo(_clientId) {
   return fetchMyCoach();
@@ -272,29 +329,61 @@ export async function deleteClientBusySlot(id) {
 }
 
 /**
- * Fetch the meals the client has logged via the daily survey (newest first).
- * Returns completed meal activity rows from the backend with meal_name.
+ * Fetch logged meals (newest first). Backend returns enriched rows with
+ * meal_name + per-meal macros joined from meal_food/food, so the UI can
+ * render without follow-up fetches.
+ *
+ * Pass `onDate` (YYYY-MM-DD) to scope to a single day — used by the
+ * overlay's "Logged Today" section. Omit for full history.
  */
-export async function fetchMealsToday(_clientId, { skip = 0, limit = 100 } = {}) {
+export async function fetchMealsToday(_clientId, { skip = 0, limit = 100, onDate } = {}) {
   try {
     const result = await apiGet(
-      withQuery("/roles/client/telemetry/query/meals", { skip, limit })
+      withQuery("/roles/client/telemetry/query/meals", { skip, limit, on_date: onDate })
     );
     if (!Array.isArray(result)) return [];
     return result.map((row) => ({
       id: row.id,
       client_prescribed_meal_id: row.client_prescribed_meal_id ?? null,
       on_demand_meal_id: row.on_demand_meal_id ?? null,
-      logged_at: row.last_updated || null,
-      meal_name: row.meal_name ?? null,
+      meal_id: row.meal_id ?? null,
+      meal_name: row.meal_name ?? "Unnamed meal",
+      meal_kind: row.meal_kind ?? null,
+      calories: Number(row.calories) || 0,
+      protein_g: Number(row.protein_g) || 0,
+      carbs_g: Number(row.carbs_g) || 0,
+      fat_g: Number(row.fat_g) || 0,
+      logged_at: row.logged_at || null,
     }));
   } catch {
     return [];
   }
 }
 
+/**
+ * Fetch full meal history (no date filter) — used by the "Meal History"
+ * section on the client overlay. Same shape as fetchMealsToday, just
+ * without the date filter so the user gets every past meal.
+ */
+export async function fetchMealHistory(clientId, { skip = 0, limit = 200 } = {}) {
+  return fetchMealsToday(clientId, { skip, limit });
+}
+
+/**
+ * Meals available to log on demand: includes the client's own custom meals
+ * plus any meals their coach has prescribed (since prescribed meals can be
+ * logged the same way). Backed by /api/meals/library, which scopes results
+ * by caller role on the server.
+ */
 export async function fetchAvailableOnDemandMeals(_clientId) {
-  return [];
+  try {
+    const result = await apiGet(
+      withQuery("/api/meals/library", { skip: 0, limit: 100 })
+    );
+    return Array.isArray(result) ? result : [];
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -334,7 +423,29 @@ export async function logMeal(_clientId, mealPayload = {}) {
   return apiPost("/roles/client/fitness/daily-survey/meal/submit", {
     on_demand_meal_id: Number.isFinite(onDemandId) ? onDemandId : null,
     client_prescribed_meal_id: Number.isFinite(prescribedId) ? prescribedId : null,
+    // Optional slot label so the dashboard can group breakfast/lunch/dinner.
+    // Plain string passes straight through; null = unlabeled.
+    meal_kind: mealPayload.meal_kind ?? null,
   });
+}
+
+/**
+ * Edit a logged meal. Send only the fields you want to change.
+ * Most common use: re-tagging the meal_kind (breakfast → lunch).
+ *
+ * @param {number} activityId  — id from completed_meal_activity (CompletedMealRow.id)
+ * @param {object} patch       — { meal_kind?, client_prescribed_meal_id?, on_demand_meal_id? }
+ */
+export async function updateLoggedMeal(activityId, patch) {
+  return apiPatch(`/roles/client/telemetry/meals/${encodeURIComponent(activityId)}`, patch);
+}
+
+/**
+ * Delete a logged meal. The calorie-card aggregate will recompute on next
+ * fetch so the dashboard auto-corrects.
+ */
+export async function deleteLoggedMeal(activityId) {
+  return apiDelete(`/roles/client/telemetry/meals/${encodeURIComponent(activityId)}`);
 }
 
 export async function fetchAvailableCoaches(filters = {}) {
@@ -387,11 +498,30 @@ export async function fetchBackendHealth() {
   return apiGet("/");
 }
 
+/**
+ * DEPRECATED — use reportAccount(accountId, reason) from api/auth surface
+ * (see reportAccount below). Routes through the legacy
+ * /roles/client/coach_report endpoint which writes to coach_report.
+ * Retained only so any unconverted call site keeps compiling.
+ */
 export async function createCoachReport(coachId, reportSummary) {
   return apiPost(
     withQuery(`/roles/client/coach_report/${coachId}`, {
       report_summary: reportSummary,
     })
+  );
+}
+
+/**
+ * Report any account by id. Hits the unified
+ * /roles/shared/account/report/{account_id} endpoint, which writes to
+ * the new `account_report` table. Replaces createCoachReport (client →
+ * coach) and createClientReview (coach → client) — both directions now
+ * share one route + one table.
+ */
+export async function reportAccount(accountId, reason) {
+  return apiPost(
+    withQuery(`/roles/shared/account/report/${accountId}`, { reason })
   );
 }
 
@@ -420,7 +550,14 @@ export function buildInitialSurveyPayload(form) {
     repeats_weekly: !!w.repeats_weekly,
     recurrence_end_dt: w.recurrence_end_dt ?? null,
   }));
+  // Coerce goal fields to numbers within the backend's valid bounds.
+  // Empty / NaN / out-of-range values fall through to the defaults the
+  // backend already enforces (10000 steps, 2000 kcal).
+  const stepGoal = Math.round(Number(form.dailyStepGoal));
+  const calorieGoal = Math.round(Number(form.dailyCalorieGoal));
   return {
+    daily_step_goal: Number.isFinite(stepGoal) && stepGoal > 0 ? stepGoal : undefined,
+    daily_calorie_goal: Number.isFinite(calorieGoal) && calorieGoal > 0 ? calorieGoal : undefined,
     fitness_goals: {
       client_id: 0,
       goal_enum: GOAL_ENUM_MAP[form.primaryGoal] ?? String(form.primaryGoal || "").toLowerCase(),
@@ -476,19 +613,19 @@ function normalizeCoachItem(coach) {
       : [];
   const certifications = Array.isArray(coach.certifications)
     ? coach.certifications.map((cert) => ({
-        name: cert.certification_name || cert.name || "Certification",
-        organization: cert.certification_organization || cert.organization || "Organization",
-        year: cert.certification_date || cert.year || "",
-        description: cert.certification_score || cert.description || "",
-      }))
+      name: cert.certification_name || cert.name || "Certification",
+      organization: cert.certification_organization || cert.organization || "Organization",
+      year: cert.certification_date || cert.year || "",
+      description: cert.certification_score || cert.description || "",
+    }))
     : [];
   const experiences = Array.isArray(coach.experiences)
     ? coach.experiences.map((experience) => ({
-        title: experience.experience_title || experience.title || "Experience",
-        organization: experience.experience_name || experience.organization || experience.issuer || "",
-        year: formatExperienceYear(experience.experience_start, experience.experience_end, experience.year),
-        description: experience.experience_description || experience.description || "",
-      }))
+      title: experience.experience_title || experience.title || "Experience",
+      organization: experience.experience_name || experience.organization || experience.issuer || "",
+      year: formatExperienceYear(experience.experience_start, experience.experience_end, experience.year),
+      description: experience.experience_description || experience.description || "",
+    }))
     : [];
 
   return {
@@ -560,7 +697,7 @@ function normalizeClientCoachRequest(item) {
             ? Number(item.relationship.id)
             : item.client_coach_relationship?.id != null
               ? Number(item.client_coach_relationship.id)
-          : null,
+              : null,
     updated_at: item.updated_at || item.last_updated || item.created_at || null,
   };
 }
@@ -693,48 +830,6 @@ function normalizePaymentExpiryDate(value) {
   return normalized;
 }
 
-function adaptWorkoutPlansForDay(plans, weekdayIdx) {
-  if (!Array.isArray(plans) || plans.length === 0) return null;
-
-  const matchingPlan = plans[weekdayIdx] ?? plans[0];
-  if (!matchingPlan) return null;
-
-  const activitiesSource =
-    matchingPlan.activities ??
-    matchingPlan.workout_activities ??
-    matchingPlan.workout_plan_activities ??
-    [];
-
-  const activities = Array.isArray(activitiesSource)
-    ? activitiesSource.map((activity, index) => normalizeWorkoutActivity(activity, index))
-    : [];
-
-  return {
-    strata_name:
-      matchingPlan.strata_name ??
-      matchingPlan.name ??
-      matchingPlan.workout_name ??
-      matchingPlan.workout_plan?.name ??
-      `Workout Plan #${matchingPlan.workout_plan_id ?? matchingPlan.id ?? weekdayIdx + 1}`,
-    activities,
-  };
-}
-
-function normalizeWorkoutActivity(activity, index) {
-  return {
-    id: activity.id ?? activity.workout_plan_activity_id ?? index + 1,
-    name:
-      activity.name ??
-      activity.activity_name ??
-      activity.workout_activity?.name ??
-      `Activity ${index + 1}`,
-    suggested_sets: Number(activity.planned_sets ?? activity.suggested_sets ?? activity.sets ?? 0),
-    suggested_reps: Number(activity.planned_reps ?? activity.suggested_reps ?? activity.reps ?? 0),
-    intensity_value: Number(activity.intensity_value ?? activity.weight ?? 0),
-    intensity_measure: activity.intensity_measure ?? "lbs",
-    logged: Boolean(activity.logged),
-  };
-}
 
 function extractWeightNumber(value) {
   const match = String(value || "").match(/\d+/);
@@ -758,11 +853,11 @@ function normalizeUploadResponse(response) {
 
   return resolvedUrl
     ? {
-        ...response,
-        url: resolvedUrl,
-        public_url: response.public_url || resolvedUrl,
-        pfp_url: response.pfp_url || resolvedUrl,
-      }
+      ...response,
+      url: resolvedUrl,
+      public_url: response.public_url || resolvedUrl,
+      pfp_url: response.pfp_url || resolvedUrl,
+    }
     : response;
 }
 

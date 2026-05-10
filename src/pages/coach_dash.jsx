@@ -1,5 +1,5 @@
 import { Navigate, useNavigate } from "react-router-dom";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Navbar,
   StatCard,
@@ -27,6 +27,7 @@ import {
   lookupClient,
   acceptClientRequest,
   denyClientRequest,
+  fetchCoachDashboardBundle,
 } from "../api/coach";
 import { getConversationWithAccount } from "../api/chat";
 import { getCoachAccessState, getImmediateCoachAccessState } from "../utils/roleAccess";
@@ -35,6 +36,7 @@ import { setLastRoleContext } from "../utils/sessionCache";
 import SessionsDetail from "../components/overlays/sessions_detail";
 import ReviewsDetail from "../components/overlays/reviews_detail";
 import ClientProfile from "../components/overlays/client_profile";
+import CoachMealsOverlay from "../components/overlays/coach_meals";
 
 const role = "coach";
 
@@ -184,6 +186,45 @@ export default function CoachDashboard() {
   const [selectedClient, setSelectedClient] = useState(null);
   const [clientSearchTerm, setClientSearchTerm] = useState("");
 
+  // Ref-backed cache so repeat lookupClient calls hit memory instead of the
+  // network. The polling tick (every 60s) used to re-fetch every pending
+  // request's full client detail; with the cache we only pay the round trip
+  // once per CACHE_TTL_MS window per client. Entries store {detail,fetchedAt}
+  // so we can lazily refresh on access without a separate sweep timer.
+  const CACHE_TTL_MS = 5 * 60 * 1000; // 5 min — long enough to amortize the
+  // polling tick, short enough that goal/profile changes from other tabs
+  // surface within a coach's typical session length.
+  const clientDetailCache = useRef(new Map());
+  const cachedLookupClient = useCallback(async (clientId) => {
+    if (!clientId) return null;
+    const entry = clientDetailCache.current.get(clientId);
+    const now = Date.now();
+    if (entry && entry.detail && now - entry.fetchedAt < CACHE_TTL_MS) {
+      return entry.detail;
+    }
+    if (entry && entry.inflight) return entry.inflight;
+    const inflight = lookupClient(clientId).catch(() => null).then((detail) => {
+      const cur = clientDetailCache.current.get(clientId);
+      clientDetailCache.current.set(clientId, {
+        detail: detail || cur?.detail || null,
+        fetchedAt: Date.now(),
+        inflight: null,
+      });
+      return detail;
+    });
+    clientDetailCache.current.set(clientId, {
+      detail: entry?.detail || null,
+      fetchedAt: entry?.fetchedAt || 0,
+      inflight,
+    });
+    return inflight;
+  }, []);
+  // Bust on accept/deny so the next read re-pulls — relationship transitions
+  // are the one event where stale cached data would mislead the UI.
+  const bustClientCache = useCallback((clientId) => {
+    clientDetailCache.current.delete(clientId);
+  }, []);
+
   /*  load account  */
   useEffect(() => {
     if (!authed) return;
@@ -204,57 +245,80 @@ export default function CoachDashboard() {
     })();
   }, [authed, navigate]);
 
-  /*  load dashboard data  */
+  /*  load dashboard data
+   *
+   *  Single round-trip via /roles/coach/dashboard_bundle. The bundle inlines
+   *  every per-client detail the page used to chase via N × `lookupClient`,
+   *  so the loop that fanned out per-request detail lookups is gone — its
+   *  data is already in `bundle.request_details_by_client_id`.
+   *
+   *  Sessions / workout plans are still independent (they hit different
+   *  domains and aren't part of the dashboard's hot path right now); they
+   *  ride along as a small Promise.all next to the bundle so the page is
+   *  fully populated in one network turn.
+   */
   useEffect(() => {
     if (!coachId) return;
     (async () => {
       try {
-        const [profile, s, c, sess, rev, plans, earningsResponse] = await Promise.all([
-          fetchCoachProfile().catch(() => null),
-          fetchCoachStats(coachId).catch(() => null),
-          fetchMyClients(coachId).catch(() => []),
+        const [bundle, sess, plans] = await Promise.all([
+          fetchCoachDashboardBundle(),
           fetchUpcomingSessions(coachId).catch(() => []),
-          fetchCoachReviews(coachId).catch(() => []),
           fetchCoachWorkoutPlans(coachId).catch(() => []),
-          fetchCoachEarnings().catch(() => null),
         ]);
-        const requests = await fetchClientRequests().catch(() => []);
-        const detailedRequests = await Promise.all(
-          requests.map(async (request) => {
-            const detail = await lookupClient(request.client_id).catch(() => null);
-            const mergedDetail = mergeClientDetail(detail, request.detail || request);
-            return {
-              ...request,
-              detail: mergedDetail,
-              name: resolveClientName(mergedDetail, request.client_id),
-              age: mergedDetail?.base_account?.age ?? request.age,
-              gender: mergedDetail?.base_account?.gender || request.gender,
-              pfp_url: mergedDetail?.base_account?.pfp_url || request.pfp_url,
-              goal: mergedDetail?.fitness_goals?.[0]?.goal_enum || request.goal || "Pending request"
-            };
-          })
-        );
-        const requestDetailsByClientId = Object.fromEntries(
-          detailedRequests
-            .filter((request) => request?.client_id)
-            .map((request) => [request.client_id, request.detail || request.details || null])
-        );
 
-        setCoachProfile(profile);
-        setStats(s);
+        if (!bundle) {
+          setClientRequests([]);
+          return;
+        }
+
+        // Pre-warm the per-client cache from the bundle so the polling tick
+        // and on-row-click `loadClientRequestDetails` find every detail in
+        // memory instead of re-fetching.
+        Object.entries(bundle.request_details_by_client_id || {}).forEach(([clientId, detail]) => {
+          if (detail) {
+            clientDetailCache.current.set(Number(clientId), {
+              detail,
+              fetchedAt: Date.now(),
+              inflight: null,
+            });
+          }
+        });
+
+        setCoachProfile(bundle.profile);
+        setStats(bundle.stats);
+        setEarnings(bundle.earnings);
+        setReviews(bundle.reviews);
+        setSessions(sess);
+        setWorkoutPlans(plans);
         setClients((prev) =>
           hydrateClientRows(
-            c,
-            requestDetailsByClientId,
+            bundle.clients,
+            bundle.request_details_by_client_id,
             prev
           )
         );
-        setSessions(sess);
-        setReviews(rev);
-        setWorkoutPlans(plans);
-        setEarnings(earningsResponse);
+        // The bundle's `client_requests` array already carries each request's
+        // base_account + fitness_goals inline; reshape to the dashboard's
+        // expected detail-merged shape without going back to the network.
+        const detailedRequests = (bundle.client_requests || []).map((request) => {
+          const fallback = bundle.request_details_by_client_id?.[request.client_id] || null;
+          const mergedDetail = mergeClientDetail(fallback, request.detail || request);
+          return {
+            ...request,
+            detail: mergedDetail,
+            name: resolveClientName(mergedDetail, request.client_id),
+            age: mergedDetail?.base_account?.age ?? request.age,
+            gender: mergedDetail?.base_account?.gender || request.gender,
+            pfp_url: mergedDetail?.base_account?.pfp_url || request.pfp_url,
+            goal:
+              mergedDetail?.fitness_goals?.[0]?.goal_enum ||
+              request.goal ||
+              "Pending request",
+          };
+        });
         setClientRequests(detailedRequests);
-        setClientRequestDetails(requestDetailsByClientId);
+        setClientRequestDetails(bundle.request_details_by_client_id || {});
       } catch {
         setClientRequests([]);
       }
@@ -263,54 +327,59 @@ export default function CoachDashboard() {
 
   const refreshRelationshipData = useCallback(async () => {
     if (!coachId) return;
+    // The polling tick now refreshes via the same bundle endpoint as the
+    // initial load. The bundle inlines per-client detail, so the previous
+    // tick — which fired N+3 round trips per minute (clients, stats,
+    // requests, then N × lookupClient) — collapses to a single GET.
+    const bundle = await fetchCoachDashboardBundle();
+    if (!bundle) return;
 
-    const [clientsResponse, statsResponse, requests] = await Promise.all([
-      fetchMyClients(coachId).catch(() => []),
-      fetchCoachStats(coachId).catch(() => null),
-      fetchClientRequests().catch(() => []),
-    ]);
+    Object.entries(bundle.request_details_by_client_id || {}).forEach(([clientId, detail]) => {
+      if (detail) {
+        clientDetailCache.current.set(Number(clientId), {
+          detail,
+          fetchedAt: Date.now(),
+          inflight: null,
+        });
+      }
+    });
 
-    const detailedRequests = await Promise.all(
-      requests.map(async (request) => {
-        const detail = await lookupClient(request.client_id).catch(() => null);
-        const mergedDetail = mergeClientDetail(detail, request.detail || request);
-        return {
-          ...request,
-          detail: mergedDetail,
-          name: resolveClientName(mergedDetail, request.client_id),
-          age: mergedDetail?.base_account?.age ?? request.age,
-          gender: mergedDetail?.base_account?.gender || request.gender,
-          pfp_url: mergedDetail?.base_account?.pfp_url || request.pfp_url,
-          goal: mergedDetail?.fitness_goals?.[0]?.goal_enum || request.goal || "Pending request"
-        };
-      })
-    );
+    const detailedRequests = (bundle.client_requests || []).map((request) => {
+      const fallback = bundle.request_details_by_client_id?.[request.client_id] || null;
+      const mergedDetail = mergeClientDetail(fallback, request.detail || request);
+      return {
+        ...request,
+        detail: mergedDetail,
+        name: resolveClientName(mergedDetail, request.client_id),
+        age: mergedDetail?.base_account?.age ?? request.age,
+        gender: mergedDetail?.base_account?.gender || request.gender,
+        pfp_url: mergedDetail?.base_account?.pfp_url || request.pfp_url,
+        goal:
+          mergedDetail?.fitness_goals?.[0]?.goal_enum ||
+          request.goal ||
+          "Pending request",
+      };
+    });
 
     setClients((prev) =>
       hydrateClientRows(
-        clientsResponse,
+        bundle.clients,
         {
           ...clientRequestDetails,
-          ...Object.fromEntries(
-            detailedRequests
-              .filter((request) => request?.client_id)
-              .map((request) => [request.client_id, request.detail || request.details || null])
-          ),
+          ...(bundle.request_details_by_client_id || {}),
         },
         prev
       )
     );
-    setStats(statsResponse);
+    setStats(bundle.stats);
+    setEarnings(bundle.earnings);
+    setReviews(bundle.reviews);
     setClientRequests(detailedRequests);
     setClientRequestDetails((prev) => ({
       ...prev,
-      ...Object.fromEntries(
-        detailedRequests
-          .filter((request) => request?.client_id)
-          .map((request) => [request.client_id, request.detail || request.details || null])
-      ),
+      ...(bundle.request_details_by_client_id || {}),
     }));
-  }, [coachId]);
+  }, [coachId, clientRequestDetails]);
 
   useEffect(() => {
     if (!coachId) return undefined;
@@ -319,8 +388,13 @@ export default function CoachDashboard() {
       void refreshRelationshipData();
     };
 
+    // 15s was aggressive — every tick re-fetches stats + clients + requests
+    // (each request fans out into a per-client lookupClient round-trip), so
+    // an idle dashboard tab was burning N+3 queries every 15s for no UX
+    // benefit. 60s + focus refresh is the new baseline: users still see
+    // fresh data when they tab back in, but the idle cost is 4× lower.
     window.addEventListener("focus", refreshOnFocus);
-    const intervalId = window.setInterval(refreshRelationshipData, 15000);
+    const intervalId = window.setInterval(refreshRelationshipData, 60000);
 
     return () => {
       window.removeEventListener("focus", refreshOnFocus);
@@ -330,70 +404,109 @@ export default function CoachDashboard() {
 
   const loadClientRequestDetails = useCallback(async (clientId) => {
     if (clientRequestDetails[clientId]) return clientRequestDetails[clientId];
-    const detail = await lookupClient(clientId);
-    setClientRequestDetails((prev) => ({ ...prev, [clientId]: detail }));
+    // Route through the cache so on-demand row clicks share the same memo
+    // bucket as the bulk dashboard load — clicking a row whose detail was
+    // already pulled by the polling tick is now a free in-memory hit.
+    const detail = await cachedLookupClient(clientId);
+    if (detail) {
+      setClientRequestDetails((prev) => ({ ...prev, [clientId]: detail }));
+    }
     return detail;
-  }, [clientRequestDetails]);
+  }, [clientRequestDetails, cachedLookupClient]);
 
   const handleAcceptRequest = async (request) => {
+    // OPTIMISTIC FLIP: swap the client from "pending" → "active" the
+    // instant the button is clicked, then fire the API in the background.
+    // Previously the UI waited for the round-trip + a relationship-data
+    // refetch before moving the row, which made the button feel laggy.
+    // On failure we roll back from the snapshot.
     setRequestActionId(request.request_id);
+    const snapshot = clients;
+    const alreadyTrackedClient = snapshot.some((c) => Number(c.id) === Number(request.client_id));
+    const alreadyActiveClient = snapshot.some(
+      (c) => Number(c.id) === Number(request.client_id) && c.status === "active"
+    );
+    const detailSeed = request.detail || request.details || request;
+    const optimisticClient = {
+      id: request.client_id,
+      request_id: request.request_id,
+      name: resolveClientName(detailSeed, request.client_id),
+      goal: detailSeed?.fitness_goals?.[0]?.goal_enum || request.goal || "Active client",
+      status: "active",
+      joined: new Date().toLocaleDateString(),
+      relationship_id: null, // backfilled when the API returns
+      details: detailSeed,
+    };
+    setClients((prev) => [
+      optimisticClient,
+      ...prev.filter((c) => Number(c.id) !== Number(request.client_id)),
+    ]);
+    setStats((prev) =>
+      prev
+        ? {
+            ...prev,
+            total_clients: prev.total_clients + (alreadyTrackedClient ? 0 : 1),
+            active_clients: prev.active_clients + (alreadyActiveClient ? 0 : 1),
+          }
+        : prev
+    );
+
     try {
       const accepted = await acceptClientRequest(request.request_id);
       if (accepted?.relationship_id) {
-        const alreadyTrackedClient = clients.some((client) => Number(client.id) === Number(request.client_id));
-        const alreadyActiveClient = clients.some(
-          (client) => Number(client.id) === Number(request.client_id) && client.status === "active"
-        );
+        // The relationship just flipped to active — bust the per-client
+        // cache so the follow-up lookup re-pulls fresh authorization-aware
+        // detail (the API may include extra fields once the coach has an
+        // accepted relationship that it withheld during the pending state).
+        bustClientCache(request.client_id);
+        // Replace the optimistic stub with the real merged detail so any
+        // reads that need relationship_id (e.g. terminate flow) work.
         const detail = await loadClientRequestDetails(request.client_id).catch(() => null);
-        const mergedDetail = mergeClientDetail(detail, request.detail || request.details || request);
+        const mergedDetail = mergeClientDetail(detail, detailSeed);
         await getConversationWithAccount(mergedDetail?.base_account?.id || null, {
           id: request.client_id,
           account_id: mergedDetail?.base_account?.id || null,
-          name: resolveClientName(mergedDetail || request, request.client_id),
+          name: resolveClientName(mergedDetail, request.client_id),
           role: "client",
         }).catch(() => null);
-        const acceptedClient = {
-          id: request.client_id,
-          request_id: request.request_id,
-          name: resolveClientName(mergedDetail || request, request.client_id),
-          goal:
-            mergedDetail?.fitness_goals?.[0]?.goal_enum ||
-            request.goal ||
-            "Active client",
-          status: "active",
-          joined: new Date().toLocaleDateString(),
-          relationship_id: accepted.relationship_id,
-          details: mergedDetail,
-        };
-
-        setClients((prev) => {
-          const next = [
-            acceptedClient,
-            ...prev.filter((client) => Number(client.id) !== Number(request.client_id)),
-          ];
-          return next;
-        });
-        setStats((prev) =>
-          prev
-            ? {
-                ...prev,
-                total_clients: prev.total_clients + (alreadyTrackedClient ? 0 : 1),
-                active_clients: prev.active_clients + (alreadyActiveClient ? 0 : 1),
-              }
-            : prev
+        setClients((prev) =>
+          prev.map((c) =>
+            Number(c.id) === Number(request.client_id)
+              ? {
+                  ...c,
+                  name: resolveClientName(mergedDetail || c, c.id),
+                  goal: mergedDetail?.fitness_goals?.[0]?.goal_enum || c.goal,
+                  relationship_id: accepted.relationship_id,
+                  details: mergedDetail,
+                }
+              : c
+          )
         );
       }
       await refreshRelationshipData();
+    } catch (err) {
+      // Roll back: restore the snapshot so the row goes back to its
+      // pending state and the coach sees the failure.
+      setClients(snapshot);
+      throw err;
     } finally {
       setRequestActionId(null);
     }
   };
 
   const handleDenyRequest = async (requestId) => {
+    // Optimistic remove — the row disappears from "pending requests"
+    // immediately, API call settles in the background. Roll back on
+    // failure so the coach can see the error and retry.
     setRequestActionId(requestId);
+    const snapshot = clients;
+    setClients((prev) => prev.filter((c) => c.request_id !== requestId));
     try {
       await denyClientRequest(requestId);
       await refreshRelationshipData();
+    } catch (err) {
+      setClients(snapshot);
+      throw err;
     } finally {
       setRequestActionId(null);
     }
@@ -681,7 +794,30 @@ export default function CoachDashboard() {
         {/*  PLANS & REVIEWS  */}
         <SectionHeader label="PLANS & REVIEWS" role={role} />
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-3 gap-4">
+          {/* Meals — coach builds meals from USDA foods and prescribes to clients.
+              Backed by /api/foods (USDA proxy) and /api/meals (CRUD + prescribe).
+              The full builder UI lives in the overlay; this card is just an
+              entry point with a quick count of saved meals. */}
+          <DashboardCard
+            role={role}
+            title="Meals"
+            footer={
+              <button
+                onClick={() => setOverlay("coach_meals")}
+                className="w-full py-2 rounded-xl border border-orange-500/30 text-orange-400 text-xs font-semibold hover:bg-orange-500/10 transition-colors"
+              >
+                Manage Meals
+              </button>
+            }
+          >
+            <p className="text-gray-400 text-xs">
+              Build meals from the USDA food database and assign them to your
+              clients. Calories and macros are computed automatically from
+              ingredient grams.
+            </p>
+          </DashboardCard>
+
           {/* Workout Plans */}
           <DashboardCard
             role={role}
@@ -743,6 +879,20 @@ export default function CoachDashboard() {
           reviews={reviews}
           avgRating={stats?.avg_rating}
           totalCount={stats?.review_count}
+        />
+      </Overlay>
+
+      <Overlay
+        open={overlay === "coach_meals"}
+        onClose={closeOverlay}
+        title="Meals"
+        wide
+      >
+        <CoachMealsOverlay
+          clients={clients
+            .filter((c) => c.status === "active")
+            .map((c) => ({ id: c.id, name: c.name }))}
+          onClose={closeOverlay}
         />
       </Overlay>
 

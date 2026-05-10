@@ -3,6 +3,30 @@ import { fetchMe } from "../api/client";
 import { cacheRoleState, getCachedRoleState } from "./sessionCache";
 
 const KNOWN_ROLE_NAMES = new Set(["client", "coach", "admin"]);
+
+function checkDeactivated(rolesResponse) {
+  if (Array.isArray(rolesResponse)) {
+    return rolesResponse.some((r) => String(r).toLowerCase().includes("deactivated"));
+  }
+  if (rolesResponse && typeof rolesResponse === "object") {
+    return Object.values(rolesResponse).some(
+      (v) => typeof v === "string" && v.toLowerCase().includes("deactivated")
+    );
+  }
+  return false;
+}
+
+function checkSuspended(rolesResponse) {
+  if (Array.isArray(rolesResponse)) {
+    return rolesResponse.some((r) => String(r).toLowerCase().includes("suspended"));
+  }
+  if (rolesResponse && typeof rolesResponse === "object") {
+    return Object.values(rolesResponse).some(
+      (v) => typeof v === "string" && v.toLowerCase().includes("suspended")
+    );
+  }
+  return false;
+}
 const ROLE_KEY_MAP = {
   client: "client",
   coach: "coach",
@@ -82,6 +106,8 @@ function collectRoles(source, roleSet) {
 export function normalizeRoleState(rolesResponse) {
   const roleSet = new Set();
   collectRoles(rolesResponse, roleSet);
+  const isDeactivated = checkDeactivated(rolesResponse);
+  const isSuspended = checkSuspended(rolesResponse);
 
   return {
     roleNames: [...roleSet],
@@ -89,6 +115,8 @@ export function normalizeRoleState(rolesResponse) {
     hasCoachRole: roleSet.has("coach"),
     hasAdminRole: roleSet.has("admin"),
     needsClientOnboarding: !roleSet.has("client"),
+    isDeactivated,
+    isSuspended,
   };
 }
 
@@ -114,5 +142,7 @@ export function getImmediateRoleState() {
     hasCoachRole: false,
     hasAdminRole: false,
     needsClientOnboarding: true,
+    isDeactivated: false,
+    isSuspended: false,
   };
 }

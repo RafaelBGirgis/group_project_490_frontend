@@ -17,8 +17,6 @@ import {
   fetchMe,
   fetchUnifiedProfile,
   fetchTelemetryToday,
-  fetchWorkoutPlan,
-  logWorkoutActivity,
   fetchCoachInfo,
   fetchCoachRating,
   fetchNextSession,
@@ -157,77 +155,22 @@ describe("fetchTelemetryToday", () => {
     expect(data.calories_burned).toBeDefined();
     expect(data.calories_consumed).toBeDefined();
     expect(data.calories_goal).toBeDefined();
+    expect(data.carbs_g).toBeDefined();
+    expect(data.fat_g).toBeDefined();
+    expect(data.protein_g).toBeDefined();
   });
 
   it("returns the route-only fallback shape when no telemetry is available", async () => {
     const result = await fetchTelemetryToday(1);
     expect(result).toEqual({
-      step_count: 0,
       calories_burned: 0,
       calories_consumed: 0,
       calories_goal: 2000,
+      carbs_g: 0,
+      fat_g: 0,
+      protein_g: 0,
+      step_count: 0
     });
-  });
-});
-
-/* ═══════════════════════════════════════════════════════════════════════
-   WORKOUT PLAN
-   ═══════════════════════════════════════════════════════════════════════ */
-
-describe("fetchWorkoutPlan", () => {
-  it("returns a stable empty-state plan on API failure", async () => {
-    mockFetchFail();
-    const plan = await fetchWorkoutPlan(1, 0);
-    expect(plan.strata_name).toBe("");
-    expect(plan.activities).toBeDefined();
-    expect(plan.activities.length).toBe(0);
-  });
-
-  it("returns an empty workout plan for Saturday (index 5)", async () => {
-    mockFetchFail();
-    const plan = await fetchWorkoutPlan(1, 5);
-    expect(plan.strata_name).toBe("");
-    expect(plan.activities.length).toBe(0);
-  });
-
-  it("each activity has required fields", async () => {
-    mockFetchFail();
-    const plan = await fetchWorkoutPlan(1, 0);
-    plan.activities.forEach((a) => {
-      expect(a.id).toBeDefined();
-      expect(a.name).toBeTruthy();
-      expect(typeof a.suggested_sets).toBe("number");
-      expect(typeof a.suggested_reps).toBe("number");
-      expect(typeof a.intensity_value).toBe("number");
-      expect(a.intensity_measure).toBeTruthy();
-      expect(typeof a.logged).toBe("boolean");
-    });
-  });
-
-  it("does not use local weekly-plan cache data", async () => {
-    mockFetchFail();
-    localStorage.setItem(
-      "client_weekly_plan:1",
-      JSON.stringify({
-        monday: {
-          name: "Push Day",
-          exercises: [{ id: "bench-1", name: "Bench Press" }],
-        },
-      })
-    );
-
-    const plan = await fetchWorkoutPlan(1, 0);
-
-    expect(plan.strata_name).toBe("");
-    expect(plan.activities).toEqual([]);
-  });
-});
-
-describe("logWorkoutActivity", () => {
-  it("throws when the backend does not support workout activity logging", async () => {
-    await expect(logWorkoutActivity(1, 1)).rejects.toThrow(
-      "The backend route list does not include a workout activity logging endpoint."
-    );
   });
 });
 
@@ -365,7 +308,7 @@ describe("fetchMealsToday", () => {
       id: 8,
       client_prescribed_meal_id: 5,
     });
-    meals.forEach((m) => expect(m.logged_at).toBeTruthy());
+    meals.forEach((m) => expect(m.logged_at).toBeNull());
   });
 });
 

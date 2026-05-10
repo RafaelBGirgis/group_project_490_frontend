@@ -21,6 +21,10 @@ import {
 const NOTIFICATION_ICONS = {
   payment: CreditCard,
   workout_plan: Dumbbell,
+  // PRD v2: a plan owner edited a plan that's in your library.
+  plan_changed: Dumbbell,
+  plan_archived: Dumbbell,
+  plan_deleted: Dumbbell,
   relationship: Handshake,
   relationship_request_creation: UserPlus,
   relationship_request_deletion: UserMinus,
@@ -560,9 +564,17 @@ export function Navbar({
                           key={notification.id}
                           onClick={() => {
                             markOneRead(notification.id);
-                            if (notification.category === "workout_plan") {
+                            // PRD v2: route plan-related notifications to
+                            // Plan My Week so the user lands on My Plans /
+                            // Previous Scripts and can see what changed.
+                            if (
+                              notification.category === "workout_plan" ||
+                              notification.category === "plan_changed" ||
+                              notification.category === "plan_archived" ||
+                              notification.category === "plan_deleted"
+                            ) {
                               setShowNotifs(false);
-                              navigate(`/${role}`);
+                              navigate(`/plan-my-week?role=${role}`);
                             }
                           }}
                           className={`flex w-full items-start gap-3 border-b border-white/3 px-4 py-3 text-left transition-colors hover:bg-white/3 ${

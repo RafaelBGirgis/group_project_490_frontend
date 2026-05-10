@@ -62,7 +62,11 @@ export default function ReportsDetail({ reports, onDismiss, onEscalate }) {
                   className="flex-1 text-xs bg-orange-900/40 text-orange-400 border border-orange-500/30 hover:bg-orange-900/60 rounded-lg py-2 transition-colors"
                   title="Suspend the reported account"
                 >
-                  Suspend {report.kind === "client_on_coach" ? "Coach" : "Client"}
+                  {/* Generic label since the new account-vs-account kind
+                      doesn't carry a coach/client distinction. The button
+                      always suspends the *reported* account regardless
+                      of which legacy table it came from. */}
+                  Suspend Account
                 </button>
               </div>
             </div>

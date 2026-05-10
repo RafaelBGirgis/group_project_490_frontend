@@ -6,6 +6,7 @@ import LandingPage from "./pages/landing";
 import LoginPage from "./pages/login";
 import SignupPage from "./pages/signup";
 import DeactivatedPage from "./pages/deactivated";
+import SuspendedPage from "./pages/suspended";
 import ProfilePage from "./pages/profile";
 import CoachRequestFormPage from "./pages/coach_request_form";
 import OnboardingPage from "./pages/onboarding";
@@ -25,6 +26,7 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/deactivated" element={<DeactivatedPage />} />
+          <Route path="/suspended" element={<SuspendedPage />} />
           <Route path="/onboarding" element={<OnboardingPage />} />
           <Route path="/profile" element={<ProfilePage role="client" />} />
           <Route path="/coach-request" element={<CoachRequestFormPage />} />

@@ -329,6 +329,42 @@ export function Navbar({
     };
   }, []);
 
+  // Poll for account state changes (suspension) so admins can suspend users
+  // and clients are redirected immediately. This runs independently and is
+  // lightweight since `/me` is cached by `fetchMe`.
+  useEffect(() => {
+    let isMounted = true;
+    let timeoutId = null;
+
+    const checkAccountState = async () => {
+      try {
+        // dynamic import to avoid circular deps at module init
+        const { fetchMe } = await import("../api/client");
+        const account = await fetchMe().catch(() => null);
+        if (!isMounted || !account) return;
+        if (account.is_suspended) {
+          // Redirect suspended users to the suspended page immediately.
+          if (window.location.pathname !== "/suspended") {
+            window.location.href = "/suspended";
+          }
+        }
+      } catch {
+        // ignore network errors
+      } finally {
+        if (!isMounted) return;
+        timeoutId = window.setTimeout(checkAccountState, 30000);
+      }
+    };
+
+    // Start polling
+    void checkAccountState();
+
+    return () => {
+      isMounted = false;
+      window.clearTimeout(timeoutId);
+    };
+  }, []);
+
   // Exclude chat_message from the bell — those surface on the messages button instead.
   const bellNotifs = notifs.filter((n) => n.category !== "chat_message");
   const unreadCount = bellNotifs.filter((n) => !n.read).length;

@@ -124,6 +124,7 @@ export function cacheAccountSnapshot(account) {
       client_id: account.client_id ?? current.account?.client_id ?? null,
       coach_id: account.coach_id ?? current.account?.coach_id ?? null,
       admin_id: account.admin_id ?? current.account?.admin_id ?? null,
+      is_suspended: Boolean(account.is_suspended ?? current.account?.is_suspended ?? false),
     },
   })).account;
 }

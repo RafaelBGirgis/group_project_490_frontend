@@ -87,6 +87,28 @@ export async function apiFetch(path, opts = {}) {
   });
 
   if (res.status === 401) {
+    // JWT is expired or invalid — nuke all user-scoped storage so the next
+    // user who logs in starts with a clean slate. Avoids importing auth.js
+    // (circular dep risk) by doing the minimal wipe inline; the full cache
+    // sweep is handled by clearAuth() which auth.js already calls on logout.
+    try {
+      const prefixes = [
+        "tf:session-cache:", "sched:day:", "sched:week:",
+        "coach_request_resolution:", "pending_coach_requests:", "coach_profile:",
+      ];
+      const exact = ["jwt", "active_client_id", "terminated_relationship_ids", "terminated_coach_ids"];
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && (exact.includes(k) || prefixes.some((p) => k.startsWith(p)))) keys.push(k);
+      }
+      keys.forEach((k) => localStorage.removeItem(k));
+    } catch { /* best-effort */ }
+
+    if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+      window.location.href = "/login";
+    }
+
     const error = new Error("Unauthorized");
     error.status = 401;
     throw error;

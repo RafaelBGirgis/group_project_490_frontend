@@ -171,6 +171,9 @@ export default function ClientDash() {
   const [planLookup, setPlanLookup] = useState({});
   const [selectedCwpData, setSelectedCwpData] = useState(null); // { cwp, plan, occurrenceStart, occurrenceEnd }
   const [completedCount, setCompletedCount] = useState(0);
+  // Set of cwp.id values already logged today. Populated from server history on
+  // load (survives page refresh) and updated optimistically on each log action.
+  const [loggedCwpIds, setLoggedCwpIds] = useState(new Set());
   const [crudReady, setCrudReady] = useState(false);
   const [coach, setCoach] = useState(null);
   const [coachRating, setCoachRating] = useState(null);
@@ -372,6 +375,40 @@ export default function ClientDash() {
       setTodayPlans(filtered);
       setPlanLookup(lookup);
       saveDayCache(dateIso, { plans: filtered, planLookup: lookup });
+
+      // For today's tab only: fetch workout history and mark already-logged CWPs
+      // so the Log button stays disabled after a page refresh.
+      if (activeDay === TODAY_IDX) {
+        try {
+          const history = await fetchWorkoutHistory({ limit: 200 });
+          const todayStr = dateIso; // "YYYY-MM-DD"
+          const loggedActivityIds = new Set(
+            history
+              .filter((h) => {
+                const ts = h.last_updated || h.created_at;
+                return ts && new Date(ts).toISOString().slice(0, 10) === todayStr;
+              })
+              .map((h) => h.workout_plan_activity_id)
+              .filter(Boolean)
+          );
+          if (loggedActivityIds.size > 0) {
+            const alreadyDone = new Set();
+            filtered.forEach((cwp) => {
+              const plan = lookup[cwp.workout_plan_id];
+              const actIds = (plan?.activities ?? []).map((a) => a.id);
+              if (actIds.some((id) => loggedActivityIds.has(id))) {
+                alreadyDone.add(cwp.id);
+              }
+            });
+            if (alreadyDone.size > 0) {
+              setLoggedCwpIds((prev) => new Set([...prev, ...alreadyDone]));
+              setCompletedCount((prev) => prev + alreadyDone.size);
+            }
+          }
+        } catch {
+          // History fetch is best-effort — don't block the plan list.
+        }
+      }
     } catch {
       setTodayPlans([]);
     } finally {
@@ -389,8 +426,11 @@ export default function ClientDash() {
     }
   }, [activeDay]);
 
-  // Reset completed count when day changes
-  useEffect(() => { setCompletedCount(0); }, [activeDay]);
+  // Reset completed count + logged set when day changes
+  useEffect(() => {
+    setCompletedCount(0);
+    setLoggedCwpIds(new Set());
+  }, [activeDay]);
 
   useEffect(() => { loadPlansForDay(); }, [loadPlansForDay]);
 
@@ -415,6 +455,10 @@ export default function ClientDash() {
   const handleLogWorkoutActivity = async (activityData) => {
     const localDate = getWeekDateForIdx(activeDay);
     await logWorkoutActivityForCwp({ ...activityData, local_date: localDate });
+    // Mark this CWP as logged — disables the Log button immediately
+    if (activityData.cwp_id != null) {
+      setLoggedCwpIds((prev) => new Set([...prev, activityData.cwp_id]));
+    }
     // Increment local completed count immediately for the progress ring
     setCompletedCount((prev) => prev + 1);
     // Re-fetch calories so burned total + ring update without a page reload
@@ -769,16 +813,23 @@ export default function ClientDash() {
                       sub={timeLabel}
                       right={
                         activeDay === TODAY_IDX ? (
-                          <button
-                            className={`text-xs border rounded-full px-3 py-1 transition-colors ${crudReady
-                              ? "text-blue-400 border-blue-500/50 hover:bg-blue-500/10 cursor-pointer"
-                              : "text-gray-600 border-gray-700 opacity-50 cursor-not-allowed"
+                          loggedCwpIds.has(cwp.id) ? (
+                            <span className="text-[10px] px-3 py-1.5 rounded-full border border-green-500/30 text-green-400">
+                              Done ✓
+                            </span>
+                          ) : (
+                            <button
+                              className={`text-xs border rounded-full px-3 py-1 transition-colors ${
+                                crudReady
+                                  ? "text-blue-400 border-blue-500/50 hover:bg-blue-500/10 cursor-pointer"
+                                  : "text-gray-600 border-gray-700 opacity-50 cursor-not-allowed"
                               }`}
-                            onClick={crudReady ? () => openCwpPopup(cwp) : undefined}
-                            disabled={!crudReady}
-                          >
-                            Log →
-                          </button>
+                              onClick={crudReady ? () => openCwpPopup(cwp) : undefined}
+                              disabled={!crudReady}
+                            >
+                              Log →
+                            </button>
+                          )
                         ) : null
                       }
                     />

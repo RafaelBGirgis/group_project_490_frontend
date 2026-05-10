@@ -31,6 +31,9 @@ function readCookie(name) {
 }
 
 export async function login(email, password) {
+  // Clear any previous user's cache BEFORE the new session begins.
+  // This prevents two accounts from sharing client-side state.
+  clearAuth();
   return apiPost("/auth/login", {
     email: String(email || "").trim(),
     password,
@@ -38,6 +41,8 @@ export async function login(email, password) {
 }
 
 export async function signup(email, password, name, pfp_url, gcp_user_id) {
+  // Same guard as login — always start with a clean slate.
+  clearAuth();
   return apiPost("/auth/signup", {
     email: String(email || "").trim(),
     password,

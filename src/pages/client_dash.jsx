@@ -162,22 +162,22 @@ export default function ClientDash() {
   }, []);
 
   /*  core state  */
-  const [account, setAccount]           = useState(null);
-  const [clientId, setClientId]         = useState(null);
-  const [activeDay, setActiveDay]       = useState(TODAY_IDX);
-  const [stepCount, setStepCount]       = useState(null);
+  const [account, setAccount] = useState(null);
+  const [clientId, setClientId] = useState(null);
+  const [activeDay, setActiveDay] = useState(TODAY_IDX);
+  const [stepCount, setStepCount] = useState(null);
   const [caloriesBurned, setCaloriesBurned] = useState(null);
   const [caloriesConsumed, setCaloriesConsumed] = useState(null);
   const [caloriesGoal, setCaloriesGoal] = useState(2000);
-  const [todayPlans, setTodayPlans]     = useState([]);
-  const [planLookup, setPlanLookup]     = useState({});
+  const [todayPlans, setTodayPlans] = useState([]);
+  const [planLookup, setPlanLookup] = useState({});
   const [selectedCwpData, setSelectedCwpData] = useState(null); // { cwp, plan, occurrenceStart, occurrenceEnd }
   const [crudReady, setCrudReady] = useState(false);
-  const [coach, setCoach]               = useState(null);
-  const [coachRating, setCoachRating]   = useState(null);
+  const [coach, setCoach] = useState(null);
+  const [coachRating, setCoachRating] = useState(null);
   const [prescribedMeals, setPrescribedMeals] = useState([]);
   const [availableMeals, setAvailableMeals] = useState([]);
-  const [loading, setLoading]           = useState(true);
+  const [loading, setLoading] = useState(true);
   const [relationshipId, setRelationshipId] = useState(null);
   const [canSwitchToCoach, setCanSwitchToCoach] = useState(
     immediateCoachAccess.canAccessCoach
@@ -221,8 +221,8 @@ export default function ClientDash() {
     const nextPending =
       (!nextApproved
         ? requestValues
-            .filter(isPendingCoachRequest)
-            .sort((a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime())[0]
+          .filter(isPendingCoachRequest)
+          .sort((a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime())[0]
         : null)
       || null;
 
@@ -296,7 +296,7 @@ export default function ClientDash() {
 
     fetchRandomAppreciation().then((data) => {
       if (data?.todays_appreciation) setAppreciation(data.todays_appreciation);
-    }).catch(() => {});
+    }).catch(() => { });
 
     (async () => {
       try {
@@ -532,15 +532,15 @@ export default function ClientDash() {
   /*  derived values  */
   const totalCount = todayPlans.reduce((sum, cwp) => sum + (planLookup[cwp.workout_plan_id]?.activities?.length ?? 0), 0);
   const completedCount = 0; // tracked per-session inside WorkoutPlanPopup
-  const stepsGoal      = account?.daily_steps_goal ?? 10000;
-  const stepsPercent   = pct(stepCount ?? 0, stepsGoal);
+  const stepsGoal = account?.daily_steps_goal ?? 10000;
+  const stepsPercent = pct(stepCount ?? 0, stepsGoal);
   // Net calories = consumed − burned. This is what counts toward the goal:
   // the more you burn, the more you can eat; the ring reflects the delta.
   // Nulls fall through to 0 so the ring renders even before data lands.
-  const consumedSafe   = caloriesConsumed ?? 0;
-  const burnedSafe     = caloriesBurned ?? 0;
-  const netCalories    = consumedSafe - burnedSafe;
-  const calPercent     = pct(Math.max(0, netCalories), caloriesGoal || 1);
+  const consumedSafe = caloriesConsumed ?? 0;
+  const burnedSafe = caloriesBurned ?? 0;
+  const netCalories = consumedSafe - burnedSafe;
+  const calPercent = pct(Math.max(0, netCalories), caloriesGoal || 1);
   const workoutPercent = pct(completedCount, totalCount || 1);
   const hasActiveCoach = Boolean(coach?.coach_id && relationshipId);
 
@@ -585,7 +585,7 @@ export default function ClientDash() {
   /*  split name for greeting card  */
   const nameParts = (account?.name ?? "").split(" ");
   const firstName = nameParts[0] || "—";
-  const lastName  = nameParts.slice(1).join(" ") || "";
+  const lastName = nameParts.slice(1).join(" ") || "";
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: "#080D19" }}>
@@ -661,11 +661,11 @@ export default function ClientDash() {
                   ? "—"
                   : netCalories.toString()
               }
-              sublabel={`net of ${caloriesGoal} kcal`}
+              sublabel={`of ${caloriesGoal} kcal`}
             />
             <div className="w-full bg-[#0A1020] rounded-xl px-4 py-2 space-y-1">
               <div className="flex items-center justify-between text-xs">
-                <span className="text-gray-500 uppercase tracking-widest text-[10px]">Consumed</span>
+                <span className="text-gray-500 pr-3 uppercase tracking-widest text-[10px]">Consumed</span>
                 <span className="text-white font-semibold">
                   {caloriesConsumed !== null ? `${caloriesConsumed} kcal` : "—"}
                 </span>
@@ -674,22 +674,6 @@ export default function ClientDash() {
                 <span className="text-gray-500 uppercase tracking-widest text-[10px]">Burned</span>
                 <span className="text-white font-semibold">
                   {caloriesBurned !== null ? `${caloriesBurned} kcal` : "—"}
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-xs pt-1 border-t border-white/5">
-                <span className="text-gray-500 uppercase tracking-widest text-[10px]">Net</span>
-                <span
-                  className={`font-semibold ${
-                    netCalories > caloriesGoal
-                      ? "text-red-300"
-                      : netCalories < 0
-                        ? "text-emerald-300"
-                        : "text-white"
-                  }`}
-                >
-                  {caloriesConsumed === null && caloriesBurned === null
-                    ? "—"
-                    : `${netCalories} kcal`}
                 </span>
               </div>
             </div>
@@ -748,14 +732,14 @@ export default function ClientDash() {
                 >
                   View Request
                 </button>
-                  <button
-                    onClick={handleCancelCoachRequest}
-                    className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-300"
-                  >
+                <button
+                  onClick={handleCancelCoachRequest}
+                  className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-300"
+                >
                   Cancel Request
-                  </button>
-                </div>
+                </button>
               </div>
+            </div>
           </DashboardCard>
         ) : null}
 
@@ -800,11 +784,10 @@ export default function ClientDash() {
                       right={
                         activeDay === TODAY_IDX ? (
                           <button
-                            className={`text-xs border rounded-full px-3 py-1 transition-colors ${
-                              crudReady
-                                ? "text-blue-400 border-blue-500/50 hover:bg-blue-500/10 cursor-pointer"
-                                : "text-gray-600 border-gray-700 opacity-50 cursor-not-allowed"
-                            }`}
+                            className={`text-xs border rounded-full px-3 py-1 transition-colors ${crudReady
+                              ? "text-blue-400 border-blue-500/50 hover:bg-blue-500/10 cursor-pointer"
+                              : "text-gray-600 border-gray-700 opacity-50 cursor-not-allowed"
+                              }`}
                             onClick={crudReady ? () => openCwpPopup(cwp) : undefined}
                             disabled={!crudReady}
                           >
@@ -937,9 +920,9 @@ export default function ClientDash() {
                     <span className="text-[11px] text-gray-400">
                       {meal.logged_at
                         ? new Date(meal.logged_at).toLocaleDateString(undefined, {
-                            month: "short",
-                            day: "numeric",
-                          })
+                          month: "short",
+                          day: "numeric",
+                        })
                         : ""}
                     </span>
                   }
@@ -997,7 +980,7 @@ export default function ClientDash() {
         wide
       >
         <DailySurvey clientId={clientId} onCompleted={refreshSurveyStatus} />
-        
+
       </Overlay>
 
       {/* Steps Log */}
@@ -1034,7 +1017,7 @@ function AppreciationCard({ appreciation }) {
   return (
     <div className="rounded-2xl border border-white/6 bg-[#0F1729] p-4 flex flex-col justify-between min-h-[80px]">
       <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-2">
-        Something I appreciate
+        Something I'm Grateful For
       </p>
       {appreciation ? (
         <p className="text-sm text-white leading-relaxed italic">

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { logout, fetchAuthRoles } from "../api/auth";
-import { activateAccount, fetchMe } from "../api/client";
+import { fetchMe } from "../api/client";
 import { resolveRoleState } from "../utils/sessionAuth";
 import { getCoachAccessState } from "../utils/roleAccess";
 
@@ -16,9 +16,8 @@ async function resolvePostLoginPath(account) {
   return "/onboarding";
 }
 
-export default function DeactivatedPage() {
+export default function SuspendedPage() {
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
   const intervalRef = useRef(null);
 
   useEffect(() => {
@@ -29,8 +28,8 @@ export default function DeactivatedPage() {
         const roles = await fetchAuthRoles();
         if (cancelled) return;
 
-        // No longer deactivated — redirect to the appropriate dashboard
-        if (!Array.isArray(roles) || !roles.includes("deactivated")) {
+        // No longer suspended — redirect to the appropriate dashboard
+        if (!Array.isArray(roles) || !roles.includes("suspended")) {
           clearInterval(intervalRef.current);
           const account = await fetchMe().catch(() => null);
           const path = account ? await resolvePostLoginPath(account) : "/client";
@@ -51,48 +50,31 @@ export default function DeactivatedPage() {
     };
   }, []);
 
-  async function handleReactivate() {
+  function handleLogout() {
+    setLoading(true);
     try {
-      setLoading(true);
-      setError(null);
-      await activateAccount();
-      // Polling will detect the change and redirect automatically,
-      // but also redirect immediately on success.
-      const account = await fetchMe().catch(() => null);
-      const path = account ? await resolvePostLoginPath(account) : "/client";
-      window.location.href = path;
-    } catch (err) {
-      setError(err?.message || "Failed to reactivate account");
+      logout();
+    } finally {
       setLoading(false);
     }
-  }
-
-  function handleLogout() {
-    logout();
   }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#080D19]">
       <div className="text-center">
-        <h1 className="text-3xl font-bold text-white mb-4">Account Deactivated</h1>
-        <p className="text-gray-300 mb-8">Your account has been deactivated.</p>
+        <h1 className="text-3xl font-bold text-white mb-4">Account Suspended</h1>
+        <p className="text-gray-300 mb-8">
+          Your account has been suspended. Contact an administrator if you believe this is an error.
+        </p>
         <div className="flex gap-4 justify-center">
-          <button
-            onClick={handleReactivate}
-            disabled={loading}
-            className="px-8 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg font-medium transition-colors"
-          >
-            {loading ? "Reactivating..." : "Reactivate Account"}
-          </button>
           <button
             onClick={handleLogout}
             disabled={loading}
             className="px-8 py-3 bg-gray-600 hover:bg-gray-700 disabled:opacity-50 text-white rounded-lg font-medium transition-colors"
           >
-            Logout
+            {loading ? "Logging out..." : "Logout"}
           </button>
         </div>
-        {error && <p className="text-red-400 mt-4">{error}</p>}
         <p className="text-gray-600 mt-6 text-xs">
           Checking account status every {POLL_INTERVAL_MS / 1000}s…
         </p>

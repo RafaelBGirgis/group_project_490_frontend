@@ -154,6 +154,14 @@ export async function updateUserStatus(userId, newStatus) {
   return apiPost(`/roles/admin/accounts/${userId}/${action}`, {});
 }
 
+export async function suspendUser(userId) {
+  return apiPost(`/roles/admin/accounts/${userId}/suspend`, {});
+}
+
+export async function unsuspendUser(userId) {
+  return apiPost(`/roles/admin/accounts/${userId}/unsuspend`, {});
+}
+
 /**
  * Permanently delete another user's account and all their data.
  * Route: DELETE /roles/admin/accounts/{id}
@@ -171,6 +179,57 @@ export async function deleteUser(userId) {
  * Edits create a VCS fork (clone + hide old version) when the row is referenced
  * by telemetry or any plan. Deletes soft-hide via is_hidden.
  */
+
+// ─── Exercise Bank aliases ────────────────────────────────────────────────────
+// admin_dash.jsx uses a flat "exercise" model: { id, name, muscle_group,
+// equipment, created_by }. The real backend stores workouts + activities
+// separately. We normalise at the API layer so the UI doesn't need to change.
+
+function normalizeWorkoutToExercise(w) {
+  // equipment may come back as a plain string, a single object {id, name, ...},
+  // or an array of such objects depending on what the fitness bank endpoint joins.
+  let equipmentStr = "";
+  if (Array.isArray(w.equipment)) {
+    equipmentStr = w.equipment.map((e) => (typeof e === "object" ? (e.name ?? "") : e)).filter(Boolean).join(", ");
+  } else if (typeof w.equipment === "object" && w.equipment !== null) {
+    equipmentStr = w.equipment.name ?? "";
+  } else {
+    equipmentStr = w.equipment ?? "";
+  }
+
+  return {
+    id: w.id,
+    name: w.name ?? "",
+    muscle_group: w.workout_type ?? "General",
+    equipment: equipmentStr,
+    created_by: w.created_by_name ?? w.created_by ?? "Admin",
+    is_hidden: w.is_hidden ?? false,
+    _raw: w,
+  };
+}
+
+export async function fetchExerciseBank({ text, muscle_group, skip = 0, limit = 100 } = {}) {
+  const workouts = await listAdminWorkouts({
+    text: text || undefined,
+    workout_type: muscle_group !== "All" ? muscle_group : undefined,
+    include_hidden: false,
+    skip,
+    limit,
+  });
+  return workouts.map(normalizeWorkoutToExercise);
+}
+
+export async function createExercise({ name, muscle_group, equipment }) {
+  return createAdminWorkout({ name, workout_type: muscle_group, equipment });
+}
+
+export async function updateExercise(id, { name, muscle_group, equipment }) {
+  return updateAdminWorkout(id, { name, workout_type: muscle_group, equipment });
+}
+
+export async function deleteExercise(id) {
+  return deleteAdminWorkout(id);
+}
 
 const FB = "/roles/admin/fitness";
 
@@ -276,10 +335,13 @@ function normalizeAdminAccount(item) {
     name: item.name || "Unknown User",
     email: item.email || "",
     role: item.role || (Array.isArray(item.roles) && item.roles[0]) || "client",
-    // Backend only knows is_active (true|false). The admin UI surfaces the
-    // off-state as "suspended" (orange badge), so collapse any backend label
-    // for inactive accounts to that single value.
-    status: item.is_active === false ? "suspended" : "active",
+    // is_suspended (admin-only block) takes priority over is_active (self-service deactivate)
+    status: item.is_suspended
+      ? "suspended"
+      : item.is_active === false
+        ? "inactive"
+        : "active",
+    is_suspended: Boolean(item.is_suspended),
     is_active: item.is_active !== false,
     created_at: item.created_at ? String(item.created_at).slice(0, 10) : "",
     last_active: item.last_active || "",

@@ -57,12 +57,31 @@ export function getCachedRoleState() {
 export function cacheRoleState(roleState) {
   if (!roleState) return getCachedRoleState();
 
+  // If the server says deactivated or suspended, wipe the old roles immediately
+  // so stale cache can't override the redirect. Don't merge — replace.
+  if (roleState.isDeactivated || roleState.isSuspended) {
+    return updateCache((current) => ({
+      ...current,
+      roleState: {
+        roleNames: [],
+        hasClientRole: false,
+        hasCoachRole: false,
+        hasAdminRole: false,
+        needsClientOnboarding: true,
+        isDeactivated: Boolean(roleState.isDeactivated),
+        isSuspended: Boolean(roleState.isSuspended),
+      },
+    })).roleState;
+  }
+
   return updateCache((current) => {
     const previousRoleNames = Array.isArray(current.roleState?.roleNames)
       ? current.roleState.roleNames
       : [];
     const nextRoleNames = Array.isArray(roleState.roleNames) ? roleState.roleNames : [];
-    const mergedRoleNames = [...new Set([...previousRoleNames, ...nextRoleNames])];
+    // Only keep roles the *fresh* response actually confirms. Don't accumulate
+    // stale roles — if the server didn't return "coach" this time, drop it.
+    const mergedRoleNames = nextRoleNames.length > 0 ? nextRoleNames : previousRoleNames;
 
     return {
       ...current,
@@ -72,6 +91,8 @@ export function cacheRoleState(roleState) {
         hasCoachRole: mergedRoleNames.includes("coach"),
         hasAdminRole: mergedRoleNames.includes("admin"),
         needsClientOnboarding: !mergedRoleNames.includes("client"),
+        isDeactivated: false,
+        isSuspended: false,
       },
     };
   }).roleState;
@@ -124,6 +145,7 @@ export function cacheAccountSnapshot(account) {
       client_id: account.client_id ?? current.account?.client_id ?? null,
       coach_id: account.coach_id ?? current.account?.coach_id ?? null,
       admin_id: account.admin_id ?? current.account?.admin_id ?? null,
+      is_suspended: Boolean(account.is_suspended ?? current.account?.is_suspended ?? false),
     },
   })).account;
 }

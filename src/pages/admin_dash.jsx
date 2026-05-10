@@ -16,6 +16,8 @@ import {
   fetchAdminStats,
   fetchAllUsers,
   updateUserStatus,
+  suspendUser,
+  unsuspendUser,
   deleteUser,
   fetchExerciseBank,
   createExercise,
@@ -403,9 +405,9 @@ export default function AdminDash() {
     const who = kind === "client_on_coach" ? "coach" : "client";
     if (!window.confirm(`Suspend the reported ${who} (${report.reported_name})?`)) return;
     try {
-      await updateUserStatus(report.reported_account_id, "suspended");
+      await suspendUser(report.reported_account_id);
       setUsers((prev) =>
-        prev.map((u) => u.id === report.reported_account_id ? { ...u, status: "suspended" } : u)
+        prev.map((u) => u.id === report.reported_account_id ? { ...u, status: "suspended", is_suspended: true } : u)
       );
       await deleteReport(kind, id).catch(() => {});
       setReports((p) => p.filter((r) => !(r.kind === kind && r.id === id)));
@@ -415,19 +417,22 @@ export default function AdminDash() {
   };
 
   const handleUserStatusChange = async (userId, newStatus) => {
-    // Confirm only when moving an account *out* of active — reactivation is
-    // harmless and shouldn't pop a dialog.
     if (
       newStatus !== "active" &&
       !window.confirm("Suspend this account? They'll be signed out and any active coach/client mappings will be torn down.")
     ) return;
     try {
-      await updateUserStatus(userId, newStatus);
-      setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, status: newStatus } : u));
+      if (newStatus === "suspended") {
+        await suspendUser(userId);
+        setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, status: "suspended", is_suspended: true } : u));
+      } else if (newStatus === "active") {
+        await unsuspendUser(userId);
+        setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, status: "active", is_suspended: false } : u));
+      } else {
+        await updateUserStatus(userId, newStatus);
+        setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, status: newStatus } : u));
+      }
     } catch (e) {
-      // Backend safety errors land here: 400 self-action, 409 last-admin
-      // removal, or 401 expired token. Surface the actual message so the
-      // admin understands why nothing changed.
       window.alert(e?.message || "Action failed");
     }
   };
@@ -801,6 +806,7 @@ export default function AdminDash() {
               >
                 <option value="all">All Status</option>
                 <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
                 <option value="suspended">Suspended</option>
               </select>
             </div>
@@ -844,15 +850,19 @@ export default function AdminDash() {
                   <div className="col-span-1">
                     <StatusBadge
                       label={user.status}
-                      variant={user.status === "active" ? "success" : "warning"}
+                      variant={
+                        user.status === "active" ? "success"
+                        : user.status === "suspended" ? "warning"
+                        : "error"
+                      }
                       dot
                     />
                   </div>
                   <span className="col-span-2 text-gray-500 text-xs">{user.last_active}</span>
                   <div className="col-span-2 flex justify-end gap-2">
-                    {/* Backend exposes only is_active (true|false). Active rows
-                        get a Suspend action (orange); suspended rows get
-                        Reactivate. Both are wired to /activate and /deactivate. */}
+                    {/* active → Suspend (orange)
+                        suspended → Unsuspend (green) via /unsuspend
+                        inactive (deactivated by self) → disabled pill, can't re-activate from here */}
                     {user.status === "active" ? (
                       <button
                         onClick={() => handleUserStatusChange(user.id, "suspended")}
@@ -860,12 +870,20 @@ export default function AdminDash() {
                       >
                         Suspend
                       </button>
-                    ) : (
+                    ) : user.status === "suspended" ? (
                       <button
                         onClick={() => handleUserStatusChange(user.id, "active")}
                         className="text-[10px] px-3 py-1.5 rounded-lg border border-green-500/30 text-green-400 hover:bg-green-500/10 transition-colors"
                       >
-                        Reactivate
+                        Unsuspend
+                      </button>
+                    ) : (
+                      <button
+                        disabled
+                        className="text-[10px] px-3 py-1.5 rounded-lg border border-gray-600/30 text-gray-600 cursor-not-allowed"
+                        title="User self-deactivated; they can reactivate via /deactivated"
+                      >
+                        Inactive
                       </button>
                     )}
                     <button

@@ -75,10 +75,33 @@ function OnboardingPage() {
   });
 
   const isFormValid = useMemo(() => {
+    // Range-validate the numeric fields here (instead of trusting the input
+    // attributes alone). Browsers honor min/max on the typed character set
+    // but nothing stops a user from pasting "-5" or "9999" into a number
+    // input — the form must refuse to submit until those resolve to
+    // something the backend will accept.
+    const ageNum = Number(form.age);
+    const weightNum = Number(String(form.weight).match(/-?\d+(\.\d+)?/)?.[0] || "");
+    const stepGoalNum = Number(form.dailyStepGoal);
+    const calorieGoalNum = Number(form.dailyCalorieGoal);
+
+    const ageOk = Number.isFinite(ageNum) && ageNum >= 13 && ageNum <= 120;
+    const weightOk = Number.isFinite(weightNum) && weightNum >= 1 && weightNum <= 600;
+    // Goals are optional in the survey contract (defaults kick in server-side
+    // when undefined), but if the user typed something it has to be in range.
+    const stepGoalOk =
+      form.dailyStepGoal === "" ||
+      (Number.isFinite(stepGoalNum) && stepGoalNum >= 1000 && stepGoalNum <= 70000);
+    const calorieGoalOk =
+      form.dailyCalorieGoal === "" ||
+      (Number.isFinite(calorieGoalNum) && calorieGoalNum >= 500 && calorieGoalNum <= 6000);
+
     return Boolean(
       form.primaryGoal &&
-        form.weight &&
-        form.age &&
+        ageOk &&
+        weightOk &&
+        stepGoalOk &&
+        calorieGoalOk &&
         form.gender &&
         form.cardNumber &&
         form.cardCvv &&
@@ -244,18 +267,30 @@ function OnboardingPage() {
                 />
                 <input
                   type="number"
-                  min="1"
+                  min="13"
+                  max="120"
+                  step="1"
+                  inputMode="numeric"
                   value={form.age}
                   onChange={(e) => setForm((prev) => ({ ...prev, age: e.target.value }))}
                   className="rounded-lg border border-white/10 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
-                  placeholder="Age"
+                  placeholder="Age (13–120)"
                   required
                 />
+                {/* Weight: numeric only, bounded to the backend validator's
+                    1–600 lb range. type="number" + min/max suppresses the "-"
+                    and "e" keys on most browsers and surfaces the native
+                    "value out of range" tooltip on submit. */}
                 <input
+                  type="number"
+                  min="1"
+                  max="600"
+                  step="1"
+                  inputMode="numeric"
                   value={form.weight}
                   onChange={(e) => setForm((prev) => ({ ...prev, weight: e.target.value }))}
                   className="rounded-lg border border-white/10 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
-                  placeholder="Weight (e.g. 165 lbs)"
+                  placeholder="Weight in lbs (1–600)"
                   required
                 />
                 <select
@@ -271,27 +306,33 @@ function OnboardingPage() {
                   <option value="prefer_not_to_say">Prefer not to say</option>
                 </select>
                 {/* Daily targets — bounds match the Client model validators
-                    (steps 0–70k, calories 500–6k). Numeric input keeps
-                    mobile keyboards numeric and prevents free-text junk. */}
+                    AND insist on a positive, realistic goal. Step goal min
+                    bumped from 0 → 1000 because a "goal" of zero steps is
+                    not a goal; calorie goal stays 500–6000 (anything below
+                    500 isn't a maintenance target, anything above 6k is
+                    almost certainly a fat-fingered entry). type="number"
+                    blocks "-" and "e" keys at the browser level. */}
                 <input
                   type="number"
-                  min="0"
+                  min="1000"
                   max="70000"
                   step="500"
+                  inputMode="numeric"
                   value={form.dailyStepGoal}
                   onChange={(e) => setForm((prev) => ({ ...prev, dailyStepGoal: e.target.value }))}
                   className="rounded-lg border border-white/10 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
-                  placeholder="Daily step goal (default 10,000)"
+                  placeholder="Daily step goal (1,000–70,000)"
                 />
                 <input
                   type="number"
                   min="500"
                   max="6000"
                   step="50"
+                  inputMode="numeric"
                   value={form.dailyCalorieGoal}
                   onChange={(e) => setForm((prev) => ({ ...prev, dailyCalorieGoal: e.target.value }))}
                   className="rounded-lg border border-white/10 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
-                  placeholder="Daily calorie goal (default 2,000)"
+                  placeholder="Daily calorie goal (500–6,000)"
                 />
               </div>
               <textarea

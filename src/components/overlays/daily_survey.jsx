@@ -370,8 +370,11 @@ function BodyMetricsForm({ status, prior, onSubmitted }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     const weightNum = Number(weight);
-    if (!Number.isFinite(weightNum) || weightNum <= 0) {
-      setError("Enter a positive weight.");
+    // Mirror the backend validator (HealthMetrics.weight must be 1–600).
+    // Frontend pre-rejects out-of-range values so we don't round-trip a
+    // 400 just to say "weight too high".
+    if (!Number.isFinite(weightNum) || weightNum < 1 || weightNum > 600) {
+      setError("Weight must be between 1 and 600 lbs.");
       return;
     }
     setSubmitting(true);
@@ -396,9 +399,12 @@ function BodyMetricsForm({ status, prior, onSubmitted }) {
         <input
           type="number"
           min={1}
+          max={600}
+          step={1}
+          inputMode="numeric"
           value={weight}
           onChange={(e) => setWeight(e.target.value)}
-          placeholder="e.g. 175"
+          placeholder="e.g. 175 (1–600 lbs)"
           className="w-full bg-[#080D19] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none"
         />
       </div>

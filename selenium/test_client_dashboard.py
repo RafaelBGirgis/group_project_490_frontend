@@ -8,6 +8,7 @@ from helpers import printSuccess
 from helpers import printFailure
 from helpers import printCongratulation
 
+from test_client_find_coach import test_client_find_coach
 from test_landing_page import test_landing_page
 from test_daily_check_in import test_daily_check_in
 from test_signup import test_signup
@@ -39,6 +40,7 @@ def test_client_dashboard(driver=None):
 
         # Add post-signup tests here
         test_daily_check_in(driver)
+        test_client_find_coach(driver)
 
         printCongratulation(f"All tests passed!: {driver.current_url} \n")
 

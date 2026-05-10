@@ -16,6 +16,7 @@ from helpers import printSuccess
 from helpers import printFailure
 from helpers import scroll
 from helpers import delete_account
+from test_signup import test_signup
 
 
 FRONTEND_URL = "http://localhost:5173"
@@ -69,34 +70,36 @@ def login_as_coach(coach_driver, email, password):
     coach_wait = WebDriverWait(coach_driver, 10)
 
     print("Opening coach login page...")
-    coach_driver.get(FRONTEND_URL)
-
-    login_link = coach_wait.until(
-        EC.element_to_be_clickable((By.LINK_TEXT, "Log in"))
-    )
-    login_link.click()
+    coach_driver.get(f"{FRONTEND_URL}/login")
 
     coach_wait.until(EC.url_contains("/login"))
     wait_for_page_to_fully_load(coach_driver)
+    coach_wait.until(EC.presence_of_element_located((By.TAG_NAME, "form")))
 
     email_input = coach_wait.until(
-        EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='email']"))
+        EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='email']"))
     )
     password_input = coach_wait.until(
-        EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='password']"))
+        EC.element_to_be_clickable((By.CSS_SELECTOR, "input[type='password']"))
     )
 
+    print("Entering coach login credentials...")
     email_input.clear()
     email_input.send_keys(email)
 
     password_input.clear()
     password_input.send_keys(password)
 
+    print("Submitting coach login form...")
     submit_button = coach_wait.until(
         EC.element_to_be_clickable((By.CSS_SELECTOR, "button[type='submit']"))
     )
     submit_button.click()
 
+    coach_wait.until(
+        lambda d: any(route in d.current_url for route in ("/client", "/coach", "/admin"))
+    )
+    coach_driver.get(f"{FRONTEND_URL}/coach")
     coach_wait.until(EC.url_contains("/coach"))
     wait_for_page_to_fully_load(coach_driver)
 
@@ -124,10 +127,11 @@ def test_client_find_coach(driver=None):
     # ---------------------- Test code -----------------------
     printNotice(f"Running {Path(__file__).name}")
     try:
+        if is_standalone_test:
+            test_signup(client_driver)
+            
         client_wait = WebDriverWait(client_driver, 10)
-
-        # Create brand new user
-        signup(client_driver)
+       
 
         # Navigate to /find-coach
         print("Navigating to Find Coach page...")

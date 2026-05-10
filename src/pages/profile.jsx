@@ -1231,7 +1231,14 @@ function ProfilePage({ role = "client" }) {
               <>
                 <SidebarCard title="Account Actions">
                   <div className="space-y-3">
-                    {canSwitchToCoach && !hasCoachStatus && (
+                    {/* Become Coach: gate on `!hasCoachStatus` ALONE.
+                        `canSwitchToCoach` was the wrong gate here — it's true
+                        only for users who are *already* verified coaches, but
+                        this button is meant for users who *aren't* a coach
+                        yet. The two are semantic opposites, so combining
+                        them with `&&` made the button impossible to render
+                        for the exact audience it targets. */}
+                    {!hasCoachStatus && (
                       <button
                         onClick={() => navigate("/coach-request")}
                         className="w-full rounded-xl px-4 py-3 text-sm font-semibold text-white"

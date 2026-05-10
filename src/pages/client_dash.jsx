@@ -44,6 +44,7 @@ import {
   fetchDailyStepsSurvey,
   fetchStepHistory,
   fetchWorkoutHistory,
+  fetchRandomAppreciation,
 } from "../api/survey";
 import { getConversationWithAccount } from "../api/chat";
 import {
@@ -191,8 +192,11 @@ export default function ClientDash() {
   const [requestStatusMessage, setRequestStatusMessage] = useState("");
   const [openingCoachChat, setOpeningCoachChat] = useState(false);
   const [terminatingRelationship, setTerminatingRelationship] = useState(false);
-  // appreciation state removed alongside <AppreciationCard /> — restore both
-  // when the teammate's appreciation feature merges in.
+  // Random gratitude entry pulled from /roles/client/telemetry/random_appreciation.
+  // null = not yet fetched, "" = fetched-but-no-history, "..." = real value.
+  // The card under the steps card uses these three states for distinct
+  // copy (loading / fallback / quote).
+  const [appreciation, setAppreciation] = useState(null);
 
   const refreshCoachRelationshipState = useCallback(async () => {
     const [requestList, myCoach] = await Promise.all([
@@ -294,8 +298,12 @@ export default function ClientDash() {
     if (!clientId) return;
     refreshSurveyStatus();
 
-    // fetchRandomAppreciation() removed — pairs with the AppreciationCard
-    // that's not on this branch. Re-add when the appreciation feature merges.
+    // Pull one random past gratitude entry to display under the steps card.
+    // Resolves to "" (empty string sentinel) when the client has nothing
+    // logged yet — distinguishes "no data" from "still loading" (null).
+    fetchRandomAppreciation().then((data) => {
+      setAppreciation(data?.todays_appreciation || "");
+    }).catch(() => setAppreciation(""));
 
     (async () => {
       // YYYY-MM-DD in local time, used to scope meal lookups to today only.
@@ -697,8 +705,10 @@ export default function ClientDash() {
               }
               onClick={() => setOverlay("steps")}
             />
-            {/* AppreciationCard removed — component lives on a teammate's
-                branch that hasn't merged. Re-add once it lands. */}
+            {/* Random past gratitude entry from the client's mood-survey
+                history. Fallback copy handles "loading" + "no entries yet"
+                so the card never shows blank or "undefined". */}
+            <AppreciationCard appreciation={appreciation} />
           </div>
 
           <DashboardCard role={role} className="items-center">
@@ -1132,6 +1142,38 @@ function MealsByKind({ meals }) {
 /* ═══════════════════════════════════════════════════════════════════════
    DAILY CHECK-IN BANNER — compact summary card with progress + open button
    ═══════════════════════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════════════════════
+   APPRECIATION CARD — random past gratitude entry, shown under steps card.
+   Distinguishes three states so the card always has copy:
+     - null             → still loading
+     - "" (empty)       → no past appreciation logged yet
+     - "<text>"         → real entry to display in italic quotes
+   ═══════════════════════════════════════════════════════════════════════ */
+
+function AppreciationCard({ appreciation }) {
+  const isLoading = appreciation === null;
+  const isEmpty = appreciation === "";
+  return (
+    <div className="rounded-2xl border border-white/6 bg-[#0F1729] p-4 flex flex-col justify-between min-h-[80px]">
+      <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-2">
+        Something to remember
+      </p>
+      {isLoading ? (
+        <p className="text-xs text-gray-600 italic">Loading…</p>
+      ) : isEmpty ? (
+        <p className="text-xs text-gray-600 italic leading-relaxed">
+          Nothing logged yet. Fill in today&apos;s mood check-in to start
+          building a list of things you&apos;re grateful for.
+        </p>
+      ) : (
+        <p className="text-sm text-white leading-relaxed italic">
+          &ldquo;{appreciation}&rdquo;
+        </p>
+      )}
+    </div>
+  );
+}
 
 function DailyCheckInBanner({ status, onOpen }) {
   // Steps has its own dashboard card and isn't part of the check-in overlay,

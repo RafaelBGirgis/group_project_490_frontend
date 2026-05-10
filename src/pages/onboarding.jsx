@@ -63,6 +63,11 @@ function OnboardingPage() {
     age: "",
     gender: "",
     bio: "",
+    // Daily targets the dashboard's progress rings + calories card use.
+    // Defaults match the Client model defaults so a user who skips both
+    // fields still ends up with reasonable starting values.
+    dailyStepGoal: "10000",
+    dailyCalorieGoal: "2000",
     availabilityWindows: [],
     cardNumber: "",
     cardCvv: "",
@@ -265,6 +270,29 @@ function OnboardingPage() {
                   <option value="non-binary">Non-binary</option>
                   <option value="prefer_not_to_say">Prefer not to say</option>
                 </select>
+                {/* Daily targets — bounds match the Client model validators
+                    (steps 0–70k, calories 500–6k). Numeric input keeps
+                    mobile keyboards numeric and prevents free-text junk. */}
+                <input
+                  type="number"
+                  min="0"
+                  max="70000"
+                  step="500"
+                  value={form.dailyStepGoal}
+                  onChange={(e) => setForm((prev) => ({ ...prev, dailyStepGoal: e.target.value }))}
+                  className="rounded-lg border border-white/10 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
+                  placeholder="Daily step goal (default 10,000)"
+                />
+                <input
+                  type="number"
+                  min="500"
+                  max="6000"
+                  step="50"
+                  value={form.dailyCalorieGoal}
+                  onChange={(e) => setForm((prev) => ({ ...prev, dailyCalorieGoal: e.target.value }))}
+                  className="rounded-lg border border-white/10 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none"
+                  placeholder="Daily calorie goal (default 2,000)"
+                />
               </div>
               <textarea
                 value={form.bio}

@@ -160,8 +160,34 @@ function CoachRequestFormPage() {
       setError("Enter a desired rate greater than $0.");
       return;
     }
+    // Realistic bounds: $5 floor (under that and the platform can't make
+    // money on the cut), $1000 ceiling (above is almost certainly a typo —
+    // the highest legit personal-trainer rates top out around $300/mo).
+    if (priceNum < 5 || priceNum > 1000) {
+      setError("Desired rate must be between $5 and $1000.");
+      return;
+    }
     if (!form.paymentInterval) {
       setError("Choose a billing interval.");
+      return;
+    }
+    if (!["monthly", "yearly"].includes(form.paymentInterval)) {
+      setError("Billing interval must be monthly or yearly.");
+      return;
+    }
+    // Year fields on certifications/experiences validated at add-time, but
+    // re-check on submit too in case a row was edited inline.
+    const currentYear = new Date().getFullYear();
+    const badYear = (y) => {
+      const n = Number(y);
+      return !Number.isFinite(n) || n < 1900 || n > currentYear;
+    };
+    if (form.certifications.some((c) => badYear(c.year))) {
+      setError(`Certification years must be between 1900 and ${currentYear}.`);
+      return;
+    }
+    if (form.experiences.some((e) => badYear(e.year))) {
+      setError(`Experience years must be between 1900 and ${currentYear}.`);
       return;
     }
 
@@ -186,7 +212,17 @@ function CoachRequestFormPage() {
   const addCertification = () => {
     if (isViewMode) return;
     if (!newCertification.title || !newCertification.issuer || !newCertification.year) return;
-    
+
+    // Reject obviously-wrong years (typos like "20223" or future dates).
+    // Same bounds the submit handler enforces — keep the error fast/inline.
+    const yearNum = Number(newCertification.year);
+    const currentYear = new Date().getFullYear();
+    if (!Number.isFinite(yearNum) || yearNum < 1900 || yearNum > currentYear) {
+      setError(`Certification year must be between 1900 and ${currentYear}.`);
+      return;
+    }
+    setError("");
+
     if (editingCertification) {
       // Update existing certification
       setForm((prev) => ({
@@ -211,7 +247,15 @@ function CoachRequestFormPage() {
   const addExperience = () => {
     if (isViewMode) return;
     if (!newExperience.title || !newExperience.organization || !newExperience.year) return;
-    
+
+    const yearNum = Number(newExperience.year);
+    const currentYear = new Date().getFullYear();
+    if (!Number.isFinite(yearNum) || yearNum < 1900 || yearNum > currentYear) {
+      setError(`Experience year must be between 1900 and ${currentYear}.`);
+      return;
+    }
+    setError("");
+
     if (editingExperience) {
       // Update existing experience
       setForm((prev) => ({
@@ -439,11 +483,15 @@ function CoachRequestFormPage() {
                       className="rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500"
                     />
                     <input
+                      type="number"
+                      min="1900"
+                      max={new Date().getFullYear()}
+                      step="1"
                       value={newCertification.year}
                       onChange={(e) =>
                         setNewCertification((prev) => ({ ...prev, year: e.target.value }))
                       }
-                      placeholder="Year"
+                      placeholder={`Year (1900–${new Date().getFullYear()})`}
                       className="rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500"
                     />
                   </div>
@@ -554,11 +602,15 @@ function CoachRequestFormPage() {
                       className="rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500"
                     />
                     <input
+                      type="number"
+                      min="1900"
+                      max={new Date().getFullYear()}
+                      step="1"
                       value={newExperience.year}
                       onChange={(e) =>
                         setNewExperience((prev) => ({ ...prev, year: e.target.value }))
                       }
-                      placeholder="Year / Range"
+                      placeholder={`Year (1900–${new Date().getFullYear()})`}
                       className="rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500"
                     />
                   </div>
@@ -607,12 +659,13 @@ function CoachRequestFormPage() {
                       type="number"
                       inputMode="decimal"
                       step="0.01"
-                      min="0"
+                      min="5"
+                      max="1000"
                       value={form.priceDollars}
                       onChange={(e) =>
                         setForm((prev) => ({ ...prev, priceDollars: e.target.value }))
                       }
-                      placeholder="50"
+                      placeholder="50 (range: $5–$1000)"
                       disabled={isViewMode}
                       className="w-full bg-transparent px-2 py-3 text-sm text-white outline-none placeholder:text-slate-500 disabled:cursor-not-allowed"
                       required

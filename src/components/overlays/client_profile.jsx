@@ -11,8 +11,8 @@ import {
   fetchClientWorkoutPlanByCoach,
   fetchClientAvailabilityByCoach,
   fetchClientBusySlotsByCoach,
-  createClientReview,
 } from "../../api/coach";
+import { reportAccount } from "../../api/client";
 import { getClientScheduledPlansAsCoach, searchWorkoutPlans } from "../../api/plan_my_week";
 import { fetchClientWorkoutHistoryEnrichedByCoach } from "../../api/coach";
 import AvailabilityCalendar from "../availability/AvailabilityCalendar";
@@ -163,9 +163,17 @@ export default function ClientProfile({ clientId, detail }) {
 
   const handleSubmitReport = async () => {
     if (!reportDraft.trim()) return;
+    // The new endpoint takes the client's *account_id*, not their
+    // client_id. Pulled off the detail object the overlay was passed
+    // (lookupClient returns base_account.id).
+    const targetAccountId = detail?.base_account?.id;
+    if (!targetAccountId) {
+      alert("Couldn't identify this client's account to report.");
+      return;
+    }
     setSubmittingReport(true);
     try {
-      await createClientReview(clientId, reportDraft.trim());
+      await reportAccount(targetAccountId, reportDraft.trim());
       setReportDraft("");
       setReportSubmitted(true);
     } catch (e) {

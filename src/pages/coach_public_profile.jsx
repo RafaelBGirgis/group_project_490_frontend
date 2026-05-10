@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Navbar, StatusBadge } from "../components";
 import {
-  createCoachReport,
+  reportAccount,
   createCoachReview,
   deleteCoachRequest,
   fetchAvailableCoaches,
@@ -119,6 +119,10 @@ function normalizeStoredCoachProfile(account, coachProfile) {
 
   return {
     coach_id: coachProfile?.coach_account?.id || account?.coach_id,
+    // account_id is what the new /shared/account/report endpoint takes —
+    // surface it on the normalized profile so the report flow can pass it
+    // straight through without another lookup.
+    account_id: account?.id ?? null,
     name: account?.name || "Coach",
     email: account?.email || "",
     age: account?.age ?? null,
@@ -438,12 +442,18 @@ export default function CoachPublicProfilePage() {
 
   const handleSubmitReport = async () => {
     if (!reportDraft.trim()) return;
+    // The new /roles/shared/account/report endpoint takes the coach's
+    // *account_id*, not their coach_id. Pull it off the normalized
+    // profile we built in normalizeStoredCoachProfile (set above).
+    const targetAccountId = coach?.account_id;
+    if (!targetAccountId) {
+      setActionError("Couldn't identify this coach's account to report.");
+      return;
+    }
     setSubmittingReport(true);
     setActionError("");
     try {
-      await createCoachReport(coachId, reportDraft.trim());
-      const reportResponse = await fetchCoachReports(coachId).catch(() => ({ reports: [] }));
-      setReports(Array.isArray(reportResponse?.reports) ? reportResponse.reports : []);
+      await reportAccount(targetAccountId, reportDraft.trim());
       setReportDraft("");
       setReportModalOpen(false);
       setActionMessage("Report submitted.");

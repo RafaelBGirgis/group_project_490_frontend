@@ -170,13 +170,31 @@ export async function fetchCaloriesToday() {
     const result = await apiGet("/roles/client/telemetry/calories_today");
     return {
       calories_consumed: Number(result?.calories_consumed) || 0,
+      // calories_burned + workout_count come from CompletedWorkoutActivity
+      // joined to today's CompletedWorkout rows. The dashboard's Calories
+      // card reads `calories_burned` directly, so missing this here is what
+      // caused "undefined kcal" to render after a workout log.
+      calories_burned: Number(result?.calories_burned) || 0,
+      net_calories: Number(result?.net_calories) || 0,
+      calories_goal: Number(result?.calories_goal) || 2000,
       protein_g: Number(result?.protein_g) || 0,
       carbs_g: Number(result?.carbs_g) || 0,
       fat_g: Number(result?.fat_g) || 0,
       meal_count: Number(result?.meal_count) || 0,
+      workout_count: Number(result?.workout_count) || 0,
     };
   } catch {
-    return { calories_consumed: 0, protein_g: 0, carbs_g: 0, fat_g: 0, meal_count: 0 };
+    return {
+      calories_consumed: 0,
+      calories_burned: 0,
+      net_calories: 0,
+      calories_goal: 2000,
+      protein_g: 0,
+      carbs_g: 0,
+      fat_g: 0,
+      meal_count: 0,
+      workout_count: 0,
+    };
   }
 }
 
@@ -457,11 +475,30 @@ export async function fetchBackendHealth() {
   return apiGet("/");
 }
 
+/**
+ * DEPRECATED — use reportAccount(accountId, reason) from api/auth surface
+ * (see reportAccount below). Routes through the legacy
+ * /roles/client/coach_report endpoint which writes to coach_report.
+ * Retained only so any unconverted call site keeps compiling.
+ */
 export async function createCoachReport(coachId, reportSummary) {
   return apiPost(
     withQuery(`/roles/client/coach_report/${coachId}`, {
       report_summary: reportSummary,
     })
+  );
+}
+
+/**
+ * Report any account by id. Hits the unified
+ * /roles/shared/account/report/{account_id} endpoint, which writes to
+ * the new `account_report` table. Replaces createCoachReport (client →
+ * coach) and createClientReview (coach → client) — both directions now
+ * share one route + one table.
+ */
+export async function reportAccount(accountId, reason) {
+  return apiPost(
+    withQuery(`/roles/shared/account/report/${accountId}`, { reason })
   );
 }
 
@@ -490,7 +527,14 @@ export function buildInitialSurveyPayload(form) {
     repeats_weekly: !!w.repeats_weekly,
     recurrence_end_dt: w.recurrence_end_dt ?? null,
   }));
+  // Coerce goal fields to numbers within the backend's valid bounds.
+  // Empty / NaN / out-of-range values fall through to the defaults the
+  // backend already enforces (10000 steps, 2000 kcal).
+  const stepGoal = Math.round(Number(form.dailyStepGoal));
+  const calorieGoal = Math.round(Number(form.dailyCalorieGoal));
   return {
+    daily_step_goal: Number.isFinite(stepGoal) && stepGoal > 0 ? stepGoal : undefined,
+    daily_calorie_goal: Number.isFinite(calorieGoal) && calorieGoal > 0 ? calorieGoal : undefined,
     fitness_goals: {
       client_id: 0,
       goal_enum: GOAL_ENUM_MAP[form.primaryGoal] ?? String(form.primaryGoal || "").toLowerCase(),

@@ -175,10 +175,13 @@ export function fetchWorkoutHistoryEnriched(opts) {
   return fetchList(`${TELEMETRY}/workouts_enriched`, opts);
 }
 
-/** Fetch a single random todays_appreciation entry from the client's mood history. */
+/** Fetch a single random todays_appreciation entry from the client's mood history.
+ *  Lives at /roles/client/telemetry/random_appreciation (no /query/ subpath),
+ *  unlike the bucketed history routes — bypass the TELEMETRY const so the URL
+ *  isn't accidentally prefixed. */
 export async function fetchRandomAppreciation() {
   try {
-    return await apiGet(`${TELEMETRY}/random_appreciation`);
+    return await apiGet("/roles/client/telemetry/random_appreciation");
   } catch {
     return null;
   }

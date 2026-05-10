@@ -21,7 +21,9 @@ const WEEKDAYS = [
   ["Sat", 5],
   ["Sun", 6],
 ];
-const MEAL_KINDS = ["breakfast", "lunch", "dinner"];
+// Meal-kind grouping (breakfast/lunch/dinner) was removed from the coach
+// planner — coaches just assign meals to a day; the client decides when to
+// log them. The constant was kept inline only for the kind-row labels.
 
 function mondayOf(date) {
   const d = new Date(date);
@@ -157,6 +159,10 @@ function PlanTab({ clients, library, onError }) {
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
   const [prescriptions, setPrescriptions] = useState([]);
   const [loading, setLoading] = useState(false);
+  // ISO date of the day a coach clicked "+ Add" on; null = picker closed.
+  // Hoisted to the parent so a single picker instance is reused across all
+  // seven day columns (cleaner than rendering 7 dropdowns).
+  const [pickerDate, setPickerDate] = useState(null);
 
   const weekStartIso = useMemo(() => isoDate(weekStart), [weekStart]);
 
@@ -178,12 +184,15 @@ function PlanTab({ clients, library, onError }) {
 
   useEffect(() => { loadPlan(clientId, weekStartIso); }, [clientId, weekStartIso]);
 
-  const indexed = useMemo(() => {
+  // Group prescriptions by scheduled_date so each day-cell can stack
+  // multiple meals. Standing recipes (no scheduled_date) are filtered out
+  // here — they show up in the Library tab instead.
+  const byDate = useMemo(() => {
     const map = {};
     for (const p of prescriptions) {
-      if (p.scheduled_date && p.meal_kind) {
-        map[`${p.scheduled_date}|${p.meal_kind}`] = p;
-      }
+      if (!p.scheduled_date) continue;
+      if (!map[p.scheduled_date]) map[p.scheduled_date] = [];
+      map[p.scheduled_date].push(p);
     }
     return map;
   }, [prescriptions]);
@@ -194,12 +203,13 @@ function PlanTab({ clients, library, onError }) {
     setWeekStart(next);
   };
 
-  const handleAssign = async (date, kind, mealId) => {
+  const handleAssign = async (date, mealId) => {
     if (!clientId || !mealId) return;
     try {
+      // mealKind is intentionally not sent — meals are assigned to the day
+      // as a whole now, not slotted into breakfast/lunch/dinner.
       await prescribeMealToClient(Number(clientId), Number(mealId), {
         scheduledDate: date,
-        mealKind: kind,
       });
       await loadPlan(clientId, weekStartIso);
     } catch (e) {
@@ -273,33 +283,29 @@ function PlanTab({ clients, library, onError }) {
 
       {loading && <p className="text-gray-500 text-xs">Loading plan…</p>}
 
-      {/* Grid: 8 cols (1 label + 7 days) × 4 rows (1 header + 3 meal kinds).
-          Cells empty = "+ assign" picker; cells filled = meal name + Clear. */}
+      {/* Grid: 7 day-columns. Each column shows the day's prescribed meals
+          stacked plus a single "+ Add" button. Clicking the button opens a
+          shared picker overlay (search + macros) instead of per-cell
+          dropdowns — easier on the eyes and on the wrist. */}
       <div className="overflow-x-auto">
-        <div className="grid grid-cols-8 gap-1 min-w-[700px]">
-          {/* Header row */}
-          <div className="text-[10px] uppercase tracking-widest text-gray-500 px-2 py-2">Slot</div>
-          {WEEKDAYS.map(([label, idx]) => (
-            <div key={label} className="text-[10px] uppercase tracking-widest text-gray-500 text-center py-2">
-              {label}
-              <div className="text-gray-600 text-[9px] font-normal normal-case">
-                {dayDates[idx].toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-              </div>
-            </div>
-          ))}
-
-          {/* Meal-kind rows */}
-          {MEAL_KINDS.map((kind) => (
-            <PlanRow
-              key={kind}
-              kind={kind}
-              dayDates={dayDates}
-              indexed={indexed}
-              library={library}
-              onAssign={handleAssign}
-              onClear={handleClear}
-            />
-          ))}
+        <div className="grid grid-cols-7 gap-2 min-w-[760px]">
+          {WEEKDAYS.map(([label, idx]) => {
+            const d = dayDates[idx];
+            const dateIso = isoDate(d);
+            const meals = byDate[dateIso] || [];
+            const isToday = dateIso === isoDate(new Date());
+            return (
+              <DayColumn
+                key={label}
+                label={label}
+                date={d}
+                meals={meals}
+                isToday={isToday}
+                onAddClick={() => setPickerDate(dateIso)}
+                onClear={handleClear}
+              />
+            );
+          })}
         </div>
       </div>
 
@@ -309,56 +315,162 @@ function PlanTab({ clients, library, onError }) {
           then come back to assign it.
         </p>
       )}
+
+      {/* Picker overlay — opens when a day cell's + button is clicked.
+          Single instance shared across all 7 days. */}
+      {pickerDate && (
+        <MealPickerOverlay
+          date={pickerDate}
+          library={library}
+          onClose={() => setPickerDate(null)}
+          onPick={async (mealId) => {
+            await handleAssign(pickerDate, mealId);
+            setPickerDate(null);
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function PlanRow({ kind, dayDates, indexed, library, onAssign, onClear }) {
+function DayColumn({ label, date, meals, isToday, onAddClick, onClear }) {
+  // Sum kcal across all meals on this day so the coach sees the daily
+  // load at a glance from the column header.
+  const totalKcal = meals.reduce((acc, p) => acc + Math.round(p.meal.totals?.calories || 0), 0);
+
   return (
-    <>
-      <div className="text-[10px] uppercase tracking-widest text-gray-300 self-center px-2 py-3">
-        {kind}
+    <div className={`rounded-xl border min-h-[200px] flex flex-col gap-2 p-2.5 transition-colors ${
+      isToday
+        ? "bg-orange-500/5 border-orange-500/30"
+        : "bg-[#0A1020] border-white/5"
+    }`}>
+      {/* Day header — bigger, with kcal subtotal when meals exist */}
+      <div className="text-center pb-1.5 border-b border-white/5">
+        <p className={`text-[10px] uppercase tracking-widest font-semibold ${
+          isToday ? "text-orange-400" : "text-gray-300"
+        }`}>
+          {label}
+        </p>
+        <p className="text-gray-600 text-[10px] mt-0.5">
+          {date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+        </p>
+        {meals.length > 0 && (
+          <p className="text-orange-400 text-[10px] font-semibold mt-1">
+            {totalKcal} kcal · {meals.length} meal{meals.length === 1 ? "" : "s"}
+          </p>
+        )}
       </div>
-      {dayDates.map((d) => {
-        const dateIso = isoDate(d);
-        const filled = indexed[`${dateIso}|${kind}`];
-        return (
-          <div key={dateIso + kind} className="bg-[#0A1020] border border-white/5 rounded-lg p-2 min-h-[72px] flex flex-col justify-between">
-            {filled ? (
-              <>
-                <div>
-                  <p className="text-white text-[11px] font-medium leading-tight line-clamp-2">
-                    {filled.meal.meal_name}
-                  </p>
-                  <p className="text-orange-400 text-[10px] mt-0.5">
-                    {Math.round(filled.meal.totals?.calories || 0)} kcal
-                  </p>
-                </div>
-                <button
-                  onClick={() => onClear(filled.id)}
-                  className="self-end text-[9px] text-gray-500 hover:text-red-400 mt-1"
-                >
-                  Clear
-                </button>
-              </>
-            ) : (
-              <select
-                defaultValue=""
-                onChange={(e) => onAssign(dateIso, kind, e.target.value)}
-                className="w-full bg-[#080D19] border border-white/10 rounded text-[10px] text-gray-300 px-1 py-1 focus:outline-none"
-              >
-                <option value="">+ Add meal…</option>
-                {library.map((m) => (
-                  <option key={m.id} value={m.id}>{m.meal_name}</option>
-                ))}
-              </select>
-            )}
-          </div>
-        );
-      })}
-    </>
+
+      {/* Meals stacked. Each shows name + kcal with a hover × to clear,
+          replacing the old text "Clear" button. */}
+      {meals.map((p) => (
+        <div
+          key={p.id}
+          className="group relative bg-[#080D19] border border-white/10 rounded-lg p-2 hover:border-orange-500/30 transition-colors"
+        >
+          <button
+            onClick={() => onClear(p.id)}
+            className="absolute top-1 right-1 w-5 h-5 rounded-full text-[10px] text-gray-600 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-opacity"
+            title="Remove meal"
+          >
+            ×
+          </button>
+          <p className="text-white text-xs font-medium leading-tight line-clamp-2 pr-4">
+            {p.meal.meal_name}
+          </p>
+          <p className="text-orange-400 text-[10px] mt-1">
+            {Math.round(p.meal.totals?.calories || 0)} kcal
+          </p>
+        </div>
+      ))}
+
+      {/* Empty state / add button — big dashed-border target instead of a
+          tiny dropdown. Click opens the shared MealPickerOverlay. */}
+      <button
+        onClick={onAddClick}
+        className={`mt-auto w-full rounded-lg border border-dashed py-2.5 text-xs text-gray-500 hover:text-orange-400 hover:border-orange-500/30 hover:bg-orange-500/5 transition-colors ${
+          meals.length === 0 ? "min-h-[80px] flex items-center justify-center text-base" : ""
+        }`}
+      >
+        {meals.length === 0 ? "+" : "+ Add meal"}
+      </button>
+    </div>
   );
 }
+
+/* Reused once across the grid — opens when any day's "+" is clicked.
+   Search + meal cards with kcal so the coach sees what they're picking
+   without needing to dig through a tiny dropdown. */
+function MealPickerOverlay({ date, library, onClose, onPick }) {
+  const [search, setSearch] = useState("");
+
+  const dateLabel = (() => {
+    const d = new Date(date + "T00:00:00");
+    return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+  })();
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return library;
+    return library.filter((m) => m.meal_name?.toLowerCase().includes(q));
+  }, [library, search]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="bg-[#0F1729] rounded-2xl border border-white/10 w-full max-w-md max-h-[80vh] flex flex-col overflow-hidden">
+        <div className="flex items-start justify-between p-4 border-b border-white/10">
+          <div>
+            <p className="text-[10px] text-gray-500 uppercase tracking-widest">Add meal for</p>
+            <h3 className="text-white font-bold text-base mt-0.5">{dateLabel}</h3>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-white text-2xl leading-none">×</button>
+        </div>
+
+        <div className="p-4 border-b border-white/10">
+          <input
+            autoFocus
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search your library…"
+            className="w-full bg-[#0A1020] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-orange-500/30"
+          />
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+          {filtered.length === 0 ? (
+            <p className="text-gray-500 text-sm text-center py-6">
+              {library.length === 0
+                ? "Your meal library is empty. Build a meal first."
+                : "No meals match your search."}
+            </p>
+          ) : (
+            filtered.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => onPick(m.id)}
+                className="w-full text-left rounded-lg bg-[#0A1020] border border-white/5 hover:border-orange-500/40 hover:bg-orange-500/5 px-3 py-2.5 transition-colors"
+              >
+                <p className="text-white text-sm font-medium truncate">{m.meal_name}</p>
+                <div className="flex items-center gap-3 mt-1 text-[10px]">
+                  <span className="text-orange-400 font-semibold">
+                    {Math.round(m.totals?.calories || 0)} kcal
+                  </span>
+                  <span className="text-gray-500">
+                    P {Math.round(m.totals?.protein_g || 0)}g · C {Math.round(m.totals?.carbs_g || 0)}g · F {Math.round(m.totals?.fat_g || 0)}g
+                  </span>
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 /* ═══════════════════════════════════════════════════════════════════════════
    LIBRARY TAB — list of meals + "Prescribe to client" picker per row

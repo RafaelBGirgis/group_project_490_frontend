@@ -337,64 +337,93 @@ export default function CoachDashboard() {
   }, [clientRequestDetails]);
 
   const handleAcceptRequest = async (request) => {
+    // OPTIMISTIC FLIP: swap the client from "pending" → "active" the
+    // instant the button is clicked, then fire the API in the background.
+    // Previously the UI waited for the round-trip + a relationship-data
+    // refetch before moving the row, which made the button feel laggy.
+    // On failure we roll back from the snapshot.
     setRequestActionId(request.request_id);
+    const snapshot = clients;
+    const alreadyTrackedClient = snapshot.some((c) => Number(c.id) === Number(request.client_id));
+    const alreadyActiveClient = snapshot.some(
+      (c) => Number(c.id) === Number(request.client_id) && c.status === "active"
+    );
+    const detailSeed = request.detail || request.details || request;
+    const optimisticClient = {
+      id: request.client_id,
+      request_id: request.request_id,
+      name: resolveClientName(detailSeed, request.client_id),
+      goal: detailSeed?.fitness_goals?.[0]?.goal_enum || request.goal || "Active client",
+      status: "active",
+      joined: new Date().toLocaleDateString(),
+      relationship_id: null, // backfilled when the API returns
+      details: detailSeed,
+    };
+    setClients((prev) => [
+      optimisticClient,
+      ...prev.filter((c) => Number(c.id) !== Number(request.client_id)),
+    ]);
+    setStats((prev) =>
+      prev
+        ? {
+            ...prev,
+            total_clients: prev.total_clients + (alreadyTrackedClient ? 0 : 1),
+            active_clients: prev.active_clients + (alreadyActiveClient ? 0 : 1),
+          }
+        : prev
+    );
+
     try {
       const accepted = await acceptClientRequest(request.request_id);
       if (accepted?.relationship_id) {
-        const alreadyTrackedClient = clients.some((client) => Number(client.id) === Number(request.client_id));
-        const alreadyActiveClient = clients.some(
-          (client) => Number(client.id) === Number(request.client_id) && client.status === "active"
-        );
+        // Replace the optimistic stub with the real merged detail so any
+        // reads that need relationship_id (e.g. terminate flow) work.
         const detail = await loadClientRequestDetails(request.client_id).catch(() => null);
-        const mergedDetail = mergeClientDetail(detail, request.detail || request.details || request);
+        const mergedDetail = mergeClientDetail(detail, detailSeed);
         await getConversationWithAccount(mergedDetail?.base_account?.id || null, {
           id: request.client_id,
           account_id: mergedDetail?.base_account?.id || null,
-          name: resolveClientName(mergedDetail || request, request.client_id),
+          name: resolveClientName(mergedDetail, request.client_id),
           role: "client",
         }).catch(() => null);
-        const acceptedClient = {
-          id: request.client_id,
-          request_id: request.request_id,
-          name: resolveClientName(mergedDetail || request, request.client_id),
-          goal:
-            mergedDetail?.fitness_goals?.[0]?.goal_enum ||
-            request.goal ||
-            "Active client",
-          status: "active",
-          joined: new Date().toLocaleDateString(),
-          relationship_id: accepted.relationship_id,
-          details: mergedDetail,
-        };
-
-        setClients((prev) => {
-          const next = [
-            acceptedClient,
-            ...prev.filter((client) => Number(client.id) !== Number(request.client_id)),
-          ];
-          return next;
-        });
-        setStats((prev) =>
-          prev
-            ? {
-                ...prev,
-                total_clients: prev.total_clients + (alreadyTrackedClient ? 0 : 1),
-                active_clients: prev.active_clients + (alreadyActiveClient ? 0 : 1),
-              }
-            : prev
+        setClients((prev) =>
+          prev.map((c) =>
+            Number(c.id) === Number(request.client_id)
+              ? {
+                  ...c,
+                  name: resolveClientName(mergedDetail || c, c.id),
+                  goal: mergedDetail?.fitness_goals?.[0]?.goal_enum || c.goal,
+                  relationship_id: accepted.relationship_id,
+                  details: mergedDetail,
+                }
+              : c
+          )
         );
       }
       await refreshRelationshipData();
+    } catch (err) {
+      // Roll back: restore the snapshot so the row goes back to its
+      // pending state and the coach sees the failure.
+      setClients(snapshot);
+      throw err;
     } finally {
       setRequestActionId(null);
     }
   };
 
   const handleDenyRequest = async (requestId) => {
+    // Optimistic remove — the row disappears from "pending requests"
+    // immediately, API call settles in the background. Roll back on
+    // failure so the coach can see the error and retry.
     setRequestActionId(requestId);
+    const snapshot = clients;
+    setClients((prev) => prev.filter((c) => c.request_id !== requestId));
     try {
       await denyClientRequest(requestId);
       await refreshRelationshipData();
+    } catch (err) {
+      setClients(snapshot);
+      throw err;
     } finally {
       setRequestActionId(null);
     }

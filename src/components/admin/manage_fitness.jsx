@@ -357,11 +357,15 @@ function WorkoutFormModal({ initial, onClose, onSubmit, editMode = false }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // ACTIVITIES TAB
 // ═══════════════════════════════════════════════════════════════════════════
+const ACTIVITIES_PER_PAGE = 10;
+
 function ActivitiesTab() {
   const [rows, setRows] = useState([]);
   const [workouts, setWorkouts] = useState([]);
   const [filterWorkout, setFilterWorkout] = useState("all");
   const [showHidden, setShowHidden] = useState(true);
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
   const [editing, setEditing] = useState(null);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -389,11 +393,33 @@ function ActivitiesTab() {
   }
   useEffect(() => { refresh(); /* eslint-disable-next-line */ }, [filterWorkout, showHidden]);
 
+  // Reset to page 1 whenever the search/filter changes so the user
+  // doesn't get stuck on an out-of-range page after narrowing results.
+  useEffect(() => { setPage(1); }, [search, filterWorkout, showHidden]);
+
   async function handleDelete(a) {
     if (!window.confirm("Hide this activity tier? Coach pickers will exclude it; existing logs survive.")) return;
     await deleteAdminActivity(a.id);
     refresh();
   }
+
+  // Filter client-side by parent workout name + intensity measure so the
+  // search field finds activities the same way users think of them.
+  const q = search.trim().toLowerCase();
+  const filteredRows = q
+    ? rows.filter((a) => {
+        const name = (a.workout_name || `#${a.workout_id}`).toLowerCase();
+        const measure = (a.intensity_measure || "").toLowerCase();
+        return name.includes(q) || measure.includes(q);
+      })
+    : rows;
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / ACTIVITIES_PER_PAGE));
+  const safePage = Math.min(page, totalPages);
+  const pageRows = filteredRows.slice(
+    (safePage - 1) * ACTIVITIES_PER_PAGE,
+    safePage * ACTIVITIES_PER_PAGE
+  );
 
   return (
     <div>
@@ -406,6 +432,15 @@ function ActivitiesTab() {
           <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} className="accent-red-500" />
           Show hidden
         </label>
+        {/* Search input shares the toolbar row with + New Activity. flex-1
+            lets it stretch to fill the gap between the dropdown/checkbox
+            cluster on the left and the create button on the right. */}
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search activities…"
+          className="flex-1 min-w-[160px]"
+        />
         <PrimaryBtn onClick={() => setCreating(true)} disabled={workouts.length === 0}>+ New Activity</PrimaryBtn>
       </SectionToolbar>
 
@@ -420,10 +455,14 @@ function ActivitiesTab() {
         </div>
         {busy && rows.length === 0 ? (
           <p className="text-gray-500 text-sm text-center py-6">Loading…</p>
-        ) : rows.length === 0 ? (
-          <p className="text-gray-500 text-sm text-center py-6">No activities</p>
+        ) : pageRows.length === 0 ? (
+          <p className="text-gray-500 text-sm text-center py-6">
+            {filteredRows.length === 0 && rows.length > 0
+              ? "No activities match your search."
+              : "No activities"}
+          </p>
         ) : (
-          rows.map((a) => (
+          pageRows.map((a) => (
             <div key={a.id} className="grid grid-cols-12 gap-4 px-3 py-3 items-center hover:bg-white/[0.02]">
               <div className="col-span-4 flex items-center gap-2">
                 <span className="text-white text-sm">{a.workout_name || `#${a.workout_id}`}</span>
@@ -443,6 +482,44 @@ function ActivitiesTab() {
           ))
         )}
       </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between px-3 py-3 border-t border-white/5 mt-2">
+          <p className="text-gray-500 text-xs">
+            Showing {(safePage - 1) * ACTIVITIES_PER_PAGE + 1}–
+            {Math.min(safePage * ACTIVITIES_PER_PAGE, filteredRows.length)} of {filteredRows.length}
+          </p>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={safePage === 1}
+              className="text-[10px] px-2.5 py-1.5 rounded-lg border border-white/10 text-gray-400 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              ← Prev
+            </button>
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
+              <button
+                key={n}
+                onClick={() => setPage(n)}
+                className={`text-[10px] min-w-[28px] py-1.5 rounded-lg border transition-colors ${
+                  n === safePage
+                    ? "border-red-500/50 bg-red-500/10 text-red-400"
+                    : "border-white/10 text-gray-500 hover:bg-white/5"
+                }`}
+              >
+                {n}
+              </button>
+            ))}
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={safePage === totalPages}
+              className="text-[10px] px-2.5 py-1.5 rounded-lg border border-white/10 text-gray-400 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              Next →
+            </button>
+          </div>
+        </div>
+      )}
 
       {creating && (
         <ActivityFormModal

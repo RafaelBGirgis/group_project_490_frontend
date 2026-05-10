@@ -1,5 +1,5 @@
 import { Navigate, useNavigate } from "react-router-dom";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Navbar,
   StatCard,
@@ -185,6 +185,45 @@ export default function CoachDashboard() {
   const [selectedClient, setSelectedClient] = useState(null);
   const [clientSearchTerm, setClientSearchTerm] = useState("");
 
+  // Ref-backed cache so repeat lookupClient calls hit memory instead of the
+  // network. The polling tick (every 60s) used to re-fetch every pending
+  // request's full client detail; with the cache we only pay the round trip
+  // once per CACHE_TTL_MS window per client. Entries store {detail,fetchedAt}
+  // so we can lazily refresh on access without a separate sweep timer.
+  const CACHE_TTL_MS = 5 * 60 * 1000; // 5 min — long enough to amortize the
+  // polling tick, short enough that goal/profile changes from other tabs
+  // surface within a coach's typical session length.
+  const clientDetailCache = useRef(new Map());
+  const cachedLookupClient = useCallback(async (clientId) => {
+    if (!clientId) return null;
+    const entry = clientDetailCache.current.get(clientId);
+    const now = Date.now();
+    if (entry && entry.detail && now - entry.fetchedAt < CACHE_TTL_MS) {
+      return entry.detail;
+    }
+    if (entry && entry.inflight) return entry.inflight;
+    const inflight = lookupClient(clientId).catch(() => null).then((detail) => {
+      const cur = clientDetailCache.current.get(clientId);
+      clientDetailCache.current.set(clientId, {
+        detail: detail || cur?.detail || null,
+        fetchedAt: Date.now(),
+        inflight: null,
+      });
+      return detail;
+    });
+    clientDetailCache.current.set(clientId, {
+      detail: entry?.detail || null,
+      fetchedAt: entry?.fetchedAt || 0,
+      inflight,
+    });
+    return inflight;
+  }, []);
+  // Bust on accept/deny so the next read re-pulls — relationship transitions
+  // are the one event where stale cached data would mislead the UI.
+  const bustClientCache = useCallback((clientId) => {
+    clientDetailCache.current.delete(clientId);
+  }, []);
+
   /*  load account  */
   useEffect(() => {
     if (!authed) return;
@@ -222,7 +261,7 @@ export default function CoachDashboard() {
         const requests = await fetchClientRequests().catch(() => []);
         const detailedRequests = await Promise.all(
           requests.map(async (request) => {
-            const detail = await lookupClient(request.client_id).catch(() => null);
+            const detail = await cachedLookupClient(request.client_id);
             const mergedDetail = mergeClientDetail(detail, request.detail || request);
             return {
               ...request,
@@ -273,7 +312,7 @@ export default function CoachDashboard() {
 
     const detailedRequests = await Promise.all(
       requests.map(async (request) => {
-        const detail = await lookupClient(request.client_id).catch(() => null);
+        const detail = await cachedLookupClient(request.client_id);
         const mergedDetail = mergeClientDetail(detail, request.detail || request);
         return {
           ...request,
@@ -320,8 +359,13 @@ export default function CoachDashboard() {
       void refreshRelationshipData();
     };
 
+    // 15s was aggressive — every tick re-fetches stats + clients + requests
+    // (each request fans out into a per-client lookupClient round-trip), so
+    // an idle dashboard tab was burning N+3 queries every 15s for no UX
+    // benefit. 60s + focus refresh is the new baseline: users still see
+    // fresh data when they tab back in, but the idle cost is 4× lower.
     window.addEventListener("focus", refreshOnFocus);
-    const intervalId = window.setInterval(refreshRelationshipData, 15000);
+    const intervalId = window.setInterval(refreshRelationshipData, 60000);
 
     return () => {
       window.removeEventListener("focus", refreshOnFocus);
@@ -331,10 +375,15 @@ export default function CoachDashboard() {
 
   const loadClientRequestDetails = useCallback(async (clientId) => {
     if (clientRequestDetails[clientId]) return clientRequestDetails[clientId];
-    const detail = await lookupClient(clientId);
-    setClientRequestDetails((prev) => ({ ...prev, [clientId]: detail }));
+    // Route through the cache so on-demand row clicks share the same memo
+    // bucket as the bulk dashboard load — clicking a row whose detail was
+    // already pulled by the polling tick is now a free in-memory hit.
+    const detail = await cachedLookupClient(clientId);
+    if (detail) {
+      setClientRequestDetails((prev) => ({ ...prev, [clientId]: detail }));
+    }
     return detail;
-  }, [clientRequestDetails]);
+  }, [clientRequestDetails, cachedLookupClient]);
 
   const handleAcceptRequest = async (request) => {
     // OPTIMISTIC FLIP: swap the client from "pending" → "active" the
@@ -376,6 +425,11 @@ export default function CoachDashboard() {
     try {
       const accepted = await acceptClientRequest(request.request_id);
       if (accepted?.relationship_id) {
+        // The relationship just flipped to active — bust the per-client
+        // cache so the follow-up lookup re-pulls fresh authorization-aware
+        // detail (the API may include extra fields once the coach has an
+        // accepted relationship that it withheld during the pending state).
+        bustClientCache(request.client_id);
         // Replace the optimistic stub with the real merged detail so any
         // reads that need relationship_id (e.g. terminate flow) work.
         const detail = await loadClientRequestDetails(request.client_id).catch(() => null);

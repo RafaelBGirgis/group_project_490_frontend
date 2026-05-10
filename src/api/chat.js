@@ -15,6 +15,30 @@ export async function fetchConversationWithAccount(accountId, fallback = {}) {
   }
 }
 
+function normalizeConversationSummary(c) {
+  return {
+    id: c.chat_id,
+    partner_account_id: c.partner?.id ?? null,
+    partner_name: c.partner?.name || `Account #${c.partner?.id ?? "?"}`,
+    partner_pfp_url: c.partner?.pfp_url || null,
+    partner_age: c.partner?.age ?? null,
+    partner_gender: c.partner?.gender || null,
+    partner_is_admin: !!c.partner?.is_admin,
+    partner_is_verified_coach: !!c.partner?.is_verified_coach,
+    partner_is_client: !!c.partner?.is_client,
+    partner_role: c.partner?.is_admin
+      ? "admin"
+      : c.partner?.is_verified_coach
+        ? "coach"
+        : c.partner?.is_client
+          ? "client"
+          : "user",
+    last_message: c.last_message || "",
+    last_message_at: c.last_message_at || null,
+    unread_count: Number(c.unread_count ?? 0),
+  };
+}
+
 /**
  * Pull every conversation the caller participates in. Backend joins through
  * account_chat → returns each chat with the partner's public profile populated.
@@ -23,29 +47,46 @@ export async function fetchAllConversations() {
   try {
     const result = await apiGet(`/roles/shared/chat/conversations`);
     const list = Array.isArray(result?.conversations) ? result.conversations : [];
-    return list.map((c) => ({
-      id: c.chat_id,
-      partner_account_id: c.partner?.id ?? null,
-      partner_name: c.partner?.name || `Account #${c.partner?.id ?? "?"}`,
-      partner_pfp_url: c.partner?.pfp_url || null,
-      partner_age: c.partner?.age ?? null,
-      partner_gender: c.partner?.gender || null,
-      partner_is_admin: !!c.partner?.is_admin,
-      partner_is_verified_coach: !!c.partner?.is_verified_coach,
-      partner_is_client: !!c.partner?.is_client,
-      partner_role: c.partner?.is_admin
-        ? "admin"
-        : c.partner?.is_verified_coach
-          ? "coach"
-          : c.partner?.is_client
-            ? "client"
-            : "user",
-      last_message: c.last_message || "",
-      last_message_at: c.last_message_at || null,
-      unread_count: Number(c.unread_count ?? 0),
-    }));
+    return list.map(normalizeConversationSummary);
   } catch {
     return [];
+  }
+}
+
+/**
+ * Single-call inbox payload. Returns conversation list + total unread + the
+ * active chat's recent messages (when activeChatId is set) — replaces the
+ * three legacy calls (`/conversations` + `/unread_count` + `/messages/<id>`)
+ * the messages page used to fire on mount with one round trip.
+ */
+export async function fetchChatInbox({ activeChatId = 0, activeMessageLimit = 50 } = {}) {
+  try {
+    const result = await apiGet(
+      withQuery("/roles/shared/chat/inbox", {
+        active_chat_id: activeChatId,
+        active_message_limit: activeMessageLimit,
+      })
+    );
+    const conversations = Array.isArray(result?.conversations)
+      ? result.conversations.map(normalizeConversationSummary)
+      : [];
+    const messages = Array.isArray(result?.active_messages)
+      ? result.active_messages.map((message) => ({
+          id: message.id,
+          from_account_id: message.from_account_id,
+          content: message.message_text,
+          created_at: message.last_updated || new Date().toISOString(),
+          is_read: message.is_read,
+        }))
+      : [];
+    return {
+      conversations,
+      total_unread: Number(result?.total_unread ?? 0),
+      active_chat_id: result?.active_chat_id ?? null,
+      active_messages: messages,
+    };
+  } catch {
+    return { conversations: [], total_unread: 0, active_chat_id: null, active_messages: [] };
   }
 }
 

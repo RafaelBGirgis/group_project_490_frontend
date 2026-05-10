@@ -134,6 +134,82 @@ export async function fetchCoachProfile() {
   return apiPost("/roles/coach/me", {});
 }
 
+/**
+ * One-shot dashboard payload — replaces the cluster of legacy
+ * `/me`, `/clients`, `/client_requests`, `/earnings`, `/review/<id>`,
+ * and per-row `/lookup_client/<id>` calls with a single round trip.
+ *
+ * The shape mirrors what `coach_dash.jsx` already expects after
+ * normalization, so the page can swap to this without rewriting its
+ * render path. Per-client `details` are inlined inside each clients[]
+ * and client_requests[] entry — no follow-up lookupClient required.
+ */
+export async function fetchCoachDashboardBundle() {
+  try {
+    const data = await apiGet("/roles/coach/dashboard_bundle");
+    if (!data || typeof data !== "object") return null;
+
+    const accepted = Array.isArray(data.clients) ? data.clients : [];
+    const requests = Array.isArray(data.client_requests) ? data.client_requests : [];
+
+    // Normalize accepted-client rows to the dashboard's renderer shape
+    // ({id, name, goal, status, relationship_id, details}). We don't go
+    // back to the network for any of these.
+    const acceptedNormalized = accepted.map((row) => ({
+      id: row.client_id,
+      request_id: row.request_id ?? null,
+      name: resolveClientName(row.details || row, row.client_id),
+      goal:
+        row.details?.fitness_goals?.[0]?.goal_enum ||
+        row.goal ||
+        "Active client",
+      status: "active",
+      joined: new Date().toLocaleDateString(),
+      relationship_id: row.relationship_id ?? null,
+      details: row.details || null,
+    }));
+
+    // Normalize pending requests too — same renderer.
+    const pendingNormalized = requests.map((req) => ({
+      id: req.client_id,
+      request_id: req.request_id ?? req.id ?? null,
+      name: resolveClientName(req, req.client_id),
+      goal: req.fitness_goals?.[0]?.goal_enum || "Pending request",
+      status: "pending",
+      joined: "",
+      relationship_id: null,
+      details: {
+        base_account: req.base_account || null,
+        fitness_goals: req.fitness_goals || [],
+      },
+    }));
+
+    return {
+      profile: data.profile || null,
+      stats: data.stats || null,
+      earnings: data.earnings || null,
+      reviews: Array.isArray(data.reviews) ? data.reviews : [],
+      // The dashboard expects two separate state slices; we hand them out
+      // pre-merged and indexed, so the page doesn't have to mergeClientsById.
+      clients: mergeClientsById(pendingNormalized, acceptedNormalized),
+      client_requests: requests,
+      // Map of clientId -> details so the in-page cache pre-populates with
+      // every detail the bundle already paid for, and follow-up clicks are
+      // free. Keys are stringified to match what coach_dash.jsx already does.
+      request_details_by_client_id: Object.fromEntries(
+        [...accepted, ...requests]
+          .filter((r) => r?.client_id)
+          .map((r) => [
+            r.client_id,
+            r.details || { base_account: r.base_account || null, fitness_goals: r.fitness_goals || [] },
+          ])
+      ),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function createCoachRequest(payload) {
   return apiPost("/roles/coach/request_coach_creation", payload);
 }

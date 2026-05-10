@@ -27,6 +27,7 @@ import {
   lookupClient,
   acceptClientRequest,
   denyClientRequest,
+  fetchCoachDashboardBundle,
 } from "../api/coach";
 import { getConversationWithAccount } from "../api/chat";
 import { getCoachAccessState, getImmediateCoachAccessState } from "../utils/roleAccess";
@@ -244,57 +245,80 @@ export default function CoachDashboard() {
     })();
   }, [authed, navigate]);
 
-  /*  load dashboard data  */
+  /*  load dashboard data
+   *
+   *  Single round-trip via /roles/coach/dashboard_bundle. The bundle inlines
+   *  every per-client detail the page used to chase via N × `lookupClient`,
+   *  so the loop that fanned out per-request detail lookups is gone — its
+   *  data is already in `bundle.request_details_by_client_id`.
+   *
+   *  Sessions / workout plans are still independent (they hit different
+   *  domains and aren't part of the dashboard's hot path right now); they
+   *  ride along as a small Promise.all next to the bundle so the page is
+   *  fully populated in one network turn.
+   */
   useEffect(() => {
     if (!coachId) return;
     (async () => {
       try {
-        const [profile, s, c, sess, rev, plans, earningsResponse] = await Promise.all([
-          fetchCoachProfile().catch(() => null),
-          fetchCoachStats(coachId).catch(() => null),
-          fetchMyClients(coachId).catch(() => []),
+        const [bundle, sess, plans] = await Promise.all([
+          fetchCoachDashboardBundle(),
           fetchUpcomingSessions(coachId).catch(() => []),
-          fetchCoachReviews(coachId).catch(() => []),
           fetchCoachWorkoutPlans(coachId).catch(() => []),
-          fetchCoachEarnings().catch(() => null),
         ]);
-        const requests = await fetchClientRequests().catch(() => []);
-        const detailedRequests = await Promise.all(
-          requests.map(async (request) => {
-            const detail = await cachedLookupClient(request.client_id);
-            const mergedDetail = mergeClientDetail(detail, request.detail || request);
-            return {
-              ...request,
-              detail: mergedDetail,
-              name: resolveClientName(mergedDetail, request.client_id),
-              age: mergedDetail?.base_account?.age ?? request.age,
-              gender: mergedDetail?.base_account?.gender || request.gender,
-              pfp_url: mergedDetail?.base_account?.pfp_url || request.pfp_url,
-              goal: mergedDetail?.fitness_goals?.[0]?.goal_enum || request.goal || "Pending request"
-            };
-          })
-        );
-        const requestDetailsByClientId = Object.fromEntries(
-          detailedRequests
-            .filter((request) => request?.client_id)
-            .map((request) => [request.client_id, request.detail || request.details || null])
-        );
 
-        setCoachProfile(profile);
-        setStats(s);
+        if (!bundle) {
+          setClientRequests([]);
+          return;
+        }
+
+        // Pre-warm the per-client cache from the bundle so the polling tick
+        // and on-row-click `loadClientRequestDetails` find every detail in
+        // memory instead of re-fetching.
+        Object.entries(bundle.request_details_by_client_id || {}).forEach(([clientId, detail]) => {
+          if (detail) {
+            clientDetailCache.current.set(Number(clientId), {
+              detail,
+              fetchedAt: Date.now(),
+              inflight: null,
+            });
+          }
+        });
+
+        setCoachProfile(bundle.profile);
+        setStats(bundle.stats);
+        setEarnings(bundle.earnings);
+        setReviews(bundle.reviews);
+        setSessions(sess);
+        setWorkoutPlans(plans);
         setClients((prev) =>
           hydrateClientRows(
-            c,
-            requestDetailsByClientId,
+            bundle.clients,
+            bundle.request_details_by_client_id,
             prev
           )
         );
-        setSessions(sess);
-        setReviews(rev);
-        setWorkoutPlans(plans);
-        setEarnings(earningsResponse);
+        // The bundle's `client_requests` array already carries each request's
+        // base_account + fitness_goals inline; reshape to the dashboard's
+        // expected detail-merged shape without going back to the network.
+        const detailedRequests = (bundle.client_requests || []).map((request) => {
+          const fallback = bundle.request_details_by_client_id?.[request.client_id] || null;
+          const mergedDetail = mergeClientDetail(fallback, request.detail || request);
+          return {
+            ...request,
+            detail: mergedDetail,
+            name: resolveClientName(mergedDetail, request.client_id),
+            age: mergedDetail?.base_account?.age ?? request.age,
+            gender: mergedDetail?.base_account?.gender || request.gender,
+            pfp_url: mergedDetail?.base_account?.pfp_url || request.pfp_url,
+            goal:
+              mergedDetail?.fitness_goals?.[0]?.goal_enum ||
+              request.goal ||
+              "Pending request",
+          };
+        });
         setClientRequests(detailedRequests);
-        setClientRequestDetails(requestDetailsByClientId);
+        setClientRequestDetails(bundle.request_details_by_client_id || {});
       } catch {
         setClientRequests([]);
       }
@@ -303,54 +327,59 @@ export default function CoachDashboard() {
 
   const refreshRelationshipData = useCallback(async () => {
     if (!coachId) return;
+    // The polling tick now refreshes via the same bundle endpoint as the
+    // initial load. The bundle inlines per-client detail, so the previous
+    // tick — which fired N+3 round trips per minute (clients, stats,
+    // requests, then N × lookupClient) — collapses to a single GET.
+    const bundle = await fetchCoachDashboardBundle();
+    if (!bundle) return;
 
-    const [clientsResponse, statsResponse, requests] = await Promise.all([
-      fetchMyClients(coachId).catch(() => []),
-      fetchCoachStats(coachId).catch(() => null),
-      fetchClientRequests().catch(() => []),
-    ]);
+    Object.entries(bundle.request_details_by_client_id || {}).forEach(([clientId, detail]) => {
+      if (detail) {
+        clientDetailCache.current.set(Number(clientId), {
+          detail,
+          fetchedAt: Date.now(),
+          inflight: null,
+        });
+      }
+    });
 
-    const detailedRequests = await Promise.all(
-      requests.map(async (request) => {
-        const detail = await cachedLookupClient(request.client_id);
-        const mergedDetail = mergeClientDetail(detail, request.detail || request);
-        return {
-          ...request,
-          detail: mergedDetail,
-          name: resolveClientName(mergedDetail, request.client_id),
-          age: mergedDetail?.base_account?.age ?? request.age,
-          gender: mergedDetail?.base_account?.gender || request.gender,
-          pfp_url: mergedDetail?.base_account?.pfp_url || request.pfp_url,
-          goal: mergedDetail?.fitness_goals?.[0]?.goal_enum || request.goal || "Pending request"
-        };
-      })
-    );
+    const detailedRequests = (bundle.client_requests || []).map((request) => {
+      const fallback = bundle.request_details_by_client_id?.[request.client_id] || null;
+      const mergedDetail = mergeClientDetail(fallback, request.detail || request);
+      return {
+        ...request,
+        detail: mergedDetail,
+        name: resolveClientName(mergedDetail, request.client_id),
+        age: mergedDetail?.base_account?.age ?? request.age,
+        gender: mergedDetail?.base_account?.gender || request.gender,
+        pfp_url: mergedDetail?.base_account?.pfp_url || request.pfp_url,
+        goal:
+          mergedDetail?.fitness_goals?.[0]?.goal_enum ||
+          request.goal ||
+          "Pending request",
+      };
+    });
 
     setClients((prev) =>
       hydrateClientRows(
-        clientsResponse,
+        bundle.clients,
         {
           ...clientRequestDetails,
-          ...Object.fromEntries(
-            detailedRequests
-              .filter((request) => request?.client_id)
-              .map((request) => [request.client_id, request.detail || request.details || null])
-          ),
+          ...(bundle.request_details_by_client_id || {}),
         },
         prev
       )
     );
-    setStats(statsResponse);
+    setStats(bundle.stats);
+    setEarnings(bundle.earnings);
+    setReviews(bundle.reviews);
     setClientRequests(detailedRequests);
     setClientRequestDetails((prev) => ({
       ...prev,
-      ...Object.fromEntries(
-        detailedRequests
-          .filter((request) => request?.client_id)
-          .map((request) => [request.client_id, request.detail || request.details || null])
-      ),
+      ...(bundle.request_details_by_client_id || {}),
     }));
-  }, [coachId]);
+  }, [coachId, clientRequestDetails]);
 
   useEffect(() => {
     if (!coachId) return undefined;

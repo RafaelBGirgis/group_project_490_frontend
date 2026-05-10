@@ -29,6 +29,7 @@ import {
   fetchCoachRating,
   fetchMealsToday,
   fetchMyCoachRequests,
+  fetchClientDashboardBundle,
   logMeal,
   deleteCoachRequest,
   terminateRelationship,
@@ -245,7 +246,14 @@ export default function ClientDash() {
     return { nextPending, nextApproved, myCoach: nextCoach };
   }, []);
 
-  /*  load account + client profile  */
+  /*  load account + client profile + bundled dashboard core
+   *
+   *  We still need /me as the auth check (it's the gatekeeper that bounces
+   *  to /login on 401), but the rest — client profile, calories_today,
+   *  latest steps/weight, my_coach (with rating inlined), and pending
+   *  coach requests — comes from one bundle call. That collapses what
+   *  used to be 7+ sequential/parallel fetches into 2 round trips.
+   */
   useEffect(() => {
     if (!authed) return;
 
@@ -261,10 +269,55 @@ export default function ClientDash() {
 
         if (me.client_id) {
           setClientId(me.client_id);
-          await refreshCoachRelationshipState();
-          try {
-            await fetchClientProfile();
-          } catch { /* profile fetch optional */ }
+
+          // Single round trip for the bulk of the dashboard data.
+          const bundle = await fetchClientDashboardBundle();
+          if (bundle) {
+            const tel = bundle.telemetry_today || {};
+            if (Number.isFinite(Number(tel.calories_burned))) {
+              setCaloriesBurned(Number(tel.calories_burned));
+            }
+            if (Number.isFinite(Number(tel.calories_consumed))) {
+              setCaloriesConsumed(Number(tel.calories_consumed));
+            }
+            if (Number.isFinite(Number(tel.calories_goal)) && Number(tel.calories_goal) > 0) {
+              setCaloriesGoal(Number(tel.calories_goal));
+            }
+            if (Number.isFinite(Number(tel.latest_step_count))) {
+              setStepCount(Number(tel.latest_step_count));
+            }
+
+            // Inline coach + rating land here — skips the chained
+            // fetchCoachRating(coach.coach_id) call on every load.
+            if (bundle.coach) {
+              setCoach(bundle.coach);
+              setRelationshipId(
+                bundle.coach.relationship_id != null ? Number(bundle.coach.relationship_id) : null
+              );
+              if (Number.isFinite(Number(bundle.coach.avg_rating))) {
+                setCoachRating({
+                  avg_rating: Number(bundle.coach.avg_rating),
+                  review_count: Number(bundle.coach.review_count) || 0,
+                  reviews: bundle.coach_reviews || [],
+                });
+              }
+            }
+            // Coach requests come pre-resolved into pending vs approved.
+            if (Array.isArray(bundle.coach_requests)) {
+              const approved = bundle.coach_requests.find(isApprovedCoachRequest) || null;
+              const pending = !approved
+                ? bundle.coach_requests.find(isPendingCoachRequest) || null
+                : null;
+              setApprovedCoachRequest(approved);
+              setPendingCoachRequest(pending);
+              shouldPollRef.current = !!(bundle.coach || pending);
+            }
+          } else {
+            // Bundle endpoint unavailable — fall back to the legacy chain so
+            // the page still works against older backends mid-deploy.
+            await refreshCoachRelationshipState();
+            try { await fetchClientProfile(); } catch { /* optional */ }
+          }
         } else {
           await refreshCoachRelationshipState();
         }
@@ -315,28 +368,13 @@ export default function ClientDash() {
       })();
 
       try {
-        const [telemetry, calories, meals] =
-          await Promise.all([
-            fetchTelemetryToday(clientId).catch(() => ({ step_count: 0 })),
-            fetchCaloriesToday().catch(() => ({})),
-            fetchMealsToday(clientId, { onDate: todayIso }).catch(() => []),
-          ]);
-
-        setStepCount(telemetry.step_count);
-        // Calories come from the dedicated /calories_today route, which sums
-        // the right columns (CompletedWorkoutActivity.estimated_calories for
-        // burned; MealIngredient.calories via CompletedMealActivity for
-        // consumed) and is scoped to today.
-        if (Number.isFinite(calories.calories_burned)) {
-          setCaloriesBurned(calories.calories_burned);
-        }
-        if (Number.isFinite(calories.calories_consumed)) {
-          setCaloriesConsumed(calories.calories_consumed);
-        }
-        if (Number.isFinite(calories.calories_goal) && calories.calories_goal > 0) {
-          setCaloriesGoal(calories.calories_goal);
-        }
-
+        // Calories + step count + weight already populated by the bundle in
+        // the auth-guard effect above; this secondary effect only fetches
+        // what the bundle doesn't (meals are date-scoped and big enough that
+        // we keep them on their own paginated endpoint). If you ever
+        // re-introduce per-day refresh of telemetry, route it through the
+        // bundle endpoint too rather than re-adding fetchCaloriesToday here.
+        const meals = await fetchMealsToday(clientId, { onDate: todayIso }).catch(() => []);
         setPrescribedMeals(meals);
       } catch {
         // Leave the last known dashboard state in place if the refresh fails.
@@ -347,11 +385,24 @@ export default function ClientDash() {
     refreshSurveyStatus,
   ]);
 
-  /*  load coach rating when coach is known  */
+  /*  load coach rating when coach is known
+   *
+   *  The dashboard_bundle inlines avg_rating + review_count on the coach
+   *  payload, so on initial load we already have it. This effect now only
+   *  fires as a refresh when `coach` changes (re-acceptance, etc) and the
+   *  bundle's inlined rating is missing — saves a round trip on first
+   *  paint without losing the post-state-change refresh path.
+   */
   useEffect(() => {
     if (!coach?.coach_id) return;
+    if (
+      coachRating?.avg_rating != null &&
+      coachRating?.review_count != null
+    ) {
+      return;
+    }
     fetchCoachRating(coach.coach_id).then(setCoachRating);
-  }, [coach]);
+  }, [coach, coachRating]);
 
   /*  load scheduled plans when day changes  */
   const loadPlansForDay = useCallback(async () => {

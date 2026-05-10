@@ -116,11 +116,18 @@ export default function ChatPage() {
     };
 
     loadMessages({ initial: true });
-    const intervalId = window.setInterval(loadMessages, 4000);
+    // 4s was burning bandwidth on idle chats. Slow the background refresh to
+    // 10s and force-poll on focus so messages land within a second of the
+    // user actually returning to the tab — the 4s-felt-instant illusion was
+    // costing us 9 wasted fetches per minute per open chat.
+    const intervalId = window.setInterval(loadMessages, 10000);
+    const onFocus = () => loadMessages();
+    window.addEventListener("focus", onFocus);
 
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
+      window.removeEventListener("focus", onFocus);
     };
   }, [activeChat?.id]);
 

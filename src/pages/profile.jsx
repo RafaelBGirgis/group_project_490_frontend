@@ -1231,7 +1231,7 @@ function ProfilePage({ role = "client" }) {
               <>
                 <SidebarCard title="Account Actions">
                   <div className="space-y-3">
-                    {!hasCoachStatus && (
+                    {canSwitchToCoach && !hasCoachStatus && (
                       <button
                         onClick={() => navigate("/coach-request")}
                         className="w-full rounded-xl px-4 py-3 text-sm font-semibold text-white"

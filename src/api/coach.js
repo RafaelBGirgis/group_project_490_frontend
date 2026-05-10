@@ -134,6 +134,82 @@ export async function fetchCoachProfile() {
   return apiPost("/roles/coach/me", {});
 }
 
+/**
+ * One-shot dashboard payload — replaces the cluster of legacy
+ * `/me`, `/clients`, `/client_requests`, `/earnings`, `/review/<id>`,
+ * and per-row `/lookup_client/<id>` calls with a single round trip.
+ *
+ * The shape mirrors what `coach_dash.jsx` already expects after
+ * normalization, so the page can swap to this without rewriting its
+ * render path. Per-client `details` are inlined inside each clients[]
+ * and client_requests[] entry — no follow-up lookupClient required.
+ */
+export async function fetchCoachDashboardBundle() {
+  try {
+    const data = await apiGet("/roles/coach/dashboard_bundle");
+    if (!data || typeof data !== "object") return null;
+
+    const accepted = Array.isArray(data.clients) ? data.clients : [];
+    const requests = Array.isArray(data.client_requests) ? data.client_requests : [];
+
+    // Normalize accepted-client rows to the dashboard's renderer shape
+    // ({id, name, goal, status, relationship_id, details}). We don't go
+    // back to the network for any of these.
+    const acceptedNormalized = accepted.map((row) => ({
+      id: row.client_id,
+      request_id: row.request_id ?? null,
+      name: resolveClientName(row.details || row, row.client_id),
+      goal:
+        row.details?.fitness_goals?.[0]?.goal_enum ||
+        row.goal ||
+        "Active client",
+      status: "active",
+      joined: new Date().toLocaleDateString(),
+      relationship_id: row.relationship_id ?? null,
+      details: row.details || null,
+    }));
+
+    // Normalize pending requests too — same renderer.
+    const pendingNormalized = requests.map((req) => ({
+      id: req.client_id,
+      request_id: req.request_id ?? req.id ?? null,
+      name: resolveClientName(req, req.client_id),
+      goal: req.fitness_goals?.[0]?.goal_enum || "Pending request",
+      status: "pending",
+      joined: "",
+      relationship_id: null,
+      details: {
+        base_account: req.base_account || null,
+        fitness_goals: req.fitness_goals || [],
+      },
+    }));
+
+    return {
+      profile: data.profile || null,
+      stats: data.stats || null,
+      earnings: data.earnings || null,
+      reviews: Array.isArray(data.reviews) ? data.reviews : [],
+      // The dashboard expects two separate state slices; we hand them out
+      // pre-merged and indexed, so the page doesn't have to mergeClientsById.
+      clients: mergeClientsById(pendingNormalized, acceptedNormalized),
+      client_requests: requests,
+      // Map of clientId -> details so the in-page cache pre-populates with
+      // every detail the bundle already paid for, and follow-up clicks are
+      // free. Keys are stringified to match what coach_dash.jsx already does.
+      request_details_by_client_id: Object.fromEntries(
+        [...accepted, ...requests]
+          .filter((r) => r?.client_id)
+          .map((r) => [
+            r.client_id,
+            r.details || { base_account: r.base_account || null, fitness_goals: r.fitness_goals || [] },
+          ])
+      ),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function createCoachRequest(payload) {
   return apiPost("/roles/coach/request_coach_creation", payload);
 }
@@ -388,7 +464,7 @@ export async function fetchCoachReviews(coachId) {
   }
 }
 
-export async function fetchCoachWorkoutPlans(coachId) {
+export async function fetchCoachWorkoutPlans(_coachId) {
   // TODO: Implement API endpoint to fetch coach workout plans
   // For now, returning empty array as we migrate away from localStorage caching
   return [];
@@ -606,7 +682,10 @@ function mapCertificationToBackend(certification) {
 }
 
 function mapExperienceToBackend(experience) {
-  const { start, end } = parseExperienceDates(experience.year || experience.experience_start);
+  const { start, end } = parseExperienceDates(
+    experience.startDate || experience.experience_start || experience.year,
+    experience.endDate || experience.experience_end,
+  );
   return {
     experience_name: experience.organization || experience.experience_name || "Organization",
     experience_title: experience.title || experience.experience_title || "Experience",
@@ -616,25 +695,23 @@ function mapExperienceToBackend(experience) {
   };
 }
 
-function parseExperienceDates(value) {
-  const text = String(value || "").trim();
-  const years = [...text.matchAll(/\d{4}/g)].map((match) => match[0]);
-  if (years.length >= 2) {
-    return {
-      start: `${years[0]}-01-01`,
-      end: `${years[1]}-12-31`,
-    };
-  }
-  if (years.length === 1) {
-    return {
-      start: `${years[0]}-01-01`,
-      end: `${years[0]}-12-31`,
-    };
-  }
-  const today = new Date().getFullYear();
+function parseExperienceDates(startValue, endValue) {
+  const toDateString = (value, fallbackSide) => {
+    const text = String(value || "").trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+    if (/^\d{4}$/.test(text)) {
+      return fallbackSide === "end" ? `${text}-12-31` : `${text}-01-01`;
+    }
+    return "";
+  };
+
+  const start = toDateString(startValue, "start");
+  const end = toDateString(endValue, "end") || start;
+  const currentYear = new Date().getFullYear();
+
   return {
-    start: `${today}-01-01`,
-    end: `${today}-12-31`,
+    start: start || `${currentYear}-01-01`,
+    end: end || `${currentYear}-12-31`,
   };
 }
 

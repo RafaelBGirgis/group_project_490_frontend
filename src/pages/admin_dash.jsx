@@ -988,17 +988,20 @@ export default function AdminDash() {
           ═══════════════════════════════════════════════════════════════ */}
 
       <Overlay open={overlay === "requests"} onClose={closeOverlay} title="Role Promotion Requests" wide>
-        {/* onView routes the admin to the same public coach profile page
-            clients see when browsing for a coach. Reuses normalizeStored
-            CoachProfile, the certifications/experiences UI, the bio, etc.
-            — no separate admin-only render path. */}
+        {/* onView routes the admin to the same coach public profile page
+            clients see, reusing the certifications/experiences UI, bio,
+            etc. — no separate admin-only render path. The `?from=admin`
+            flag is REQUIRED: the public branch sources its data from
+            /query/hirable_coaches which only returns verified coaches,
+            so a pending applicant would 404 there. With from=admin the
+            page falls through to the admin coach-requests feed instead. */}
         <RoleRequestsDetail
           requests={roleRequests}
           onApprove={handleApprove}
           onReject={handleReject}
           onView={(req) => {
             if (req?.coach_id != null) {
-              navigate(`/coaches/${req.coach_id}`);
+              navigate(`/coaches/${req.coach_id}?from=admin`);
               closeOverlay();
             }
           }}

@@ -33,6 +33,29 @@ export async function fetchClientProfile() {
   return apiPost("/roles/client/me", {});
 }
 
+/**
+ * Single-call dashboard payload for the client dashboard.
+ *
+ * Replaces the cluster of (`/me` + `/roles/client/me` + `/calories_today`
+ * + `/query/steps` + `/query/workouts` + `/query/weights` + `/my_coach`
+ * + `/my_coach_requests` + `/review/<coach>`) with one round trip. The
+ * server inlines the coach's avg_rating + review_count alongside `coach`
+ * so we don't need a follow-up `fetchCoachRating(coach.coach_id)` once
+ * the coach is known.
+ *
+ * Returns null on failure so the page can fall back to its individual
+ * fetches if the bundle endpoint is unavailable (e.g. older backend).
+ */
+export async function fetchClientDashboardBundle() {
+  try {
+    const data = await apiGet("/roles/client/dashboard_bundle");
+    if (!data || typeof data !== "object") return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchUnifiedProfile() {
   try {
     const result = await apiGet("/roles/shared/account/me");

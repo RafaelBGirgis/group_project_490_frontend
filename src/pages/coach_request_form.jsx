@@ -45,7 +45,8 @@ function CoachRequestFormPage() {
   const [newExperience, setNewExperience] = useState({
     title: "",
     organization: "",
-    year: "",
+    startDate: "",
+    endDate: "",
     description: "",
   });
   const [editingCertification, setEditingCertification] = useState(null);
@@ -101,7 +102,8 @@ function CoachRequestFormPage() {
                 id: exp.id || `exp-${index}`,
                 title: exp.experience_title || "",
                 organization: exp.experience_name || "",
-                year: exp.experience_start || "",
+                startDate: exp.experience_start || "",
+                endDate: exp.experience_end || "",
                 description: exp.experience_description || "",
               }))
             : prev.experiences,
@@ -121,7 +123,7 @@ function CoachRequestFormPage() {
     };
 
     loadNameFromSession();
-  }, [navigate]);
+  }, [navigate, isEditMode, isViewMode]);
 
   const toggleSpecialization = (item) => {
     if (isViewMode) return;
@@ -160,11 +162,11 @@ function CoachRequestFormPage() {
       setError("Enter a desired rate greater than $0.");
       return;
     }
-    // Realistic bounds: $5 floor (under that and the platform can't make
-    // money on the cut), $1000 ceiling (above is almost certainly a typo —
-    // the highest legit personal-trainer rates top out around $300/mo).
-    if (priceNum < 5 || priceNum > 1000) {
-      setError("Desired rate must be between $5 and $1000.");
+    const maxPriceDollars = form.paymentInterval === "yearly" ? 6000 : 500;
+    // Realistic bounds: $5 floor and a $500/mo ceiling for monthly plans.
+    // Yearly plans use the same monthly-equivalent ceiling scaled by 12.
+    if (priceNum < 5 || priceNum > maxPriceDollars) {
+      setError(`Desired rate must be between $5 and $${maxPriceDollars}.`);
       return;
     }
     if (!form.paymentInterval) {
@@ -186,8 +188,19 @@ function CoachRequestFormPage() {
       setError(`Certification years must be between 1900 and ${currentYear}.`);
       return;
     }
-    if (form.experiences.some((e) => badYear(e.year))) {
-      setError(`Experience years must be between 1900 and ${currentYear}.`);
+    const badExperienceDate = (exp) => {
+      if (!exp?.startDate || !exp?.endDate) return true;
+      const start = new Date(exp.startDate);
+      if (Number.isNaN(start.getTime())) return true;
+      const end = new Date(exp.endDate);
+      if (Number.isNaN(end.getTime())) return true;
+      const startYear = start.getFullYear();
+      if (startYear < 1900 || startYear > currentYear) return true;
+      if (end < start) return true;
+      return false;
+    };
+    if (form.experiences.some(badExperienceDate)) {
+      setError("Each experience needs a valid start date, end date, and the end date must be on or after the start.");
       return;
     }
 
@@ -246,18 +259,31 @@ function CoachRequestFormPage() {
 
   const addExperience = () => {
     if (isViewMode) return;
-    if (!newExperience.title || !newExperience.organization || !newExperience.year) return;
+    if (!newExperience.title || !newExperience.organization || !newExperience.startDate || !newExperience.endDate) return;
 
-    const yearNum = Number(newExperience.year);
     const currentYear = new Date().getFullYear();
-    if (!Number.isFinite(yearNum) || yearNum < 1900 || yearNum > currentYear) {
-      setError(`Experience year must be between 1900 and ${currentYear}.`);
+    const start = new Date(newExperience.startDate);
+    if (Number.isNaN(start.getTime())) {
+      setError("Start date is required.");
+      return;
+    }
+    const end = new Date(newExperience.endDate);
+    if (Number.isNaN(end.getTime())) {
+      setError("End date is required.");
+      return;
+    }
+    const startYear = start.getFullYear();
+    if (startYear < 1900 || startYear > currentYear) {
+      setError(`Start date year must be between 1900 and ${currentYear}.`);
+      return;
+    }
+    if (end < start) {
+      setError("End date must be on or after the start date.");
       return;
     }
     setError("");
 
     if (editingExperience) {
-      // Update existing experience
       setForm((prev) => ({
         ...prev,
         experiences: prev.experiences.map((exp) =>
@@ -266,14 +292,13 @@ function CoachRequestFormPage() {
       }));
       setEditingExperience(null);
     } else {
-      // Add new experience
       setForm((prev) => ({
         ...prev,
         experiences: [...prev.experiences, { id: Date.now(), ...newExperience }],
       }));
     }
-    
-    setNewExperience({ title: "", organization: "", year: "", description: "" });
+
+    setNewExperience({ title: "", organization: "", startDate: "", endDate: "", description: "" });
     setShowExpForm(false);
   };
 
@@ -301,7 +326,8 @@ function CoachRequestFormPage() {
     setNewExperience({
       title: exp.title,
       organization: exp.organization,
-      year: exp.year,
+      startDate: exp.startDate || exp.experience_start || "",
+      endDate: exp.endDate || exp.experience_end || "",
       description: exp.description || "",
     });
     setShowExpForm(true);
@@ -543,7 +569,10 @@ function CoachRequestFormPage() {
                         <div className="flex-1">
                           <h3 className="text-sm font-semibold text-white">{item.title}</h3>
                           <p className="mt-1 text-xs text-amber-300">{item.organization}</p>
-                          <p className="mt-1 text-[11px] text-slate-500">{item.year}</p>
+                          <p className="mt-1 text-[11px] text-slate-500">
+                            {item.startDate || item.experience_start || item.year}
+                            {item.endDate || item.experience_end ? ` → ${item.endDate || item.experience_end}` : ""}
+                          </p>
                           {item.description && (
                             <p className="mt-2 text-xs text-slate-300">{item.description}</p>
                           )}
@@ -584,7 +613,7 @@ function CoachRequestFormPage() {
 
               {!isViewMode && showExpForm && (
                 <div className="rounded-xl border border-white/6 bg-[#101827] p-4 space-y-3">
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
                     <input
                       value={newExperience.title}
                       onChange={(e) =>
@@ -602,15 +631,21 @@ function CoachRequestFormPage() {
                       className="rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500"
                     />
                     <input
-                      type="number"
-                      min="1900"
-                      max={new Date().getFullYear()}
-                      step="1"
-                      value={newExperience.year}
+                      type="date"
+                      value={newExperience.startDate}
                       onChange={(e) =>
-                        setNewExperience((prev) => ({ ...prev, year: e.target.value }))
+                        setNewExperience((prev) => ({ ...prev, startDate: e.target.value }))
                       }
-                      placeholder={`Year (1900–${new Date().getFullYear()})`}
+                      placeholder="Start date"
+                      className="rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500"
+                    />
+                    <input
+                      type="date"
+                      value={newExperience.endDate}
+                      onChange={(e) =>
+                        setNewExperience((prev) => ({ ...prev, endDate: e.target.value }))
+                      }
+                      placeholder="End date"
                       className="rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500"
                     />
                   </div>
@@ -629,7 +664,7 @@ function CoachRequestFormPage() {
                       onClick={() => {
                         setShowExpForm(false);
                         setEditingExperience(null);
-                        setNewExperience({ title: "", organization: "", year: "", description: "" });
+                        setNewExperience({ title: "", organization: "", startDate: "", endDate: "", description: "" });
                       }}
                       className="rounded-lg border border-white/10 bg-[rgba(255,255,255,0.03)] px-3 py-2 text-xs font-medium text-slate-300"
                     >
@@ -660,12 +695,12 @@ function CoachRequestFormPage() {
                       inputMode="decimal"
                       step="0.01"
                       min="5"
-                      max="1000"
+                      max={form.paymentInterval === "yearly" ? "6000" : "500"}
                       value={form.priceDollars}
                       onChange={(e) =>
                         setForm((prev) => ({ ...prev, priceDollars: e.target.value }))
                       }
-                      placeholder="50 (range: $5–$1000)"
+                      placeholder={form.paymentInterval === "yearly" ? "50 (range: $5–$6000)" : "50 (range: $5–$500)"}
                       disabled={isViewMode}
                       className="w-full bg-transparent px-2 py-3 text-sm text-white outline-none placeholder:text-slate-500 disabled:cursor-not-allowed"
                       required
@@ -698,7 +733,7 @@ function CoachRequestFormPage() {
               <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
                 Why Do You Want To Be A Coach?
               </label>
-                <textarea
+              <textarea
                 value={form.reason}
                 onChange={(e) => setForm((prev) => ({ ...prev, reason: e.target.value }))}
                 rows={4}

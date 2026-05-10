@@ -192,10 +192,16 @@ export default function MessagesPage() {
     };
 
     loadMessages({ initial: true });
-    const intervalId = window.setInterval(loadMessages, 4000);
+    // Slowed from 4s → 10s; we re-poll on focus so a returning user still
+    // sees fresh messages immediately. The 4s cadence was hammering the
+    // backend even when the tab was idle in the background.
+    const intervalId = window.setInterval(loadMessages, 10000);
+    const onFocus = () => loadMessages();
+    window.addEventListener("focus", onFocus);
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
+      window.removeEventListener("focus", onFocus);
     };
   }, [activeChat?.id]);
 
@@ -250,7 +256,10 @@ export default function MessagesPage() {
         setBlockStatus({ i_blocked_them: !!s.i_blocked_them, they_blocked_me: !!s.they_blocked_me });
     };
     refresh();
-    const intervalId = window.setInterval(refresh, 5000);
+    // Block status changes are rare (user has to explicitly tap a button).
+    // 5s polling was excessive — block UI just needs to be eventually
+    // consistent, so 30s cuts 83% of round trips.
+    const intervalId = window.setInterval(refresh, 30000);
     return () => { cancelled = true; window.clearInterval(intervalId); };
   }, [activeChat?.partner_account_id]);
 

@@ -15,6 +15,7 @@ import {
   terminateRelationship,
 } from "../api/client";
 import { fetchCoachAvailabilityWindows, fetchCoachProfile } from "../api/coach";
+import { fetchCoachRequests as fetchAdminCoachRequests } from "../api/admin";
 import AvailabilityCalendar from "../components/availability/AvailabilityCalendar";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
@@ -183,6 +184,62 @@ function mergeCoachWithStoredProfile(coach) {
   };
 }
 
+/**
+ * Map the admin /query/coach_requests PotentialCoachItem shape into the same
+ * shape the public-profile page renders. Coach is unverified by definition
+ * (they're applying), so verified=false and we leave rating/review counts at 0.
+ */
+function normalizeAdminCoachItem(item) {
+  const baseAccount = item?.base_account || {};
+  const certifications = Array.isArray(item?.certifications)
+    ? item.certifications.map((c) => ({
+        name: c.certification_name || "Certification",
+        organization: c.certification_organization || "Organization",
+        year: c.certification_date || "",
+        description: c.certification_score || "",
+      }))
+    : [];
+  const experiences = Array.isArray(item?.experiences)
+    ? item.experiences.map((e) => ({
+        title: e.experience_title || "Experience",
+        organization: e.experience_name || "",
+        year: e.experience_start || "",
+        description: e.experience_description || "",
+      }))
+    : [];
+  const specialties = Array.isArray(item?.specialties)
+    ? item.specialties
+    : String(item?.specialties || baseAccount.specialties || "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+  return {
+    coach_id: item?.coach_id ?? null,
+    name: baseAccount.name || "Coach Applicant",
+    email: baseAccount.email || "",
+    age: baseAccount.age ?? null,
+    gender: baseAccount.gender || "",
+    bio: baseAccount.bio || "",
+    pfp_url: baseAccount.pfp_url || "",
+    specialties,
+    certifications,
+    experiences,
+    pricingInterval: item?.payment_interval || item?.pricing?.payment_interval || "",
+    amount:
+      item?.amount != null
+        ? String(item.amount)
+        : item?.price_cents != null
+          ? String(Number(item.price_cents) / 100)
+          : item?.pricing?.price_cents != null
+            ? String(Number(item.pricing.price_cents) / 100)
+            : "",
+    verified: false,
+    rating_avg: 0,
+    review_count: 0,
+  };
+}
+
 function formatPaymentPlan(coach) {
   const amount = String(coach?.amount || "").trim();
   const interval = String(coach?.pricingInterval || "").trim().toLowerCase();
@@ -201,6 +258,12 @@ export default function CoachPublicProfilePage() {
   const { coachId: coachIdParam } = useParams();
   const [searchParams] = useSearchParams();
   const previewMode = searchParams.get("preview") === "1";
+  const fromParam = searchParams.get("from") || "";
+  // adminMode = an admin reviewing an incoming coach role-promotion request.
+  // The coach is unverified, so fetchAvailableCoaches won't return them; we
+  // fall back to fetchCoachRequests (admin-only) to source their profile data.
+  const adminMode = fromParam === "admin";
+  const fromDashboard = fromParam === "dashboard";
   const coachId = Number(coachIdParam);
 
   const [account, setAccount] = useState(null);
@@ -248,6 +311,18 @@ export default function CoachPublicProfilePage() {
         if (previewMode && Number(me?.coach_id) === coachId) {
           const coachProfile = await fetchCoachProfile().catch(() => null);
           setCoach(normalizeStoredCoachProfile(me, coachProfile));
+        } else if (adminMode) {
+          // Pending coach applicants are unverified, so they don't appear in
+          // /query/hirable_coaches. Pull them from the admin coach-requests
+          // feed instead, then map the PotentialCoachItem shape into the
+          // shape the rest of this page expects.
+          const adminRequests = await fetchAdminCoachRequests({ limit: 1000 }).catch(() => []);
+          const matched = adminRequests.find((item) => Number(item.coach_id) === coachId);
+          if (matched) {
+            setCoach(normalizeAdminCoachItem(matched));
+          } else {
+            setActionError("Unable to load this coach profile.");
+          }
         } else {
           const availableCoaches = await fetchAvailableCoaches({ limit: 1000 }).catch(() => []);
           const matchedCoach = availableCoaches.find((item) => Number(item.coach_id) === coachId);
@@ -274,7 +349,7 @@ export default function CoachPublicProfilePage() {
     };
 
     loadPage();
-  }, [coachId, navigate, previewMode]);
+  }, [coachId, navigate, previewMode, adminMode]);
 
   useEffect(() => {
     if (!coachId || !availabilityRange.from || !availabilityRange.to) return;
@@ -410,7 +485,16 @@ export default function CoachPublicProfilePage() {
         </button>
       );
     }
-    const fromDashboard = searchParams.get("from") === "dashboard";
+    if (adminMode) {
+      return (
+        <button
+          onClick={() => navigate("/admin")}
+          className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-300"
+        >
+          Back to Dashboard
+        </button>
+      );
+    }
     return (
       <button
         onClick={() => navigate(fromDashboard ? "/client" : "/find-coach")}
@@ -424,7 +508,7 @@ export default function CoachPublicProfilePage() {
   if (loading) {
     return (
       <div className="min-h-screen bg-[#080D19]">
-        <Navbar role={previewMode ? "coach" : "client"} userName={userInitials} canSwitchToCoach={canSwitchToCoach} />
+        <Navbar role={adminMode ? "admin" : previewMode ? "coach" : "client"} userName={userInitials} canSwitchToCoach={canSwitchToCoach} />
         <div className="mx-auto max-w-6xl px-6 py-6">
           <div className="h-16 rounded-2xl bg-white/5 animate-pulse" />
         </div>
@@ -437,14 +521,23 @@ export default function CoachPublicProfilePage() {
 
   return (
     <div className="min-h-screen bg-[#080D19]">
-      <Navbar role={previewMode ? "coach" : "client"} userName={userInitials} canSwitchToCoach={canSwitchToCoach} />
+      <Navbar role={adminMode ? "admin" : previewMode ? "coach" : "client"} userName={userInitials} canSwitchToCoach={canSwitchToCoach} />
 
       <div className="mx-auto max-w-6xl px-6 py-6 space-y-6">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-white">
-              {previewMode ? "Public Coach Profile Preview" : "Coach Profile"}
+              {previewMode
+                ? "Public Coach Profile Preview"
+                : adminMode
+                  ? "Coach Application Review"
+                  : "Coach Profile"}
             </h1>
+            {adminMode && (
+              <p className="text-xs text-red-300 mt-1">
+                Pending coach role-promotion request — verify experience, certifications, and pricing before approving.
+              </p>
+            )}
           </div>
           {renderBackButton()}
         </div>
@@ -526,7 +619,7 @@ export default function CoachPublicProfilePage() {
               </div>
             </section>
 
-            {!previewMode && (
+            {!previewMode && !adminMode && (
               <section className="rounded-2xl border border-white/8 bg-[#0F1729] p-5">
                 <div className="flex items-center justify-between gap-4">
                   <div>

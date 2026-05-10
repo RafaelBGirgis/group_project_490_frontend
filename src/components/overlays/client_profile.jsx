@@ -13,7 +13,10 @@ import {
   fetchClientBusySlotsByCoach,
   createClientReview,
 } from "../../api/coach";
+import { getClientScheduledPlansAsCoach, searchWorkoutPlans } from "../../api/plan_my_week";
+import { fetchClientWorkoutHistoryEnrichedByCoach } from "../../api/coach";
 import AvailabilityCalendar from "../availability/AvailabilityCalendar";
+import WorkoutJournal from "../workout_journal";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const TODAY_IDX = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
@@ -190,6 +193,36 @@ export default function ClientProfile({ clientId, detail }) {
     setMealsMore(more.length === PAGE_SIZE);
     setMealsSkip((s) => s + PAGE_SIZE);
   };
+
+  const journalFetchDayData = useCallback(async (isoDate) => {
+    const [y, mo, d] = isoDate.split("-").map(Number);
+    const from_dt = new Date(y, mo - 1, d, 0, 0, 0).toISOString();
+    const to_dt = new Date(y, mo - 1, d, 23, 59, 59).toISOString();
+
+    const [cwps, allPlans, allLogs] = await Promise.all([
+      getClientScheduledPlansAsCoach(clientId, { from_dt, to_dt }).catch(() => []),
+      searchWorkoutPlans({ limit: 200 }).catch(() => []),
+      fetchClientWorkoutHistoryEnrichedByCoach(clientId, { limit: 200, skip: 0 }).catch(() => []),
+    ]);
+
+    const lookup = {};
+    allPlans.forEach((p) => { lookup[p.id] = p; });
+
+    const logs = allLogs.filter((l) => {
+      const ts = l.last_updated || l.created_at;
+      if (!ts) return false;
+      try { return new Date(ts).toISOString().slice(0, 10) === isoDate; } catch { return false; }
+    });
+
+    const filtered = cwps.filter((cwp) =>
+      (cwp.occurrences ?? []).some((occ) => {
+        const s = new Date(occ.start_dt);
+        return `${s.getFullYear()}-${String(s.getMonth() + 1).padStart(2, "0")}-${String(s.getDate()).padStart(2, "0")}` === isoDate;
+      })
+    );
+
+    return { cwps: filtered, planLookup: lookup, logs };
+  }, [clientId]);
 
   const name         = detail?.base_account?.name || "—";
   const age          = detail?.base_account?.age || "—";
@@ -394,6 +427,12 @@ export default function ClientProfile({ clientId, detail }) {
             ))
           )}
         </div>
+      </div>
+
+      {/* ── Workout Journal ───────────────────────────────────────────────── */}
+      <div className="rounded-2xl border border-white/6 bg-[#0B1120] p-4">
+        <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-3">Workout Journal</p>
+        <WorkoutJournal fetchDayData={journalFetchDayData} accent="#F59E0B" />
       </div>
 
       {/* ── Client Availability ───────────────────────────────────────────── */}

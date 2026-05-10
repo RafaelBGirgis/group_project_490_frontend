@@ -17,10 +17,6 @@ import {
   fetchAllUsers,
   updateUserStatus,
   deleteUser,
-  fetchExerciseBank,
-  createExercise,
-  updateExercise,
-  deleteExercise,
   fetchAnalytics,
   fetchCoachRequests,
   fetchReports,
@@ -29,12 +25,10 @@ import {
 } from "../api/admin";
 import RoleRequestsDetail from "../components/overlays/role_requests_detail";
 import ReportsDetail from "../components/overlays/reports_detail";
+import ManageFitness from "../components/admin/manage_fitness";
 
 const role = "admin";
-const MUSCLE_GROUPS = ["Chest", "Back", "Shoulders", "Legs", "Arms", "Core", "Cardio"];
-const EQUIPMENT = ["Barbell", "Dumbbell", "Cable", "Machine", "Bodyweight"];
 const USERS_PER_PAGE = 10;
-const EXERCISES_PER_PAGE = 10;
 
 /* ═══════════════════════════════════════════════════════════════════════
    ANIMATED COUNTER — numbers count up on mount
@@ -262,7 +256,6 @@ export default function AdminDash() {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
   const [users, setUsers] = useState([]);
-  const [exercises, setExercises] = useState([]);
   const [analytics, setAnalytics] = useState(null);
   const [roleRequests, setRoleRequests] = useState([]);
   const [reports, setReports] = useState([]);
@@ -276,13 +269,6 @@ export default function AdminDash() {
   const [userRoleFilter, setUserRoleFilter] = useState("all");
   const [userStatusFilter, setUserStatusFilter] = useState("all");
   const [userPage, setUserPage] = useState(1);
-
-  /*  exercise bank state  */
-  const [exSearch, setExSearch] = useState("");
-  const [exGroupFilter, setExGroupFilter] = useState("All");
-  const [exPage, setExPage] = useState(1);
-  const [editingExercise, setEditingExercise] = useState(null);
-  const [newExercise, setNewExercise] = useState(null);
 
   /*  analytics state  */
   const [analyticsPeriod, setAnalyticsPeriod] = useState("daily");
@@ -331,14 +317,10 @@ export default function AdminDash() {
           fetchAnalytics().catch(() => ({ daily: [], weekly: [], monthly: [] })),
           fetchCoachRequests().catch(() => []),
         ]);
-        const [exerciseResponse, reportsResponse] = await Promise.all([
-          fetchExerciseBank().catch(() => []),
-          fetchReports().catch(() => []),
-        ]);
+        const reportsResponse = await fetchReports().catch(() => []);
 
         setStats(s);
         setUsers(u);
-        setExercises(exerciseResponse);
         setAnalytics(an);
         setRoleRequests(requests);
         setReports(reportsResponse);
@@ -425,23 +407,6 @@ export default function AdminDash() {
     }
   };
 
-  const handleSaveExercise = async (exercise) => {
-    if (exercise.id) {
-      await updateExercise(exercise.id, exercise);
-      setExercises((prev) => prev.map((e) => e.id === exercise.id ? { ...e, ...exercise } : e));
-    } else {
-      const result = await createExercise(exercise);
-      setExercises((prev) => [...prev, { ...exercise, id: result.id || Date.now(), created_by: "Admin" }]);
-    }
-    setEditingExercise(null);
-    setNewExercise(null);
-  };
-
-  const handleDeleteExercise = async (exerciseId) => {
-    await deleteExercise(exerciseId);
-    setExercises((prev) => prev.filter((e) => e.id !== exerciseId));
-  };
-
   /*  computed  */
   const pendingRequests = roleRequests.filter((r) => r.is_approved === null);
 
@@ -459,18 +424,6 @@ export default function AdminDash() {
 
   const totalUserPages = Math.max(1, Math.ceil(filteredUsers.length / USERS_PER_PAGE));
   const paginatedUsers = filteredUsers.slice((userPage - 1) * USERS_PER_PAGE, userPage * USERS_PER_PAGE);
-
-  const filteredExercises = useMemo(() => {
-    return exercises.filter((e) => {
-      if (exSearch && !e.name.toLowerCase().includes(exSearch.toLowerCase())) return false;
-      if (exGroupFilter !== "All" && e.muscle_group !== exGroupFilter) return false;
-      return true;
-    });
-  }, [exercises, exSearch, exGroupFilter]);
-
-  useEffect(() => { setExPage(1); }, [exSearch, exGroupFilter]);
-  const totalExPages = Math.max(1, Math.ceil(filteredExercises.length / EXERCISES_PER_PAGE));
-  const paginatedExercises = filteredExercises.slice((exPage - 1) * EXERCISES_PER_PAGE, exPage * EXERCISES_PER_PAGE);
 
   const activeAnalytics = analytics?.[analyticsPeriod] ?? [];
 
@@ -918,6 +871,14 @@ export default function AdminDash() {
                   sub={`Requesting: ${req.requested_role}`}
                   right={
                     <div className="flex gap-2">
+                      {req.coach_id != null && (
+                        <button
+                          onClick={() => navigate(`/coaches/${req.coach_id}?from=admin`)}
+                          className="text-xs bg-blue-900/40 text-blue-400 border border-blue-500/30 rounded-full px-3 py-1 hover:bg-blue-900/60 transition-colors"
+                        >
+                          View Profile
+                        </button>
+                      )}
                       <button onClick={() => handleApprove(req.id)} className="text-xs bg-green-900/40 text-green-400 border border-green-500/30 rounded-full px-3 py-1 hover:bg-green-900/60 transition-colors">Approve</button>
                       <button onClick={() => handleReject(req.id)} className="text-xs bg-red-900/40 text-red-400 border border-red-500/30 rounded-full px-3 py-1 hover:bg-red-900/60 transition-colors">Reject</button>
                     </div>
@@ -929,129 +890,10 @@ export default function AdminDash() {
         </DashboardCard>
 
         {/* ═══════════════════════════════════════════════════════════════
-            EXERCISE BANK
+            FITNESS MANAGEMENT
             ═══════════════════════════════════════════════════════════════ */}
-        <SectionHeader label="EXERCISE BANK" role={role} />
-
-        <div className="bg-[#0E1628] rounded-2xl border border-white/5 overflow-hidden">
-          {/* Search, filter, + add */}
-          <div className="p-5 border-b border-white/5">
-            <div className="flex gap-3">
-              <input
-                type="text"
-                placeholder="Search exercises..."
-                value={exSearch}
-                onChange={(e) => setExSearch(e.target.value)}
-                className="flex-1 bg-[#0A1020] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none"
-              />
-              <select
-                value={exGroupFilter}
-                onChange={(e) => setExGroupFilter(e.target.value)}
-                className="bg-[#0A1020] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-gray-300 focus:outline-none"
-              >
-                <option value="All">All Groups</option>
-                {MUSCLE_GROUPS.map((g) => <option key={g} value={g}>{g}</option>)}
-              </select>
-              <button
-                onClick={() => setNewExercise({ name: "", muscle_group: "Chest", equipment: "Barbell" })}
-                className="px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors flex items-center gap-2"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                Add Exercise
-              </button>
-            </div>
-            <p className="text-gray-500 text-xs mt-2">{filteredExercises.length} exercise{filteredExercises.length !== 1 ? "s" : ""} in bank</p>
-          </div>
-
-          {/* Add/Edit inline form */}
-          {(newExercise || editingExercise) && (
-            <div className="p-5 border-b border-white/5 bg-[#0A1020]/50">
-              <ExerciseForm
-                initial={newExercise || editingExercise}
-                onSave={handleSaveExercise}
-                onCancel={() => { setNewExercise(null); setEditingExercise(null); }}
-              />
-            </div>
-          )}
-
-          {/* Exercise list */}
-          <div className="divide-y divide-white/5">
-            <div className="grid grid-cols-12 gap-4 px-5 py-2.5 text-[10px] text-gray-500 uppercase tracking-widest">
-              <span className="col-span-4">Exercise</span>
-              <span className="col-span-2">Muscle Group</span>
-              <span className="col-span-2">Equipment</span>
-              <span className="col-span-2">Added By</span>
-              <span className="col-span-2 text-right">Actions</span>
-            </div>
-
-            {filteredExercises.length === 0 ? (
-              <p className="text-gray-500 text-sm text-center py-8">No exercises match your filters</p>
-            ) : (
-              paginatedExercises.map((ex) => (
-                <div key={ex.id} className="grid grid-cols-12 gap-4 px-5 py-3 items-center hover:bg-white/[0.02] transition-colors">
-                  <span className="col-span-4 text-white text-sm font-medium">{ex.name}</span>
-                  <div className="col-span-2">
-                    <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-red-500/10 text-red-400">{ex.muscle_group}</span>
-                  </div>
-                  <span className="col-span-2 text-gray-400 text-sm">{ex.equipment}</span>
-                  <span className="col-span-2 text-gray-500 text-xs">{ex.created_by}</span>
-                  <div className="col-span-2 flex justify-end gap-2">
-                    <button
-                      onClick={() => setEditingExercise({ ...ex })}
-                      className="text-[10px] px-3 py-1.5 rounded-lg border border-white/10 text-gray-300 hover:bg-white/5 transition-colors"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => handleDeleteExercise(ex.id)}
-                      className="text-[10px] px-3 py-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-
-          {/* Exercise pagination */}
-          {totalExPages > 1 && (
-            <div className="flex items-center justify-between px-5 py-3 border-t border-white/5">
-              <p className="text-gray-500 text-xs">
-                Showing {(exPage - 1) * EXERCISES_PER_PAGE + 1}–{Math.min(exPage * EXERCISES_PER_PAGE, filteredExercises.length)} of {filteredExercises.length}
-              </p>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => setExPage((p) => Math.max(1, p - 1))}
-                  disabled={exPage === 1}
-                  className="text-[10px] px-2.5 py-1.5 rounded-lg border border-white/10 text-gray-400 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  ← Prev
-                </button>
-                {Array.from({ length: totalExPages }, (_, i) => i + 1).map((page) => (
-                  <button
-                    key={page}
-                    onClick={() => setExPage(page)}
-                    className={`text-[10px] min-w-[28px] py-1.5 rounded-lg border transition-colors ${
-                      page === exPage
-                        ? "border-red-500/50 bg-red-500/10 text-red-400"
-                        : "border-white/10 text-gray-500 hover:bg-white/5"
-                    }`}
-                  >
-                    {page}
-                  </button>
-                ))}
-                <button
-                  onClick={() => setExPage((p) => Math.min(totalExPages, p + 1))}
-                  disabled={exPage === totalExPages}
-                  className="text-[10px] px-2.5 py-1.5 rounded-lg border border-white/10 text-gray-400 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  Next →
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+        <SectionHeader label="FITNESS MANAGEMENT" role={role} />
+        <ManageFitness />
 
         {/* ═══════════════════════════════════════════════════════════════
             REPORTS & FLAGS
@@ -1090,7 +932,16 @@ export default function AdminDash() {
           ═══════════════════════════════════════════════════════════════ */}
 
       <Overlay open={overlay === "requests"} onClose={closeOverlay} title="Role Promotion Requests" wide>
-        <RoleRequestsDetail requests={roleRequests} onApprove={handleApprove} onReject={handleReject} />
+        <RoleRequestsDetail
+          requests={roleRequests}
+          onApprove={handleApprove}
+          onReject={handleReject}
+          onView={(req) => {
+            if (req?.coach_id == null) return;
+            closeOverlay();
+            navigate(`/coaches/${req.coach_id}?from=admin`);
+          }}
+        />
       </Overlay>
 
       <Overlay open={overlay === "reports"} onClose={closeOverlay} title="Active Reports" wide>
@@ -1100,61 +951,3 @@ export default function AdminDash() {
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   EXERCISE FORM — inline add/edit for exercise bank
-   ═══════════════════════════════════════════════════════════════════════ */
-
-function ExerciseForm({ initial, onSave, onCancel }) {
-  const [name, setName] = useState(initial.name ?? "");
-  const [muscleGroup, setMuscleGroup] = useState(initial.muscle_group ?? "Chest");
-  const [equipment, setEquipment] = useState(initial.equipment ?? "Barbell");
-
-  return (
-    <div className="flex gap-3 items-end">
-      <div className="flex-1">
-        <label className="text-[10px] text-gray-500 uppercase tracking-widest">Exercise Name</label>
-        <input
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. Bulgarian Split Squat"
-          className="w-full bg-[#080D19] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none mt-1"
-          autoFocus
-        />
-      </div>
-      <div>
-        <label className="text-[10px] text-gray-500 uppercase tracking-widest">Muscle Group</label>
-        <select
-          value={muscleGroup}
-          onChange={(e) => setMuscleGroup(e.target.value)}
-          className="w-full bg-[#080D19] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none mt-1"
-        >
-          {MUSCLE_GROUPS.map((g) => <option key={g} value={g}>{g}</option>)}
-        </select>
-      </div>
-      <div>
-        <label className="text-[10px] text-gray-500 uppercase tracking-widest">Equipment</label>
-        <select
-          value={equipment}
-          onChange={(e) => setEquipment(e.target.value)}
-          className="w-full bg-[#080D19] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none mt-1"
-        >
-          {EQUIPMENT.map((e) => <option key={e} value={e}>{e}</option>)}
-        </select>
-      </div>
-      <button
-        onClick={() => name.trim() && onSave({ ...initial, name: name.trim(), muscle_group: muscleGroup, equipment })}
-        disabled={!name.trim()}
-        className="px-5 py-2 rounded-lg text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors disabled:opacity-40"
-      >
-        {initial.id ? "Update" : "Add"}
-      </button>
-      <button
-        onClick={onCancel}
-        className="px-4 py-2 rounded-lg text-sm border border-white/10 text-gray-400 hover:bg-white/5 transition-colors"
-      >
-        Cancel
-      </button>
-    </div>
-  );
-}

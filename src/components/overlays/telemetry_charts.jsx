@@ -72,7 +72,7 @@ export default function TelemetryCharts({ accent = "#3B82F6" }) {
     return `${sign}${delta.toFixed(1)} lbs`;
   }, [weightSeries]);
 
-  const workoutsByDay = useMemo(() => groupByDay(workouts), [workouts]);
+  const weeklyCalSeries = useMemo(() => groupByWeekCalories(workouts), [workouts]);
 
   if (loading) {
     return <p className="text-sm text-slate-400">Loading your progress...</p>;
@@ -82,7 +82,7 @@ export default function TelemetryCharts({ accent = "#3B82F6" }) {
     weightSeries.length === 0 &&
     stepsSeries.length === 0 &&
     moodSeries.length === 0 &&
-    workoutsByDay.length === 0;
+    weeklyCalSeries.length === 0;
 
   if (allEmpty) {
     return (
@@ -139,20 +139,17 @@ export default function TelemetryCharts({ accent = "#3B82F6" }) {
         )}
       </ChartCard>
 
-      {/*  Workouts  */}
+      {/*  Weekly Caloric Expenditure  */}
       <ChartCard
-        title="Completed Workouts"
-        unit="per day"
-        empty={workoutsByDay.length === 0}
-        emptyText="No completed workouts yet."
+        title="Weekly Caloric Expenditure"
+        unit="kcal / week (from workouts)"
+        empty={weeklyCalSeries.length === 0}
+        emptyText="No workout calorie data yet. Log workouts with calorie estimates to see this chart."
         accent={accent}
         noStats
       >
-        {workoutsByDay.length > 0 && (
-          <BarChart
-            points={workoutsByDay.map((d) => ({ value: d.value, date: d.day }))}
-            accent={accent}
-          />
+        {weeklyCalSeries.length > 0 && (
+          <PaginatedBarChart allPoints={weeklyCalSeries} accent={accent} unit="kcal" />
         )}
       </ChartCard>
     </div>
@@ -313,6 +310,118 @@ function StepsChart({ allPoints, accent }) {
               <text x={tx + TIP_W / 2} y={ty + 27} textAnchor="middle"
                 fill="#94a3b8" fontSize="8">
                 {hovered.date}
+              </text>
+            </g>
+          );
+        })()}
+      </svg>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Generic paginated bar chart (reused for weekly calories, etc.)
+   ═══════════════════════════════════════════════════════════════════════ */
+
+function PaginatedBarChart({ allPoints, accent, unit = "steps" }) {
+  const [page, setPage] = useState(0);
+  const totalPages = Math.ceil(allPoints.length / WEEK);
+
+  const pagePoints = useMemo(() => {
+    const reversed = [...allPoints].reverse();
+    return reversed.slice(page * WEEK, (page + 1) * WEEK).reverse();
+  }, [allPoints, page]);
+
+  useEffect(() => { setPage(0); }, [allPoints]);
+
+  const [hovered, setHovered] = useState(null);
+  const handleLeave = useCallback(() => setHovered(null), []);
+
+  const W = 480, H = 170;
+  const Y_W = 46, X_H = 22, PAD_TOP = 10, PAD_R = 8;
+  const CW = W - Y_W - PAD_R;
+  const CH = H - X_H - PAD_TOP;
+
+  const rawMax = Math.max(...pagePoints.map((p) => p.value), 1);
+  const yMax = Math.ceil(rawMax * 1.1 / niceStep(rawMax)) * niceStep(rawMax);
+  const yMin = 0;
+  const yRange = yMax - yMin;
+  const yTicks = computeYTicks(yMin, yMax, 4);
+
+  const yFor = (v) => PAD_TOP + CH - ((v - yMin) / yRange) * CH;
+
+  const n = pagePoints.length;
+  const barGap = 6;
+  const barW = Math.max((CW - barGap * (n + 1)) / n, 4);
+  const barX = (i) => Y_W + barGap + i * (barW + barGap);
+  const barCx = (i) => barX(i) + barW / 2;
+
+  const TIP_W = 104, TIP_H = 36;
+
+  return (
+    <div>
+      <PaginationRow
+        page={page}
+        totalPages={totalPages}
+        onPrev={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+        onNext={() => setPage((p) => Math.max(0, p - 1))}
+      />
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ overflow: "visible" }}>
+        {yTicks.map((tick) => {
+          const y = yFor(tick);
+          return (
+            <g key={tick}>
+              <line x1={Y_W} y1={y} x2={W - PAD_R} y2={y} stroke="#1e293b" strokeWidth="1" />
+              <text x={Y_W - 4} y={y + 3.5} textAnchor="end" fill="#64748b" fontSize="8.5">
+                {formatShort(tick)}
+              </text>
+            </g>
+          );
+        })}
+
+        {pagePoints.map((p, i) => {
+          const bh = yRange === 0 ? 0 : ((p.value - yMin) / yRange) * CH;
+          const by = yFor(p.value);
+          const cx = barCx(i);
+          return (
+            <g key={i}>
+              <rect
+                x={barX(i)}
+                y={by}
+                width={barW}
+                height={Math.max(bh, 1)}
+                rx="2"
+                fill={accent}
+                opacity={hovered?.i === i ? 1 : 0.75}
+                style={{ cursor: "pointer" }}
+                onMouseEnter={() => setHovered({ i, cx, barTop: by, value: p.value, date: p.date })}
+                onMouseLeave={handleLeave}
+              />
+              <text x={cx} y={H - 5} textAnchor="middle" fill="#475569" fontSize="7.5">
+                {shortDate(p.date)}
+              </text>
+            </g>
+          );
+        })}
+
+        <line x1={Y_W} y1={PAD_TOP} x2={Y_W} y2={PAD_TOP + CH} stroke="#334155" strokeWidth="1" />
+
+        {hovered && (() => {
+          const tx = Math.min(Math.max(hovered.cx - TIP_W / 2, Y_W + 2), W - PAD_R - TIP_W - 2);
+          const ty = hovered.barTop - TIP_H - 6 < PAD_TOP
+            ? hovered.barTop + 6
+            : hovered.barTop - TIP_H - 6;
+          return (
+            <g>
+              <rect x={tx} y={ty} width={TIP_W} height={TIP_H} rx="5"
+                fill="#1e293b" stroke={accent} strokeWidth="0.8" opacity="0.97" />
+              <text x={tx + TIP_W / 2} y={ty + 14} textAnchor="middle"
+                fill="white" fontSize="9" fontWeight="700">
+                {formatNumber(hovered.value)} {unit}
+              </text>
+              <text x={tx + TIP_W / 2} y={ty + 27} textAnchor="middle"
+                fill="#94a3b8" fontSize="8">
+                week of {hovered.date}
               </text>
             </g>
           );
@@ -661,19 +770,32 @@ function niceStep(max) {
   return max / base >= 5 ? base : base / 2;
 }
 
-function groupByDay(workouts) {
-  const byDay = new Map();
+/**
+ * Groups completed workout entries by ISO week (Monday-start) and sums
+ * estimated_calories. Returns chronological array of { date, value } where
+ * date is the Monday label of that week.
+ */
+function groupByWeekCalories(workouts) {
+  const byWeek = new Map();
   (workouts || []).forEach((w) => {
     const ts = w.last_updated || w.created_at;
     if (!ts) return;
     const d = new Date(ts);
     if (Number.isNaN(d.getTime())) return;
-    const key = d.toISOString().slice(0, 10);
-    byDay.set(key, (byDay.get(key) || 0) + 1);
+    const cal = Number(w.estimated_calories) || 0;
+    const day = d.getDay(); // 0=Sun
+    const diff = day === 0 ? -6 : 1 - day;
+    const monday = new Date(d);
+    monday.setDate(d.getDate() + diff);
+    const key = monday.toISOString().slice(0, 10);
+    byWeek.set(key, (byWeek.get(key) || 0) + cal);
   });
-  return [...byDay.entries()]
+  return [...byWeek.entries()]
     .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([day, count]) => ({ day, value: count }));
+    .map(([monday, calories]) => ({
+      value: calories,
+      date: formatDateLabel(monday),
+    }));
 }
 
 function formatNumber(value) {

@@ -154,6 +154,37 @@ export async function deleteAccount() {
   return apiDelete("/roles/shared/account/delete");
 }
 
+/**
+ * Aggregated calorie summary for today, scoped to the authenticated client.
+ * Backend joins through CompletedWorkoutActivity.estimated_calories (burned)
+ * and MealIngredient.calories via CompletedMealActivity → Meal (consumed).
+ *
+ * Always returns a fully-populated object — nulls coerce to 0 — so callers can
+ * read every field without optional-chaining or fallbacks.
+ */
+export async function fetchCaloriesToday() {
+  try {
+    const r = await apiGet("/roles/client/telemetry/calories_today");
+    return {
+      calories_consumed: Number(r?.calories_consumed ?? 0),
+      calories_burned: Number(r?.calories_burned ?? 0),
+      net_calories: Number(r?.net_calories ?? 0),
+      calories_goal: Number(r?.calories_goal ?? 2000),
+      meal_count: Number(r?.meal_count ?? 0),
+      workout_count: Number(r?.workout_count ?? 0),
+    };
+  } catch {
+    return {
+      calories_consumed: 0,
+      calories_burned: 0,
+      net_calories: 0,
+      calories_goal: 2000,
+      meal_count: 0,
+      workout_count: 0,
+    };
+  }
+}
+
 export async function fetchTelemetryToday(_clientId) {
   try {
     const [steps, workouts, meals, weights] = await Promise.all([
@@ -166,8 +197,21 @@ export async function fetchTelemetryToday(_clientId) {
     const latestSteps = Array.isArray(steps) ? steps[0] : null;
     const latestWeight = Array.isArray(weights) ? weights[0] : null;
 
+    // Only surface today's step count — yesterday's reading shouldn't appear as today's.
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    const stepDateStr = (() => {
+      const ts = latestSteps?.last_updated || latestSteps?.created_at;
+      if (!ts) return null;
+      try {
+        const d = new Date(ts);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      } catch { return null; }
+    })();
+    const todayStepCount = stepDateStr === todayStr ? Number(latestSteps?.step_count ?? 0) : 0;
+
     return {
-      step_count: Number(latestSteps?.step_count ?? 0),
+      step_count: todayStepCount,
       calories_burned: sumTelemetryValue(workouts, [
         "calories_burned",
         "estimated_calories_burned",
@@ -190,29 +234,6 @@ export async function fetchTelemetryToday(_clientId) {
   }
 }
 
-export async function fetchClientWorkoutPlans({ skip = 0, limit = 100 } = {}) {
-  const result = await apiGet(withQuery("/roles/client/fitness/query/plans", { skip, limit }));
-  if (Array.isArray(result)) return result;
-  if (Array.isArray(result?.plans)) return result.plans;
-  return [];
-}
-
-export async function fetchWorkoutPlan(_clientId, weekdayIdx) {
-  try {
-    const plans = await fetchClientWorkoutPlans();
-    const adapted = adaptWorkoutPlansForDay(plans, weekdayIdx);
-    if (adapted) return adapted;
-  } catch {
-    // Fall through to empty-state plan below.
-  }
-
-  void weekdayIdx;
-  return { strata_name: "", activities: [] };
-}
-
-export async function logWorkoutActivity(_clientId, _activityId) {
-  throw new Error("The backend route list does not include a workout activity logging endpoint.");
-}
 
 export async function fetchCoachInfo(_clientId) {
   return fetchMyCoach();
@@ -689,48 +710,6 @@ function normalizePaymentExpiryDate(value) {
   return normalized;
 }
 
-function adaptWorkoutPlansForDay(plans, weekdayIdx) {
-  if (!Array.isArray(plans) || plans.length === 0) return null;
-
-  const matchingPlan = plans[weekdayIdx] ?? plans[0];
-  if (!matchingPlan) return null;
-
-  const activitiesSource =
-    matchingPlan.activities ??
-    matchingPlan.workout_activities ??
-    matchingPlan.workout_plan_activities ??
-    [];
-
-  const activities = Array.isArray(activitiesSource)
-    ? activitiesSource.map((activity, index) => normalizeWorkoutActivity(activity, index))
-    : [];
-
-  return {
-    strata_name:
-      matchingPlan.strata_name ??
-      matchingPlan.name ??
-      matchingPlan.workout_name ??
-      matchingPlan.workout_plan?.name ??
-      `Workout Plan #${matchingPlan.workout_plan_id ?? matchingPlan.id ?? weekdayIdx + 1}`,
-    activities,
-  };
-}
-
-function normalizeWorkoutActivity(activity, index) {
-  return {
-    id: activity.id ?? activity.workout_plan_activity_id ?? index + 1,
-    name:
-      activity.name ??
-      activity.activity_name ??
-      activity.workout_activity?.name ??
-      `Activity ${index + 1}`,
-    suggested_sets: Number(activity.planned_sets ?? activity.suggested_sets ?? activity.sets ?? 0),
-    suggested_reps: Number(activity.planned_reps ?? activity.suggested_reps ?? activity.reps ?? 0),
-    intensity_value: Number(activity.intensity_value ?? activity.weight ?? 0),
-    intensity_measure: activity.intensity_measure ?? "lbs",
-    logged: Boolean(activity.logged),
-  };
-}
 
 function extractWeightNumber(value) {
   const match = String(value || "").match(/\d+/);

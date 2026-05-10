@@ -14,7 +14,7 @@ const ACCENT = "#3B82F6";
  * Props:
  *   accent — accent color (defaults to dashboard blue).
  */
-export default function ProgressPictures({ accent = ACCENT }) {
+export default function ProgressPictures({ accent = ACCENT, onChanged }) {
   const [pictures, setPictures] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -39,6 +39,7 @@ export default function ProgressPictures({ accent = ACCENT }) {
     try {
       await uploadProgressPicture(file);
       await load(); // refresh from API so the upsert is reflected
+      onChanged?.();
     } catch (e) {
       setError(e.message || "Upload failed. Try again.");
     } finally {

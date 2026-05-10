@@ -33,6 +33,8 @@ function CoachRequestFormPage() {
     specializations: [],
     certifications: [],
     experiences: [],
+    paymentInterval: "monthly",
+    priceDollars: "",
   });
   const [newCertification, setNewCertification] = useState({
     title: "",
@@ -69,9 +71,21 @@ function CoachRequestFormPage() {
           .map((item) => item.trim())
           .filter(Boolean);
 
+        const existingPricing =
+          existingCoachProfile?.pricing
+          ?? existingCoachProfile?.coach_account?.pricing
+          ?? null;
+        const existingInterval = existingPricing?.payment_interval || "monthly";
+        const existingPriceDollars =
+          existingPricing?.price_cents != null
+            ? String(Number(existingPricing.price_cents) / 100)
+            : "";
+
         setForm((prev) => ({
           ...prev,
           name: data.name || "",
+          paymentInterval: existingInterval,
+          priceDollars: existingPriceDollars || prev.priceDollars,
           specializations: existingSpecialties.length > 0 ? existingSpecialties : prev.specializations,
           certifications: Array.isArray(existingCoachProfile?.certifications)
             ? existingCoachProfile.certifications.map((cert, index) => ({
@@ -141,11 +155,23 @@ function CoachRequestFormPage() {
       setError("Add at least one availability slot.");
       return;
     }
+    const priceNum = Number(form.priceDollars);
+    if (!form.priceDollars || !Number.isFinite(priceNum) || priceNum <= 0) {
+      setError("Enter a desired rate greater than $0.");
+      return;
+    }
+    if (!form.paymentInterval) {
+      setError("Choose a billing interval.");
+      return;
+    }
 
     setError("");
     setSubmitting(true);
 
-    const backendPayload = buildCoachRequestPayload(form, availabilityWindows);
+    const backendPayload = buildCoachRequestPayload(
+      { ...form, priceCents: Math.round(priceNum * 100) },
+      availabilityWindows,
+    );
 
     try {
       await createCoachRequest(backendPayload);
@@ -567,6 +593,52 @@ function CoachRequestFormPage() {
                   </div>
                 </div>
               )}
+            </div>
+
+            <div>
+              <label className="mb-2 block text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                Desired Rate
+              </label>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div>
+                  <div className="flex items-center rounded-lg border border-white/6 bg-[#0F172A] px-3 focus-within:border-amber-500/50">
+                    <span className="text-sm text-slate-400">$</span>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      step="0.01"
+                      min="0"
+                      value={form.priceDollars}
+                      onChange={(e) =>
+                        setForm((prev) => ({ ...prev, priceDollars: e.target.value }))
+                      }
+                      placeholder="50"
+                      disabled={isViewMode}
+                      className="w-full bg-transparent px-2 py-3 text-sm text-white outline-none placeholder:text-slate-500 disabled:cursor-not-allowed"
+                      required
+                    />
+                  </div>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Amount you want to charge each client per billing cycle.
+                  </p>
+                </div>
+                <div>
+                  <select
+                    value={form.paymentInterval}
+                    onChange={(e) =>
+                      setForm((prev) => ({ ...prev, paymentInterval: e.target.value }))
+                    }
+                    disabled={isViewMode}
+                    className="w-full rounded-lg border border-white/6 bg-[#0F172A] px-4 py-3 text-sm text-white outline-none disabled:cursor-not-allowed"
+                  >
+                    <option value="monthly">Monthly</option>
+                    <option value="yearly">Yearly</option>
+                  </select>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Billing cadence shown to potential clients.
+                  </p>
+                </div>
+              </div>
             </div>
 
             <div>

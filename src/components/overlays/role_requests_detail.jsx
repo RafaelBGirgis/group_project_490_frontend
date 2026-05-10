@@ -8,7 +8,7 @@ import StatusBadge from "../status_badge";
  *   onApprove – (id) => void
  *   onReject  – (id) => void
  */
-export default function RoleRequestsDetail({ requests, onApprove, onReject }) {
+export default function RoleRequestsDetail({ requests, onApprove, onReject, onView }) {
   const pending  = requests.filter((r) => r.is_approved === null);
   const approved = requests.filter((r) => r.is_approved === true);
   const rejected = requests.filter((r) => r.is_approved === false);
@@ -48,6 +48,14 @@ export default function RoleRequestsDetail({ requests, onApprove, onReject }) {
                   </p>
                 </div>
                 <div className="flex gap-2">
+                  {onView && req.coach_id != null && (
+                    <button
+                      onClick={() => onView(req)}
+                      className="text-xs bg-blue-900/40 text-blue-400 border border-blue-500/30 rounded-full px-4 py-1.5 hover:bg-blue-900/60 transition-colors"
+                    >
+                      View Profile
+                    </button>
+                  )}
                   <button
                     onClick={() => onApprove(req.id)}
                     className="text-xs bg-green-900/40 text-green-400 border border-green-500/30 rounded-full px-4 py-1.5 hover:bg-green-900/60 transition-colors"
@@ -83,11 +91,21 @@ export default function RoleRequestsDetail({ requests, onApprove, onReject }) {
                     Requested: {req.requested_role}
                   </p>
                 </div>
-                <StatusBadge
-                  label={req.is_approved ? "Approved" : "Rejected"}
-                  variant={req.is_approved ? "success" : "danger"}
-                  dot
-                />
+                <div className="flex items-center gap-2">
+                  {onView && req.coach_id != null && (
+                    <button
+                      onClick={() => onView(req)}
+                      className="text-[11px] bg-blue-900/40 text-blue-400 border border-blue-500/30 rounded-full px-3 py-1 hover:bg-blue-900/60 transition-colors"
+                    >
+                      View
+                    </button>
+                  )}
+                  <StatusBadge
+                    label={req.is_approved ? "Approved" : "Rejected"}
+                    variant={req.is_approved ? "success" : "danger"}
+                    dot
+                  />
+                </div>
               </div>
             ))}
           </div>

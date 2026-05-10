@@ -394,13 +394,16 @@ function BookForm({ available, onBook, onCancel, accent }) {
 export default function AvailabilityCalendar({
   availabilities = [],
   busySlots = [],
+  ghostBlocks = [],
   mode = "view",
   role = "client",
   onCreate,
   onDelete,
   onBook,
+  onBusySlotClick,
   onRangeChange,
   initialDate,
+  editDisabled = false,
 }) {
   const isCoach = role === "coach";
   const accent = isCoach ? "#F97316" : "#3B82F6";
@@ -438,7 +441,7 @@ export default function AvailabilityCalendar({
 
   const busySegments = useMemo(() => {
     const expanded = (busySlots || [])
-      .map((b) => ({ start: new Date(b.start_dt), end: new Date(b.end_dt), source: b.source, source_name: b.source_name, busy_slot_id: b.busy_slot_id }))
+      .map((b) => ({ start: new Date(b.start_dt), end: new Date(b.end_dt), source: b.source, source_id: b.source_id, source_name: b.source_name, busy_slot_id: b.busy_slot_id }))
       .filter((b) => b.end > weekStart && b.start < weekEnd);
     const split = expanded.flatMap((b) => {
       const out = [];
@@ -457,6 +460,20 @@ export default function AvailabilityCalendar({
 
   const availByDay = useMemo(() => bucketByDay(availabilitySegments, weekStart), [availabilitySegments, weekStart]);
   const busyByDay = useMemo(() => bucketByDay(busySegments, weekStart), [busySegments, weekStart]);
+
+  const ghostByDay = useMemo(() => {
+    const segments = ghostBlocks.flatMap((block) => {
+      if (!block.date_iso || !block.start_time || !block.end_time) return [];
+      const [y, m, d] = block.date_iso.split("-").map(Number);
+      const [sh, sm] = block.start_time.split(":").map(Number);
+      const [eh, em] = block.end_time.split(":").map(Number);
+      const start = new Date(y, m - 1, d, sh, sm, 0);
+      const end = new Date(y, m - 1, d, eh, em, 0);
+      if (end <= start || end <= weekStart || start >= weekEnd) return [];
+      return [{ start, end, planName: block.planName || "Plan" }];
+    });
+    return bucketByDay(segments, weekStart);
+  }, [ghostBlocks, weekStart, weekEnd]);
 
   const goPrev = () => setWeekStart(addDays(weekStart, -7));
   const goNext = () => setWeekStart(addDays(weekStart, 7));
@@ -503,8 +520,9 @@ export default function AvailabilityCalendar({
         {mode === "edit" ? (
           <button
             type="button"
-            onClick={() => { setCreateDefaultDate(null); setCreating(true); }}
-            className="rounded-lg px-3 py-1.5 text-xs font-medium text-white"
+            onClick={() => { if (!editDisabled) { setCreateDefaultDate(null); setCreating(true); } }}
+            disabled={editDisabled}
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium text-white ${editDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
             style={{ backgroundColor: accent }}
           >
             + Add availability
@@ -540,7 +558,7 @@ export default function AvailabilityCalendar({
               <button
                 key={label}
                 type="button"
-                onClick={mode === "edit" ? () => startCreateForDay(i) : undefined}
+                onClick={mode === "edit" && !editDisabled ? () => startCreateForDay(i) : undefined}
                 className={`px-2 py-2 text-center text-xs font-semibold ${isToday ? "text-white" : "text-slate-400"} ${mode === "edit" ? "hover:bg-white/5" : ""}`}
                 title={mode === "edit" ? "Add availability on this day" : undefined}
               >
@@ -574,13 +592,13 @@ export default function AvailabilityCalendar({
               ))}
               {availByDay[dayIdx]?.map((seg, idx) => {
                 const { top, height } = topAndHeight(seg);
-                const clickable = mode === "edit" || mode === "book";
+                const clickable = (mode === "edit" && !editDisabled) || mode === "book";
                 return (
                   <div
                     key={`a-${idx}`}
                     role={clickable ? "button" : undefined}
                     onClick={
-                      mode === "edit"
+                      mode === "edit" && !editDisabled
                         ? () => handleDelete(seg)
                         : mode === "book"
                           ? () => setBookingTarget(seg)
@@ -602,10 +620,13 @@ export default function AvailabilityCalendar({
               })}
               {busyByDay[dayIdx]?.map((seg, idx) => {
                 const { top, height } = topAndHeight(seg);
+                const busyClickable = !!onBusySlotClick;
                 return (
                   <div
                     key={`b-${idx}`}
-                    className="absolute left-1 right-1 rounded-md text-[10px] text-white px-1 py-0.5 overflow-hidden"
+                    role={busyClickable ? "button" : undefined}
+                    onClick={busyClickable ? () => onBusySlotClick(seg) : undefined}
+                    className={`absolute left-1 right-1 rounded-md text-[10px] text-white px-1 py-0.5 overflow-hidden ${busyClickable ? "cursor-pointer hover:brightness-110" : ""}`}
                     style={{
                       top,
                       height,
@@ -616,6 +637,25 @@ export default function AvailabilityCalendar({
                     title={`${seg.source_name || "Booked"} ${fmtTime(seg.start)} – ${fmtTime(seg.end)}`}
                   >
                     <div className="font-semibold">{seg.source_name || "Booked"}</div>
+                    <div>{fmtTime(seg.start)} – {fmtTime(seg.end)}</div>
+                  </div>
+                );
+              })}
+              {ghostByDay[dayIdx]?.map((seg, idx) => {
+                const { top, height } = topAndHeight(seg);
+                return (
+                  <div
+                    key={`g-${idx}`}
+                    className="absolute left-1 right-1 rounded-md text-[10px] text-white px-1 py-0.5 overflow-hidden pointer-events-none"
+                    style={{
+                      top,
+                      height,
+                      backgroundColor: "#F97316",
+                      border: "1.5px dashed rgba(249,115,22,0.9)",
+                      opacity: 0.5,
+                    }}
+                  >
+                    <div className="font-semibold truncate">{seg.planName}</div>
                     <div>{fmtTime(seg.start)} – {fmtTime(seg.end)}</div>
                   </div>
                 );

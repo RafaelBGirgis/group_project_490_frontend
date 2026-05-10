@@ -1,5 +1,5 @@
 
-import { apiDelete, apiGet, apiPost, apiPut, withQuery } from "./api";
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut, withQuery } from "./api";
 /* ─── Workout / activity / equipment catalog ────────────────────────────── */
 
 export async function searchWorkouts({
@@ -58,15 +58,74 @@ export async function createWorkout(payload) {
 
 /* ─── Workout plans ─────────────────────────────────────────────────────── */
 
-export async function searchWorkoutPlans({ text, skip = 0, limit = 24 } = {}) {
+/**
+ * PRD v2: server now exposes library_source ∈ {self_authored, prescribed,
+ * public_save}. mine_only is kept as a deprecated synonym for
+ * library_source=self_authored so callers can migrate gradually.
+ */
+export async function searchWorkoutPlans({
+  text,
+  skip = 0,
+  limit = 24,
+  public_only,
+  mine_only,
+  library_source,
+} = {}) {
   const result = await apiGet(
     withQuery("/roles/shared/fitness/query/workout_plan", {
       text: text || undefined,
       skip,
       limit,
+      public_only: public_only || undefined,
+      mine_only: mine_only || undefined,
+      library_source: library_source || undefined,
     })
   );
   return Array.isArray(result) ? result : [];
+}
+
+export async function searchPublicPlans({ text, skip = 0, limit = 24 } = {}) {
+  return searchWorkoutPlans({ text, skip, limit, public_only: true });
+}
+
+export async function searchMyPlans({ text, skip = 0, limit = 24 } = {}) {
+  return searchWorkoutPlans({ text, skip, limit, library_source: "self_authored" });
+}
+
+/** "From Coach" view — plans the caller has been prescribed. Read-only. */
+export async function searchPrescribedPlans({ text, skip = 0, limit = 24 } = {}) {
+  return searchWorkoutPlans({ text, skip, limit, library_source: "prescribed" });
+}
+
+/** Save a public plan into the caller's library (no copy). Client-only on server. */
+export async function saveWorkoutPlan(planId) {
+  return apiPost(`/roles/shared/fitness/plan/${planId}/save`, {});
+}
+
+/** Copy-to-own — clones a plan into a new client-owned, is_forked plan. */
+export async function copyWorkoutPlan(planId) {
+  return apiPost(`/roles/shared/fitness/plan/${planId}/copy`, {});
+}
+
+export async function renameWorkoutPlan(planId, strataName) {
+  return apiPatch(`/roles/shared/fitness/plan/${planId}`, { strata_name: strataName });
+}
+
+/** Toggle whether this plan is publicly listed in Browse Plans. */
+export async function publishWorkoutPlan(planId, isPublic) {
+  return apiPatch(`/roles/shared/fitness/plan/${planId}`, { is_public: !!isPublic });
+}
+
+export async function deleteWorkoutPlan(planId) {
+  return apiDelete(`/roles/shared/fitness/plan/${planId}`);
+}
+
+export async function addActivityToPlan(planId, activity) {
+  return apiPost(`/roles/shared/fitness/plan/${planId}/activity`, activity);
+}
+
+export async function removeActivityFromPlan(planId, activityId) {
+  return apiDelete(`/roles/shared/fitness/plan/${planId}/activity/${activityId}`);
 }
 
 /**
@@ -88,9 +147,14 @@ export async function prescribePlanToClient({ workout_plan_id, client_id, blocks
   return apiPost("/roles/coach/prescribe_plan", { workout_plan_id, client_id, blocks });
 }
 
-export async function listMyScheduledPlans({ skip = 0, limit = 100 } = {}) {
+export async function listMyScheduledPlans({ from_dt, to_dt, skip = 0, limit = 100 } = {}) {
   const result = await apiGet(
-    withQuery("/roles/client/fitness/query/plans", { skip, limit })
+    withQuery("/roles/client/fitness/query/plans", {
+      from_dt: from_dt instanceof Date ? from_dt.toISOString() : from_dt,
+      to_dt: to_dt instanceof Date ? to_dt.toISOString() : to_dt,
+      skip,
+      limit,
+    })
   );
   return Array.isArray(result) ? result : [];
 }
@@ -121,9 +185,53 @@ export async function getClientAvailabilityAsCoach(clientId) {
   return Array.isArray(result) ? result : [];
 }
 
-export async function getClientScheduledPlansAsCoach(clientId) {
-  const result = await apiGet(`/roles/coach/client/${clientId}/client_workout_plans`);
+export async function getClientScheduledPlansAsCoach(clientId, { from_dt, to_dt } = {}) {
+  const query = new URLSearchParams();
+  if (from_dt) query.append("from_dt", from_dt instanceof Date ? from_dt.toISOString() : from_dt);
+  if (to_dt) query.append("to_dt", to_dt instanceof Date ? to_dt.toISOString() : to_dt);
+  const qs = query.toString();
+  const result = await apiGet(`/roles/coach/client/${clientId}/client_workout_plans${qs ? `?${qs}` : ""}`);
   return Array.isArray(result) ? result : [];
+}
+
+export async function checkSchedulableAsClient({ start_dt, end_dt }) {
+  return apiPost("/roles/client/check_schedulable", {
+    start_dt: start_dt instanceof Date ? start_dt.toISOString() : start_dt,
+    end_dt: end_dt instanceof Date ? end_dt.toISOString() : end_dt,
+  });
+}
+
+export async function checkSchedulableForClient({ client_id, start_dt, end_dt }) {
+  return apiPost("/roles/coach/check_schedulable_for_client", {
+    client_id,
+    start_dt: start_dt instanceof Date ? start_dt.toISOString() : start_dt,
+    end_dt: end_dt instanceof Date ? end_dt.toISOString() : end_dt,
+  });
+}
+
+/**
+ * Log a completed workout activity for a specific CWP occurrence.
+ * local_date: "YYYY-MM-DD" — the client's local date of the workout.
+ * Backend enforces a hard 400 if the CWP is not scheduled for that date.
+ */
+export async function logWorkoutActivityForCwp({
+  cwp_id,
+  workout_plan_activity_id,
+  local_date,
+  completed_reps = null,
+  completed_sets = null,
+  completed_duration = null,
+  estimated_calories = null,
+}) {
+  return apiPost("/roles/client/fitness/log_workout_activity", {
+    cwp_id,
+    workout_plan_activity_id,
+    local_date,
+    completed_reps,
+    completed_sets,
+    completed_duration,
+    estimated_calories,
+  });
 }
 
 /* ─── Self availability (used for client-side fast-fail validation) ─────── */

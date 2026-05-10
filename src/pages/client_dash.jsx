@@ -7,7 +7,6 @@ import {
   ProgressRing,
   DayTabs,
   ListRow,
-  StatusBadge,
   SectionHeader,
   Overlay,
   SkeletonStatCard,
@@ -16,16 +15,16 @@ import {
   SkeletonRing,
   SkeletonAvailability,
 } from "../components";
-import WorkoutDetail from "../components/overlays/workout_detail";
+
 import MealDetail from "../components/overlays/meal_detail";
+import WorkoutPlanPopup from "../components/plan_my_week/workout_plan_popup";
 import DailySurvey from "../components/overlays/daily_survey";
 import StepsLog from "../components/overlays/steps_log";
 import {
   fetchMe,
   fetchClientProfile,
   fetchTelemetryToday,
-  fetchWorkoutPlan,
-  logWorkoutActivity,
+  fetchCaloriesToday,
   fetchMyCoach,
   fetchCoachRating,
   fetchMealsToday,
@@ -36,9 +35,18 @@ import {
   terminateRelationship,
 } from "../api/client";
 import {
+  listMyScheduledPlans,
+  searchWorkoutPlans,
+  deleteScheduledPlanAsClient,
+  logWorkoutActivityForCwp,
+} from "../api/plan_my_week";
+import {
   fetchAllDailySurveys,
   fetchDailyStepsSurvey,
   fetchStepHistory,
+  fetchWorkoutHistory,
+  fetchWorkoutHistoryEnriched,
+  fetchRandomAppreciation,
 } from "../api/survey";
 import { getConversationWithAccount } from "../api/chat";
 import {
@@ -46,6 +54,7 @@ import {
   isPendingCoachRequest,
   resolveActiveCoachRelationship,
 } from "../utils/coachRequests";
+import { loadDayCache, saveDayCache } from "../utils/scheduleCache";
 import {
   forgetTerminatedCoachId,
   getRememberedTerminatedCoachIds,
@@ -54,11 +63,25 @@ import {
 } from "../utils/terminatedRelationships";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
+import WorkoutJournal from "../components/workout_journal";
 
 const role = "client";
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const TODAY_IDX = new Date().getDay() === 0 ? 6 : new Date().getDay() - 1;
 const pct = (val, max) => Math.min(100, Math.round((val / max) * 100));
+
+function getWeekDateForIdx(weekdayIdx) {
+  const today = new Date();
+  const todayIdx = today.getDay() === 0 ? 6 : today.getDay() - 1;
+  const diff = weekdayIdx - todayIdx;
+  const target = new Date(today);
+  target.setDate(today.getDate() + diff);
+  target.setHours(0, 0, 0, 0);
+  const y = target.getFullYear();
+  const m = String(target.getMonth() + 1).padStart(2, "0");
+  const d = String(target.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
 
 export default function ClientDash() {
   const navigate = useNavigate();
@@ -75,8 +98,21 @@ export default function ClientDash() {
   const closeOverlay = () => setOverlay(null);
 
   /*  daily survey state  */
-  const [surveyStatus, setSurveyStatus] = useState({ mood: null, body_metrics: null, steps: null });
+  const [surveyStatus, setSurveyStatus] = useState({ mood: null, body_metrics: null, steps: null, progress_pic: null });
   const [stepsRecent, setStepsRecent] = useState([]);
+
+  // True when the entry's last_updated/created_at falls on the current local date.
+  const isFromToday = (entry) => {
+    const ts = entry?.last_updated || entry?.created_at;
+    if (!ts) return false;
+    try {
+      const d = new Date(ts);
+      const t = new Date();
+      return d.getFullYear() === t.getFullYear()
+        && d.getMonth() === t.getMonth()
+        && d.getDate() === t.getDate();
+    } catch { return false; }
+  };
 
   const refreshSurveyStatus = useCallback(async () => {
     try {
@@ -86,10 +122,13 @@ export default function ClientDash() {
       ]);
       setSurveyStatus(all);
       setStepsRecent(recent);
-      // If we have a recent step entry from today, surface it on the card.
+      // Only surface step count if the latest entry is from today; otherwise
+      // show 0 so the card never displays a stale reading as "today".
       const latest = recent?.[0];
-      if (latest && Number.isFinite(Number(latest.step_count))) {
+      if (latest && isFromToday(latest) && Number.isFinite(Number(latest.step_count))) {
         setStepCount(Number(latest.step_count));
+      } else {
+        setStepCount(0);
       }
     } catch {
       // Endpoint failures fall through; the overlay handles its own errors.
@@ -105,8 +144,10 @@ export default function ClientDash() {
       setSurveyStatus((prev) => ({ ...prev, steps: stepsStatus }));
       setStepsRecent(recent);
       const latest = recent?.[0];
-      if (latest && Number.isFinite(Number(latest.step_count))) {
+      if (latest && isFromToday(latest) && Number.isFinite(Number(latest.step_count))) {
         setStepCount(Number(latest.step_count));
+      } else {
+        setStepCount(0);
       }
     } catch {
       // Ignore — card just keeps last known data.
@@ -121,8 +162,10 @@ export default function ClientDash() {
   const [caloriesBurned, setCaloriesBurned] = useState(null);
   const [caloriesConsumed, setCaloriesConsumed] = useState(null);
   const [caloriesGoal, setCaloriesGoal] = useState(2000);
-  const [workoutPlan, setWorkoutPlan]   = useState(null);
-  const [workoutActivities, setWorkoutActivities] = useState([]);
+  const [todayPlans, setTodayPlans]     = useState([]);
+  const [planLookup, setPlanLookup]     = useState({});
+  const [selectedCwpData, setSelectedCwpData] = useState(null); // { cwp, plan, occurrenceStart, occurrenceEnd }
+  const [crudReady, setCrudReady] = useState(false);
   const [coach, setCoach]               = useState(null);
   const [coachRating, setCoachRating]   = useState(null);
   const [prescribedMeals, setPrescribedMeals] = useState([]);
@@ -140,6 +183,7 @@ export default function ClientDash() {
   const [requestStatusMessage, setRequestStatusMessage] = useState("");
   const [openingCoachChat, setOpeningCoachChat] = useState(false);
   const [terminatingRelationship, setTerminatingRelationship] = useState(false);
+  const [appreciation, setAppreciation] = useState(null);
 
   const refreshCoachRelationshipState = useCallback(async () => {
     const [requestList, myCoach] = await Promise.all([
@@ -196,6 +240,7 @@ export default function ClientDash() {
       try {
         const me = await fetchMe();
         setAccount(me);
+        if (me.daily_calorie_budget) setCaloriesGoal(me.daily_calorie_budget);
         const roleState = await resolveRoleState();
         setCanSwitchToAdmin(roleState.hasAdminRole);
         const coachAccess = await getCoachAccessState(me);
@@ -240,24 +285,30 @@ export default function ClientDash() {
     if (!clientId) return;
     refreshSurveyStatus();
 
+    fetchRandomAppreciation().then((data) => {
+      if (data?.todays_appreciation) setAppreciation(data.todays_appreciation);
+    }).catch(() => {});
+
     (async () => {
       try {
-        const [telemetry, meals, mealOptions] =
+        const [telemetry, calories, meals, mealOptions] =
           await Promise.all([
-            fetchTelemetryToday(clientId).catch(() => ({
-              step_count: 0,
-              calories_burned: 0,
-              calories_consumed: 0,
-              calories_goal: 2000,
-            })),
+            fetchTelemetryToday(clientId).catch(() => ({ step_count: 0 })),
+            fetchCaloriesToday(),
             fetchMealsToday(clientId).catch(() => []),
             fetchAvailableOnDemandMeals(clientId).catch(() => []),
           ]);
 
         setStepCount(telemetry.step_count);
-        setCaloriesBurned(telemetry.calories_burned);
-        setCaloriesConsumed(telemetry.calories_consumed);
-        if (telemetry.calories_goal) setCaloriesGoal(telemetry.calories_goal);
+        // Calories come from the dedicated /calories_today route, which sums
+        // the right columns (CompletedWorkoutActivity.estimated_calories for
+        // burned; MealIngredient.calories via CompletedMealActivity for
+        // consumed) and is scoped to today.
+        setCaloriesBurned(calories.calories_burned);
+        setCaloriesConsumed(calories.calories_consumed);
+        if (Number.isFinite(calories.calories_goal) && calories.calories_goal > 0) {
+          setCaloriesGoal(calories.calories_goal);
+        }
 
         setPrescribedMeals(meals);
         setAvailableMeals(mealOptions);
@@ -276,28 +327,90 @@ export default function ClientDash() {
     fetchCoachRating(coach.coach_id).then(setCoachRating);
   }, [coach]);
 
-  /*  load workout plan when day changes  */
-  const loadWorkouts = useCallback(async () => {
+  /*  load scheduled plans when day changes  */
+  const loadPlansForDay = useCallback(async () => {
     if (!clientId) return;
-    const data = await fetchWorkoutPlan(clientId, activeDay);
-    setWorkoutPlan({ strata_name: data.strata_name });
-    setWorkoutActivities(data.activities ?? []);
+    const dateIso = getWeekDateForIdx(activeDay);
+
+    // Show cached plans immediately while API loads
+    const cached = loadDayCache(dateIso);
+    if (cached) {
+      setTodayPlans(cached.plans || []);
+      setPlanLookup(cached.planLookup || {});
+    }
+    setCrudReady(false);
+
+    const [y, mo, d] = dateIso.split("-").map(Number);
+    const from_dt = new Date(y, mo - 1, d, 0, 0, 0).toISOString();
+    const to_dt = new Date(y, mo - 1, d, 23, 59, 59).toISOString();
+
+    try {
+      const [cwps, allPlans] = await Promise.all([
+        listMyScheduledPlans({ from_dt, to_dt }),
+        searchWorkoutPlans({ limit: 200 }),
+      ]);
+
+      const filtered = cwps.filter((cwp) => {
+        const occs = cwp.occurrences ?? [];
+        return occs.some((occ) => {
+          const start = new Date(occ.start_dt);
+          const occDate = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
+          return occDate === dateIso;
+        });
+      });
+
+      const lookup = {};
+      allPlans.forEach((p) => { lookup[p.id] = p; });
+      setTodayPlans(filtered);
+      setPlanLookup(lookup);
+      saveDayCache(dateIso, { plans: filtered, planLookup: lookup });
+    } catch {
+      setTodayPlans([]);
+    } finally {
+      setCrudReady(true);
+    }
   }, [clientId, activeDay]);
 
-  useEffect(() => { loadWorkouts(); }, [loadWorkouts]);
-
-  /*  log a workout activity  */
-  const handleLogActivity = async (activityId) => {
-    setWorkoutActivities((prev) =>
-      prev.map((a) => (a.id === activityId ? { ...a, logged: true } : a))
-    );
-    try {
-      await logWorkoutActivity(clientId, activityId);
-    } catch {
-      setWorkoutActivities((prev) =>
-        prev.map((a) => (a.id === activityId ? { ...a, logged: false } : a))
-      );
+  // Paint cached plans immediately on mount / day-tab change before clientId resolves
+  useEffect(() => {
+    const dateIso = getWeekDateForIdx(activeDay);
+    const cached = loadDayCache(dateIso);
+    if (cached) {
+      setTodayPlans(cached.plans || []);
+      setPlanLookup(cached.planLookup || {});
     }
+  }, [activeDay]);
+
+  useEffect(() => { loadPlansForDay(); }, [loadPlansForDay]);
+
+  /*  open workout plan popup  */
+  function openCwpPopup(cwp) {
+    const dateIso = getWeekDateForIdx(activeDay);
+    const occs = cwp.occurrences ?? [];
+    const occ = occs.find((o) => {
+      const start = new Date(o.start_dt);
+      const occDate = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
+      return occDate === dateIso;
+    }) ?? occs[0];
+    setSelectedCwpData({
+      cwp,
+      plan: planLookup[cwp.workout_plan_id] ?? null,
+      occurrenceStart: occ?.start_dt ?? null,
+      occurrenceEnd: occ?.end_dt ?? null,
+    });
+  }
+
+  /*  log a workout activity via popup  */
+  const handleLogWorkoutActivity = async (activityData) => {
+    const localDate = getWeekDateForIdx(activeDay);
+    await logWorkoutActivityForCwp({ ...activityData, local_date: localDate });
+  };
+
+  /*  delete a scheduled plan via popup  */
+  const handleDeleteCwp = async (cwpId) => {
+    await deleteScheduledPlanAsClient(cwpId);
+    setSelectedCwpData(null);
+    await loadPlansForDay();
   };
 
   /*  log a meal  */
@@ -376,11 +489,49 @@ export default function ClientDash() {
     }
   };
 
+  /*  workout journal fetch callback  */
+  const journalFetchDayData = useCallback(async (isoDate) => {
+    const [y, mo, d] = isoDate.split("-").map(Number);
+    const from_dt = new Date(y, mo - 1, d, 0, 0, 0).toISOString();
+    const to_dt = new Date(y, mo - 1, d, 23, 59, 59).toISOString();
+
+    const [cwps, allPlans, allLogs] = await Promise.all([
+      listMyScheduledPlans({ from_dt, to_dt }).catch(() => []),
+      searchWorkoutPlans({ limit: 200 }).catch(() => []),
+      fetchWorkoutHistoryEnriched({ limit: 200 }).catch(() => []),
+    ]);
+
+    const lookup = {};
+    allPlans.forEach((p) => { lookup[p.id] = p; });
+
+    const logs = allLogs.filter((l) => {
+      const ts = l.last_updated || l.created_at;
+      if (!ts) return false;
+      try { return new Date(ts).toISOString().slice(0, 10) === isoDate; } catch { return false; }
+    });
+
+    const filtered = cwps.filter((cwp) =>
+      (cwp.occurrences ?? []).some((occ) => {
+        const s = new Date(occ.start_dt);
+        return `${s.getFullYear()}-${String(s.getMonth() + 1).padStart(2, "0")}-${String(s.getDate()).padStart(2, "0")}` === isoDate;
+      })
+    );
+
+    return { cwps: filtered, planLookup: lookup, logs };
+  }, []);
+
   /*  derived values  */
-  const completedCount = workoutActivities.filter((a) => a.logged).length;
-  const totalCount     = workoutActivities.length;
-  const stepsPercent   = pct(stepCount ?? 0, 10000);
-  const calPercent     = pct(caloriesConsumed ?? 0, caloriesGoal);
+  const totalCount = todayPlans.reduce((sum, cwp) => sum + (planLookup[cwp.workout_plan_id]?.activities?.length ?? 0), 0);
+  const completedCount = 0; // tracked per-session inside WorkoutPlanPopup
+  const stepsGoal      = account?.daily_steps_goal ?? 10000;
+  const stepsPercent   = pct(stepCount ?? 0, stepsGoal);
+  // Net calories = consumed − burned. This is what counts toward the goal:
+  // the more you burn, the more you can eat; the ring reflects the delta.
+  // Nulls fall through to 0 so the ring renders even before data lands.
+  const consumedSafe   = caloriesConsumed ?? 0;
+  const burnedSafe     = caloriesBurned ?? 0;
+  const netCalories    = consumedSafe - burnedSafe;
+  const calPercent     = pct(Math.max(0, netCalories), caloriesGoal || 1);
   const workoutPercent = pct(completedCount, totalCount || 1);
   const hasActiveCoach = Boolean(coach?.coach_id && relationshipId);
 
@@ -472,9 +623,9 @@ export default function ClientDash() {
                 surveyStatus?.steps === null
                   ? "Survey offline"
                   : surveyStatus?.steps?.is_finished
-                    ? `Logged · ${stepsPercent}% of daily goal`
+                    ? `Logged · ${stepsPercent}% of ${stepsGoal.toLocaleString()} goal`
                     : stepCount !== null
-                      ? `Tap to log · ${stepsPercent}% of daily goal`
+                      ? `Tap to log · ${stepsPercent}% of ${stepsGoal.toLocaleString()} goal`
                       : "Tap to log today's steps"
               }
               progress={stepsPercent}
@@ -487,27 +638,56 @@ export default function ClientDash() {
               }
               onClick={() => setOverlay("steps")}
             />
-            <StatCard
-              role={role}
-              label="CALORIES BURNED"
-              value={caloriesBurned !== null ? `${caloriesBurned} kcal` : "—"}
-              sub="from logged workouts"
-            />
+            <AppreciationCard appreciation={appreciation} />
           </div>
 
-          <DashboardCard role={role} title="Calories" className="items-center">
+          <DashboardCard role={role} className="items-center">
+            <p className="text-white font-semibold text-base text-center w-full">Calories</p>
             <ProgressRing
               role={role}
               percent={calPercent}
               size={120}
               label={
-                caloriesConsumed !== null ? caloriesConsumed.toString() : "—"
+                caloriesConsumed === null && caloriesBurned === null
+                  ? "—"
+                  : netCalories.toString()
               }
-              sublabel={`of ${caloriesGoal} kcal`}
+              sublabel={`net of ${caloriesGoal} kcal`}
             />
+            <div className="w-full bg-[#0A1020] rounded-xl px-4 py-2 space-y-1">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-500 uppercase tracking-widest text-[10px]">Consumed</span>
+                <span className="text-white font-semibold">
+                  {caloriesConsumed !== null ? `${caloriesConsumed} kcal` : "—"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-gray-500 uppercase tracking-widest text-[10px]">Burned</span>
+                <span className="text-white font-semibold">
+                  {caloriesBurned !== null ? `${caloriesBurned} kcal` : "—"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs pt-1 border-t border-white/5">
+                <span className="text-gray-500 uppercase tracking-widest text-[10px]">Net</span>
+                <span
+                  className={`font-semibold ${
+                    netCalories > caloriesGoal
+                      ? "text-red-300"
+                      : netCalories < 0
+                        ? "text-emerald-300"
+                        : "text-white"
+                  }`}
+                >
+                  {caloriesConsumed === null && caloriesBurned === null
+                    ? "—"
+                    : `${netCalories} kcal`}
+                </span>
+              </div>
+            </div>
           </DashboardCard>
 
-          <DashboardCard role={role} title="Progress" className="items-center">
+          <DashboardCard role={role} className="items-center">
+            <p className="text-white font-semibold text-base text-center w-full">Progress</p>
             <ProgressRing
               role={role}
               percent={workoutPercent}
@@ -515,7 +695,7 @@ export default function ClientDash() {
               label={`${workoutPercent}%`}
               sublabel="weekly goal"
             />
-            <div className="w-full bg-[#0A1020] rounded-xl px-4 py-2 text-center mt-2">
+            <div className="w-full bg-[#0A1020] rounded-xl px-4 py-2 text-center">
               <p className="text-[10px] text-gray-500 uppercase tracking-widest">
                 Workouts
               </p>
@@ -574,11 +754,7 @@ export default function ClientDash() {
           {/* Today's Workout */}
           <DashboardCard
             role={role}
-            title={`Today's Workout: ${workoutPlan?.strata_name ?? "—"}`}
-            action={{
-              label: "View all",
-              onClick: () => setOverlay("workout"),
-            }}
+            title="Today's Workout"
             footer={
               <button
                 onClick={() => navigate("/plan-my-week?role=client")}
@@ -596,30 +772,40 @@ export default function ClientDash() {
             />
 
             <div className="mt-3 space-y-2">
-              {workoutActivities.length === 0 ? (
+              {todayPlans.length === 0 ? (
                 <p className="text-gray-500 text-sm text-center py-4">
-                  No activities for this day
+                  No workouts scheduled for this day
                 </p>
               ) : (
-                workoutActivities.map((activity) => (
-                  <ListRow
-                    key={activity.id}
-                    label={activity.name}
-                    sub={`${activity.suggested_sets} sets · ${activity.suggested_reps} reps · ${activity.intensity_value} ${activity.intensity_measure}`}
-                    right={
-                      activity.logged ? (
-                        <StatusBadge label="Logged ✓" variant="success" />
-                      ) : (
-                        <button
-                          className="text-blue-400 text-xs border border-blue-500/50 rounded-full px-3 py-1 hover:bg-blue-500/10 transition-colors"
-                          onClick={() => handleLogActivity(activity.id)}
-                        >
-                          Log →
-                        </button>
-                      )
-                    }
-                  />
-                ))
+                todayPlans.map((cwp) => {
+                  const plan = planLookup[cwp.workout_plan_id];
+                  const occ = (cwp.occurrences ?? [])[0];
+                  const timeLabel = occ
+                    ? `${new Date(occ.start_dt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })} – ${new Date(occ.end_dt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`
+                    : "";
+                  return (
+                    <ListRow
+                      key={cwp.id}
+                      label={plan?.strata_name || `Plan #${cwp.workout_plan_id}`}
+                      sub={timeLabel}
+                      right={
+                        activeDay === TODAY_IDX ? (
+                          <button
+                            className={`text-xs border rounded-full px-3 py-1 transition-colors ${
+                              crudReady
+                                ? "text-blue-400 border-blue-500/50 hover:bg-blue-500/10 cursor-pointer"
+                                : "text-gray-600 border-gray-700 opacity-50 cursor-not-allowed"
+                            }`}
+                            onClick={crudReady ? () => openCwpPopup(cwp) : undefined}
+                            disabled={!crudReady}
+                          >
+                            Log →
+                          </button>
+                        ) : null
+                      }
+                    />
+                  );
+                })
               )}
             </div>
           </DashboardCard>
@@ -753,28 +939,33 @@ export default function ClientDash() {
             </div>
           )}
         </DashboardCard>
+
+        {/*  WORKOUT JOURNAL  */}
+        <SectionHeader label="WORKOUT JOURNAL" role={role} />
+
+        <DashboardCard role={role} title="Workout Journal">
+          <WorkoutJournal fetchDayData={journalFetchDayData} accent="#3B82F6" />
+        </DashboardCard>
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════
           OVERLAYS — rendered on top of the dashboard
           ═══════════════════════════════════════════════════════════════ */}
 
-      {/* Workout Detail */}
-      <Overlay
-        open={overlay === "workout"}
-        onClose={closeOverlay}
-        title={`Workout Plan — ${workoutPlan?.strata_name ?? "Today"}`}
-        wide
-      >
-        <WorkoutDetail
-          planName={workoutPlan?.strata_name}
-          activities={workoutActivities}
-          weekdays={WEEKDAYS}
-          activeDay={activeDay}
-          onDayChange={setActiveDay}
-          onLog={handleLogActivity}
+      {/* Workout Plan Popup */}
+      {selectedCwpData && (
+        <WorkoutPlanPopup
+          cwp={selectedCwpData.cwp}
+          plan={selectedCwpData.plan}
+          occurrenceStart={selectedCwpData.occurrenceStart}
+          occurrenceEnd={selectedCwpData.occurrenceEnd}
+          isToday={activeDay === TODAY_IDX}
+          localDate={getWeekDateForIdx(activeDay)}
+          onDelete={() => handleDeleteCwp(selectedCwpData.cwp.id)}
+          onLog={handleLogWorkoutActivity}
+          onClose={() => setSelectedCwpData(null)}
         />
-      </Overlay>
+      )}
 
       {/* Meals */}
       <Overlay
@@ -813,7 +1004,7 @@ export default function ClientDash() {
             if (Array.isArray(updatedRecent)) {
               setStepsRecent(updatedRecent);
               const latest = updatedRecent[0];
-              if (latest && Number.isFinite(Number(latest.step_count))) {
+              if (latest && isFromToday(latest) && Number.isFinite(Number(latest.step_count))) {
                 setStepCount(Number(latest.step_count));
               }
             }
@@ -827,13 +1018,40 @@ export default function ClientDash() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
+   APPRECIATION CARD — replaces calories burned, shows a gratitude quote
+   ═══════════════════════════════════════════════════════════════════════ */
+
+function AppreciationCard({ appreciation }) {
+  return (
+    <div className="rounded-2xl border border-white/6 bg-[#0F1729] p-4 flex flex-col justify-between min-h-[80px]">
+      <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-2">
+        Something I appreciate
+      </p>
+      {appreciation ? (
+        <p className="text-sm text-white leading-relaxed italic">
+          &ldquo;{appreciation}&rdquo;
+        </p>
+      ) : (
+        <p className="text-xs text-gray-600 italic">
+          Fill in today&apos;s check-in to see your gratitude here.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
    DAILY CHECK-IN BANNER — compact summary card with progress + open button
    ═══════════════════════════════════════════════════════════════════════ */
 
 function DailyCheckInBanner({ status, onOpen }) {
+  // Steps has its own dashboard card and isn't part of the check-in overlay,
+  // so the banner only counts the three things the overlay actually drives:
+  // mood, body metrics, progress picture.
   const sections = [
     { key: "mood", label: "Mood" },
     { key: "body_metrics", label: "Body" },
+    { key: "progress_pic", label: "Photo" },
   ];
   const availableSections = sections.filter((s) => status?.[s.key] !== null);
   const completed = availableSections.filter((s) => status?.[s.key]?.is_finished).length;

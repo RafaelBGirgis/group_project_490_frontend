@@ -23,6 +23,24 @@ function SolidStar({ className }) {
   );
 }
 
+const INTERVAL_ABBREV = {
+  monthly: "/mo",
+  yearly: "/yr",
+  annually: "/yr",
+  weekly: "/wk",
+  daily: "/day",
+};
+
+function formatRateTag(coach) {
+  const amount = String(coach?.amount || "").trim();
+  const interval = String(coach?.pricingInterval || "").trim().toLowerCase();
+  if (!amount && !interval) return null;
+  const parsed = Number(amount);
+  const amountLabel = Number.isFinite(parsed) && amount !== "" ? `$${parsed % 1 === 0 ? parsed : parsed.toFixed(2)}` : amount;
+  const abbrev = INTERVAL_ABBREV[interval] || (interval ? `/${interval}` : "");
+  return `${amountLabel}${abbrev}`;
+}
+
 function extractSpecialties(coaches) {
   const set = new Set();
   coaches.forEach((coach) => {
@@ -378,11 +396,18 @@ export default function FindCoachPage() {
               const isRequesting = requesting === coach.coach_id;
               const initials = coach.name?.split(" ").map((name) => name[0]).join("") ?? "?";
 
+              const rateTag = formatRateTag(coach);
+
               return (
                 <div
                   key={coach.coach_id}
-                  className="rounded-2xl border border-white/6 bg-[#0F1729] p-5 hover:border-blue-500/20 transition-colors"
+                  className="relative rounded-2xl border border-white/6 bg-[#0F1729] p-5 hover:border-blue-500/20 transition-colors"
                 >
+                  {rateTag && (
+                    <span className="absolute top-4 right-4 rounded-full bg-emerald-500/15 border border-emerald-500/25 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-400 leading-tight">
+                      {rateTag}
+                    </span>
+                  )}
                   <div className="flex items-start gap-4">
                     <div className="w-14 h-14 rounded-full bg-blue-900/40 flex items-center justify-center text-blue-400 font-bold text-lg shrink-0">
                       {initials}

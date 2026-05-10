@@ -5,31 +5,74 @@ import {
   submitDailyMoodSurvey,
   startDailyBodyMetricsSurvey,
   submitDailyBodyMetricsSurvey,
+  fetchMoodHistory,
+  fetchWeightHistory,
 } from "../../api/survey";
 import ProgressPictures from "./progress_pictures";
 
 const ACCENT = "#3B82F6";
 
-const SECTION_KEYS = ["mood", "body_metrics"];
+// Sections shown inside the overlay. Steps has its own dashboard card and
+// isn't part of this flow.
+const SECTION_KEYS = ["mood", "body_metrics", "progress_pic"];
+
+// True when an entry's last_updated/created_at falls on today's local date.
+function isFromToday(entry) {
+  const ts = entry?.last_updated || entry?.created_at;
+  if (!ts) return false;
+  try {
+    const d = new Date(ts);
+    const t = new Date();
+    return d.getFullYear() === t.getFullYear()
+      && d.getMonth() === t.getMonth()
+      && d.getDate() === t.getDate();
+  } catch { return false; }
+}
 
 /**
- * Daily check-in overlay body. The user must call /start before /submit, so
- * each section auto-starts when expanded the first time and submits the form
- * data when the user clicks Submit.
+ * Daily check-in overlay body.
+ *
+ * The backend submit endpoints upsert (POST /submit will overwrite an existing
+ * CompletedSurvey or HealthMetrics row tied to the same daily survey), so once
+ * a section is finished the form stays editable — the action button just
+ * relabels to "Update". For mood and body metrics we prefill today's prior
+ * values from telemetry history. Progress pictures get their own section
+ * sourced from /progress_pictures (no daily-survey table for them).
  *
  * Props:
  *   onCompleted — called after any successful submission so the dashboard can
  *                 refresh its summary count.
  */
 export default function DailySurvey({ onCompleted }) {
-  const [statuses, setStatuses] = useState({ mood: null, body_metrics: null });
+  const [statuses, setStatuses] = useState({
+    mood: null,
+    body_metrics: null,
+    progress_pic: null,
+  });
+  const [todaysMood, setTodaysMood] = useState(null);
+  const [todaysWeight, setTodaysWeight] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState(null);
 
+  const reload = async () => {
+    const [all, moodHist, weightHist] = await Promise.all([
+      fetchAllDailySurveys(),
+      fetchMoodHistory({ limit: 1 }).catch(() => []),
+      fetchWeightHistory({ limit: 1 }).catch(() => []),
+    ]);
+    setStatuses({
+      mood: all.mood,
+      body_metrics: all.body_metrics,
+      progress_pic: all.progress_pic,
+    });
+    setTodaysMood(moodHist?.[0] && isFromToday(moodHist[0]) ? moodHist[0] : null);
+    setTodaysWeight(weightHist?.[0] && isFromToday(weightHist[0]) ? weightHist[0] : null);
+    return all;
+  };
+
   useEffect(() => {
     (async () => {
-      const all = await fetchAllDailySurveys();
-      setStatuses({ mood: all.mood, body_metrics: all.body_metrics });
+      const all = await reload();
       setLoading(false);
       const firstAvailableUnfinished = SECTION_KEYS.find(
         (key) => all[key] && !all[key].is_finished,
@@ -38,20 +81,18 @@ export default function DailySurvey({ onCompleted }) {
     })();
   }, []);
 
-  const handleSubmitted = (key, response) => {
-    setStatuses((prev) => ({ ...prev, [key]: response }));
+  const handleSubmitted = async () => {
+    // Re-fetch so the status badges + prefilled values reflect the new server
+    // truth (rather than constructing a partial response client-side).
+    await reload();
     onCompleted?.();
-    const next = SECTION_KEYS.find(
-      (k) => k !== key && statuses[k] && !statuses[k].is_finished,
-    );
-    setActiveSection(next ?? null);
   };
 
   if (loading) {
     return <p className="text-sm text-gray-400">Loading today's check-in...</p>;
   }
 
-  const allUnavailable = statuses.mood === null && statuses.body_metrics === null;
+  const allUnavailable = SECTION_KEYS.every((k) => statuses[k] === null);
 
   return (
     <div className="space-y-4">
@@ -65,8 +106,8 @@ export default function DailySurvey({ onCompleted }) {
       ) : (
         <>
           <p className="text-sm text-gray-400 leading-relaxed">
-            Quick check-ins for mood and body metrics. Each one logs to your telemetry so
-            your coach can see how you're tracking. Steps are logged from the dashboard card.
+            Quick check-ins for mood, body metrics, and your daily progress picture. Already
+            submitted today? Open any section to edit it — your update overwrites today's entry.
           </p>
 
           <SurveySection
@@ -77,7 +118,8 @@ export default function DailySurvey({ onCompleted }) {
           >
             <MoodForm
               status={statuses.mood}
-              onSubmitted={(response) => handleSubmitted("mood", response)}
+              prior={todaysMood}
+              onSubmitted={handleSubmitted}
             />
           </SurveySection>
 
@@ -91,15 +133,26 @@ export default function DailySurvey({ onCompleted }) {
           >
             <BodyMetricsForm
               status={statuses.body_metrics}
-              onSubmitted={(response) => handleSubmitted("body_metrics", response)}
+              prior={todaysWeight}
+              onSubmitted={handleSubmitted}
+            />
+          </SurveySection>
+
+          <SurveySection
+            title="Progress Picture"
+            status={statuses.progress_pic}
+            expanded={activeSection === "progress_pic"}
+            onToggle={() =>
+              setActiveSection(activeSection === "progress_pic" ? null : "progress_pic")
+            }
+          >
+            <ProgressPictures
+              accent={ACCENT}
+              onChanged={handleSubmitted}
             />
           </SurveySection>
         </>
       )}
-
-      <div className="rounded-xl border border-white/10 bg-[#0A1020] px-4 py-4">
-        <ProgressPictures />
-      </div>
     </div>
   );
 }
@@ -154,13 +207,11 @@ function SurveySection({ title, status, expanded, onToggle, children }) {
           This check-in isn't reachable right now. Try again later — your other sections will still work.
         </p>
       )}
-      {expanded && !unavailable && !finished && (
+      {/* Always render the form when expanded (and the section is reachable),
+          so users can edit a finished entry. The form internally relabels its
+          submit button to "Update" once is_finished is true. */}
+      {expanded && !unavailable && (
         <div className="px-4 pb-4 pt-1">{children}</div>
-      )}
-      {expanded && !unavailable && finished && (
-        <p className="px-4 pb-4 text-xs text-gray-500">
-          Submitted earlier today. Come back tomorrow for the next check-in.
-        </p>
       )}
     </div>
   );
@@ -200,14 +251,29 @@ function ErrorMessage({ message }) {
    Mood / wellbeing form
    ═══════════════════════════════════════════════════════════════════════ */
 
-function MoodForm({ status, onSubmitted }) {
-  const [happiness, setHappiness] = useState(7);
-  const [alertness, setAlertness] = useState(7);
-  const [healthiness, setHealthiness] = useState(7);
-  const [goals, setGoals] = useState("");
-  const [appreciation, setAppreciation] = useState("");
+function MoodForm({ status, prior, onSubmitted }) {
+  // Prefill from today's submitted CompletedSurvey row when present, so editing
+  // shows the user what they previously logged rather than the default 7s.
+  const [happiness, setHappiness] = useState(prior?.happiness_meter ?? 7);
+  const [alertness, setAlertness] = useState(prior?.alertness ?? 7);
+  const [healthiness, setHealthiness] = useState(prior?.healthiness ?? 7);
+  const [goals, setGoals] = useState(prior?.todays_goals ?? "");
+  const [appreciation, setAppreciation] = useState(prior?.todays_appreciation ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  // Re-sync when a new prior arrives (parent reloaded after a submit).
+  useEffect(() => {
+    if (prior) {
+      setHappiness(prior.happiness_meter ?? 7);
+      setAlertness(prior.alertness ?? 7);
+      setHealthiness(prior.healthiness ?? 7);
+      setGoals(prior.todays_goals ?? "");
+      setAppreciation(prior.todays_appreciation ?? "");
+    }
+  }, [prior]);
+
+  const isUpdate = Boolean(status?.is_finished);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -218,17 +284,19 @@ function MoodForm({ status, onSubmitted }) {
     setSubmitting(true);
     setError("");
     try {
+      // /start is idempotent server-side; calling it after the survey is
+      // finished is a no-op. Only call it if we haven't started yet.
       if (!status?.is_started) {
         await startDailyMoodSurvey();
       }
-      const response = await submitDailyMoodSurvey({
+      await submitDailyMoodSurvey({
         happiness_meter: happiness,
         alertness,
         healthiness,
         todays_goals: goals.trim(),
         todays_appreciation: appreciation.trim(),
       });
-      onSubmitted(response);
+      onSubmitted();
     } catch (err) {
       setError(err?.message || "Failed to submit. Please try again.");
     } finally {
@@ -274,7 +342,11 @@ function MoodForm({ status, onSubmitted }) {
         className="w-full py-2.5 rounded-lg text-sm font-bold text-white transition-colors disabled:opacity-40"
         style={{ backgroundColor: ACCENT }}
       >
-        {submitting ? "Saving..." : "Submit Mood Check-in"}
+        {submitting
+          ? "Saving..."
+          : isUpdate
+            ? "Update Mood Check-in"
+            : "Submit Mood Check-in"}
       </button>
     </form>
   );
@@ -284,10 +356,16 @@ function MoodForm({ status, onSubmitted }) {
    Body metrics form
    ═══════════════════════════════════════════════════════════════════════ */
 
-function BodyMetricsForm({ status, onSubmitted }) {
-  const [weight, setWeight] = useState("");
+function BodyMetricsForm({ status, prior, onSubmitted }) {
+  const [weight, setWeight] = useState(prior?.weight != null ? String(prior.weight) : "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (prior?.weight != null) setWeight(String(prior.weight));
+  }, [prior]);
+
+  const isUpdate = Boolean(status?.is_finished);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -302,8 +380,8 @@ function BodyMetricsForm({ status, onSubmitted }) {
       if (!status?.is_started) {
         await startDailyBodyMetricsSurvey();
       }
-      const response = await submitDailyBodyMetricsSurvey({ weight: Math.round(weightNum) });
-      onSubmitted(response);
+      await submitDailyBodyMetricsSurvey({ weight: Math.round(weightNum) });
+      onSubmitted();
     } catch (err) {
       setError(err?.message || "Failed to submit. Please try again.");
     } finally {
@@ -333,9 +411,12 @@ function BodyMetricsForm({ status, onSubmitted }) {
         className="w-full py-2.5 rounded-lg text-sm font-bold text-white transition-colors disabled:opacity-40"
         style={{ backgroundColor: ACCENT }}
       >
-        {submitting ? "Saving..." : "Submit Body Metrics"}
+        {submitting
+          ? "Saving..."
+          : isUpdate
+            ? "Update Body Metrics"
+            : "Submit Body Metrics"}
       </button>
     </form>
   );
 }
-

@@ -1,4 +1,4 @@
-import { apiDelete, apiGet, apiPost, withQuery } from "./api";
+import { apiDelete, apiGet, apiPatch, apiPost, withQuery } from "./api";
 
 export async function fetchCoachRequests({ skip = 0, limit = 100 } = {}) {
   const result = await apiGet(withQuery("/roles/admin/query/coach_requests", { skip, limit }));
@@ -166,25 +166,73 @@ export async function deleteUser(userId) {
   return apiDelete(`/roles/admin/accounts/${userId}`);
 }
 
-export async function fetchExerciseBank() {
-  throw new Error("The backend route list does not include an exercise bank endpoint.");
-}
+/* ─── Admin Fitness Bank ───────────────────────────────────────────────────
+ * Full CRUD over Workouts, WorkoutActivities, Equipment, and WorkoutPlans.
+ * Edits create a VCS fork (clone + hide old version) when the row is referenced
+ * by telemetry or any plan. Deletes soft-hide via is_hidden.
+ */
 
-export async function createExercise(exercise) {
-  void exercise;
-  throw new Error("The backend route list does not include an exercise creation endpoint.");
-}
+const FB = "/roles/admin/fitness";
 
-export async function updateExercise(exerciseId, exercise) {
-  void exerciseId;
-  void exercise;
-  throw new Error("The backend route list does not include an exercise update endpoint.");
+// Workouts
+export async function listAdminWorkouts({ text, workout_type, include_hidden = true, skip = 0, limit = 50 } = {}) {
+  const url = withQuery(`${FB}/workouts`, {
+    text: text || undefined,
+    workout_type: workout_type || undefined,
+    include_hidden,
+    skip,
+    limit,
+  });
+  const r = await apiGet(url);
+  return Array.isArray(r) ? r : [];
 }
+export async function createAdminWorkout(payload) { return apiPost(`${FB}/workouts`, payload); }
+export async function updateAdminWorkout(id, patch) { return apiPatch(`${FB}/workouts/${id}`, patch); }
+export async function deleteAdminWorkout(id) { return apiDelete(`${FB}/workouts/${id}`); }
+export async function unhideAdminWorkout(id) { return apiPost(`${FB}/workouts/${id}/unhide`, {}); }
 
-export async function deleteExercise(exerciseId) {
-  void exerciseId;
-  throw new Error("The backend route list does not include an exercise deletion endpoint.");
+// Activities
+export async function listAdminActivities({ workout_id, include_hidden = true, skip = 0, limit = 100 } = {}) {
+  const url = withQuery(`${FB}/activities`, {
+    workout_id: workout_id ?? undefined,
+    include_hidden,
+    skip,
+    limit,
+  });
+  const r = await apiGet(url);
+  return Array.isArray(r) ? r : [];
 }
+export async function createAdminActivity(payload) { return apiPost(`${FB}/activities`, payload); }
+export async function updateAdminActivity(id, patch) { return apiPatch(`${FB}/activities/${id}`, patch); }
+export async function deleteAdminActivity(id) { return apiDelete(`${FB}/activities/${id}`); }
+
+// Equipment
+export async function listAdminEquipment({ text, skip = 0, limit = 100 } = {}) {
+  const url = withQuery(`${FB}/equipment`, { text: text || undefined, skip, limit });
+  const r = await apiGet(url);
+  return Array.isArray(r) ? r : [];
+}
+export async function createAdminEquipment(payload) { return apiPost(`${FB}/equipment`, payload); }
+export async function updateAdminEquipment(id, patch) { return apiPatch(`${FB}/equipment/${id}`, patch); }
+export async function deleteAdminEquipment(id) { return apiDelete(`${FB}/equipment/${id}`); }
+
+// Plans
+export async function listAdminPlans({ text, include_hidden = true, public_only = false, created_by_account_id, skip = 0, limit = 50 } = {}) {
+  const url = withQuery(`${FB}/plans`, {
+    text: text || undefined,
+    include_hidden,
+    public_only: public_only || undefined,
+    created_by_account_id: created_by_account_id ?? undefined,
+    skip,
+    limit,
+  });
+  const r = await apiGet(url);
+  return Array.isArray(r) ? r : [];
+}
+export async function createAdminPlan(payload) { return apiPost(`${FB}/plans`, payload); }
+export async function updateAdminPlan(id, patch) { return apiPatch(`${FB}/plans/${id}`, patch); }
+export async function deleteAdminPlan(id) { return apiDelete(`${FB}/plans/${id}`); }
+export async function unhideAdminPlan(id) { return apiPost(`${FB}/plans/${id}/unhide`, {}); }
 
 /**
  * Engagement bar-chart data: bucketed counts of active users and new signups

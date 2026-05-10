@@ -16,6 +16,11 @@ function normalizeErrorDetail(detail) {
   if (typeof detail === "string") {
     return detail;
   }
+  if (detail != null && typeof detail === "object") {
+    // FastAPI nested detail: { detail: "...", conflicts: [...] }
+    if (typeof detail.detail === "string") return detail.detail;
+    return JSON.stringify(detail);
+  }
   return null;
 }
 
@@ -91,6 +96,7 @@ export async function apiFetch(path, opts = {}) {
     const body = await res.json().catch(() => ({}));
     const error = new Error(normalizeErrorDetail(body?.detail) || `API ${res.status}`);
     error.status = res.status;
+    error.detail = body?.detail;
     throw error;
   }
 

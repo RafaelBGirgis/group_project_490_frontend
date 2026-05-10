@@ -423,6 +423,10 @@ export function fetchClientWorkoutHistoryByCoach(clientId, opts) {
   return fetchCoachClientList(clientId, "workouts", opts);
 }
 
+export function fetchClientWorkoutHistoryEnrichedByCoach(clientId, opts) {
+  return fetchCoachClientList(clientId, "workouts_enriched", opts);
+}
+
 export async function fetchClientProgressPicturesByCoach(clientId, { limit = 10, skip = 0 } = {}) {
   try {
     const result = await apiGet(withQuery(`/roles/coach/client_progress_pictures/${clientId}`, { limit, skip }));

@@ -112,8 +112,19 @@ def test_daily_check_in(driver=None, keep_driver=False):
             )
         )
         print("[OK] Submitted Mood Check-in")
+        time.sleep(1)
 
         print("Testing Body Metrics section...")
+        body_metrics_section_button = wait.until(
+            EC.element_to_be_clickable(
+                (
+                    By.XPATH,
+                    "//button[.//h3[contains(normalize-space(), 'Body Metrics')]]",
+                )
+            )
+        )
+        body_metrics_section_button.click()
+
         weight_input = wait.until(
             EC.presence_of_element_located(
                 (By.XPATH, "//input[@type='number' and @placeholder='e.g. 175']")
@@ -139,6 +150,7 @@ def test_daily_check_in(driver=None, keep_driver=False):
             )
         )
         print("[OK] Submitted Body Metrics")
+        time.sleep(1)
 
         close_daily_check_in_button = wait.until(
             EC.element_to_be_clickable(

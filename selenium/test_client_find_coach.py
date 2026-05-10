@@ -29,8 +29,8 @@ def wait_for_coaches_to_load(driver, wait):
         EC.presence_of_element_located(
             (
                 By.XPATH,
-                "//div[.//button[contains(normalize-space(), 'Quick Details')] "
-                "and .//button[contains(normalize-space(), 'View Profile')]]"
+                "//div[.//button[contains(normalize-space(), 'View Profile')] "
+                "and .//button[contains(normalize-space(), 'Message')]]"
             )
         )
     )
@@ -181,30 +181,6 @@ def test_client_find_coach(driver=None, keep_driver=False):
         sort_select.select_by_value("rating_count")
         wait_for_coaches_to_load(client_driver, client_wait)
         print("Sorted coaches by most reviewed")
-
-        print("Testing Quick Details and Hide Details...")
-        time.sleep(1)
-
-        quick_details_button = client_wait.until(
-            EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='Quick Details']"))
-        )
-        ActionChains(client_driver).move_to_element(quick_details_button).perform()
-        time.sleep(1)
-        quick_details_button.click()
-        print("Quick Details opened successfully")
-
-        time.sleep(1)
-
-        hide_details_button = client_wait.until(
-            EC.element_to_be_clickable(
-                (By.XPATH, "//button[normalize-space()='Hide Details']")
-            )
-        )
-        ActionChains(client_driver).move_to_element(hide_details_button).perform()
-        time.sleep(1)
-        hide_details_button.click()
-        print("Hide Details closed successfully")
-        time.sleep(2)
 
         print("Testing View Profile...")
         view_profile_button = client_wait.until(

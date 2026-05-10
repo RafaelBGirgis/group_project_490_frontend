@@ -18,7 +18,6 @@ FRONTEND_URL = "http://localhost:5173"
 ADMIN_EMAIL = "rat8@njit.edu"
 CLIENT_EMAIL = "janedoe@gmail.com"
 DEFAULT_PFP_URL = "https://upload.wikimedia.org/wikipedia/en/e/e9/New_Jersey_IT_seal.svg"
-DEFAULT_SIGNUP_BIO = "This is a Selenium test account."
 DEFAULT_ONBOARDING_BIO = "This is a Selenium onboarding test account, onboarding bio."
 
 def createDriver():
@@ -202,7 +201,6 @@ def signup(
     name="John Doe",
     email=None,
     age="25",
-    signup_gender="Male",
     onboarding_gender="male",
     password="password",
 ):
@@ -228,29 +226,18 @@ def signup(
         )
 
         # ------------------------------------------SIGN UP HERE------------------------------------------
-        # Enter client login credentials
+        # Current signup page only collects name, email, and password fields.
         name_input = wait.until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "input[name='name']"))
         )
         email_input = wait.until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "input[name='email']"))
         )
-        age_input = wait.until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "input[name='age']"))
-        )
-        gender_select = Select(
-            wait.until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "select[name='gender']"))
-            )
-        )
         password_input = wait.until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "input[name='password']"))
         )
         confirm_password_input = wait.until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "input[name='confirmPassword']"))
-        )
-        bio_input = wait.until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "textarea[name='bio']"))
         )
 
         if email is None:
@@ -262,19 +249,11 @@ def signup(
         email_input.clear()
         email_input.send_keys(email)
 
-        age_input.clear()
-        age_input.send_keys(str(age))
-
-        gender_select.select_by_visible_text(signup_gender)
-        
         password_input.clear()
         password_input.send_keys(password)
 
         confirm_password_input.clear()
         confirm_password_input.send_keys(password)
-
-        bio_input.clear()
-        bio_input.send_keys(DEFAULT_SIGNUP_BIO)
 
         # Submit signup form
         submit_button = wait.until(
@@ -300,6 +279,15 @@ def signup(
         primary_goal_select.select_by_visible_text("Muscle Gain")
 
         # Fill baseline metrics
+        age_input = wait.until(
+            EC.presence_of_element_located(
+                (By.CSS_SELECTOR, "input[placeholder='Age']")
+            )
+        )
+
+        age_input.clear()
+        age_input.send_keys("25")
+
         weight_input = wait.until(
             EC.presence_of_element_located(
                 (By.CSS_SELECTOR, "input[placeholder='Weight (e.g. 165 lbs)']")
@@ -328,6 +316,24 @@ def signup(
         bio_input.clear()
         bio_input.send_keys(DEFAULT_ONBOARDING_BIO)
 
+        # Daily targets
+        daily_step_goal_input = wait.until(
+            EC.presence_of_element_located(
+                (By.CSS_SELECTOR, "input[placeholder='Daily step goal (default 10,000)']")
+            )
+        )
+        daily_calorie_goal_input = wait.until(
+            EC.presence_of_element_located(
+                (By.CSS_SELECTOR, "input[placeholder='Daily calorie goal (default 2,000)']")
+            )
+        )
+
+        daily_step_goal_input.clear()
+        daily_step_goal_input.send_keys("8000")
+
+        daily_calorie_goal_input.clear()
+        daily_calorie_goal_input.send_keys("1800")
+
         # --------------------------------------AVAILABILITY--------------------------------------
         try:
             add_availability_button = wait.until(
@@ -349,10 +355,10 @@ def signup(
             )
 
             start_time_input.clear()
-            start_time_input.send_keys("09:00")
+            start_time_input.send_keys("08:00")
 
             end_time_input.clear()
-            end_time_input.send_keys("10:00")
+            end_time_input.send_keys("16:00")
 
             add_availability_submit = wait.until(
                 EC.element_to_be_clickable(

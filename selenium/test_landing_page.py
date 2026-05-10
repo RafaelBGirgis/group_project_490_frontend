@@ -5,28 +5,32 @@ Frontend: http://localhost:5173
 """
 
 import time
+from pathlib import Path
 
-from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.edge.options import Options
 
+from helpers import createDriver
+from helpers import printNotice
 from helpers import printSuccess, wait_for_page_to_fully_load
 from helpers import scroll
 
 FRONTEND_URL = "http://localhost:5173"
 
-def test_landing_page():
+def test_landing_page(driver=None):
     """Navigate from landing page to login page"""
 
-    edge_options = Options()
-    edge_options.add_experimental_option("excludeSwitches", ["enable-logging"])
-    edge_options.add_argument("--log-level=3")
+    # ---------- Create driver for standalone tests ----------
+    is_standalone_test = False
 
-    driver = webdriver.Edge(options=edge_options)
+    if driver is None:
+        driver = createDriver()
+        is_standalone_test = True
 
+    # ---------------------- Test code -----------------------
+    printNotice(f"Running {Path(__file__).name}")
     try:
         wait = WebDriverWait(driver, 10)
 
@@ -69,14 +73,17 @@ def test_landing_page():
         assert "/signup" in current_url, (
             f"Expected URL to contain '/signup', got: {current_url}"
         )
-        printSuccess(f"Successfully navigated to signup page: {driver.current_url}")
+        printSuccess(f"No errors in {Path(__file__).name}: {driver.current_url} \n")
 
     except Exception as e:
         print(f"[x] Test failed: {e} \n")
         raise
+
+    # ----------- Quit driver for standalone tests -----------
     finally:
-        driver.quit()
-        print("Browser closed \n")
+        if is_standalone_test:
+            driver.quit()
+            print("Browser closed \n")
 
 if __name__ == "__main__":
     test_landing_page()

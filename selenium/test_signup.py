@@ -1,24 +1,41 @@
 import time
+from pathlib import Path
 
 from helpers import createDriver
-from helpers import printSuccess
 from helpers import signup
+from helpers import printNotice
+from helpers import printSuccess
+from helpers import delete_account
 
 FRONTEND_URL = "http://localhost:5173"
 
 TEST_EMAIL = "rat8@njit.edu"
 TEST_PASSWORD = "password"   
 
-def test_signup():
+def test_signup(driver=None):
     """Test signup here"""
 
-    driver = createDriver()
-    signup(driver)
+    # ---------- Create driver for standalone tests ----------
+    is_standalone_test = False
 
-    printSuccess(f"Sign-Up works: {driver.current_url}")
+    if driver is None:
+        driver = createDriver()
+        is_standalone_test = True
 
-    driver.quit()
-    print("Browser closed \n")
+    # ---------------------- Test code -----------------------
+    printNotice(f"Running {Path(__file__).name}")
+    try:
+        signup(driver)
+        printSuccess(f"No errors in {Path(__file__).name}: {driver.current_url} \n")
+        
+    
+    # ----------- Quit driver for standalone tests -----------
+    finally:
+        if is_standalone_test:
+            delete_account(driver)
+            driver.quit()
+            print("Browser closed \n")
+
 
 if __name__ == "__main__":
     test_signup()

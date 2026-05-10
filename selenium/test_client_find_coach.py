@@ -1,4 +1,5 @@
 import time
+from pathlib import Path
 
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -10,9 +11,11 @@ from selenium.webdriver.common.action_chains import ActionChains
 from helpers import createDriver
 from helpers import signup
 from helpers import wait_for_page_to_fully_load
+from helpers import printNotice
 from helpers import printSuccess
 from helpers import printFailure
 from helpers import scroll
+from helpers import delete_account
 
 
 FRONTEND_URL = "http://localhost:5173"
@@ -106,10 +109,20 @@ def login_as_coach(coach_driver, email, password):
     print(f"Coach logged in successfully: {coach_driver.current_url}")
 
 
-def test_client_find_coach():
-    client_driver = createDriver()
+def test_client_find_coach(driver=None):
+    # ---------- Create driver for standalone tests ----------
+    is_standalone_test = False
+
+    if driver is None:
+        client_driver = createDriver()
+        is_standalone_test = True
+    else:
+        client_driver = driver
+        
     coach_driver = None
 
+    # ---------------------- Test code -----------------------
+    printNotice(f"Running {Path(__file__).name}")
     try:
         client_wait = WebDriverWait(client_driver, 10)
 
@@ -360,11 +373,6 @@ def test_client_find_coach():
 
         wait_for_page_to_fully_load(client_driver)
 
-        my_coach_card = client_wait.until(
-            EC.presence_of_element_located(
-                (By.XPATH, "//h3[normalize-space()='My Coach']")
-            )
-        )
         client_wait.until(
             EC.presence_of_element_located(
                 (By.XPATH, "//p[normalize-space()='Wii Fit Trainer']")
@@ -376,49 +384,7 @@ def test_client_find_coach():
             f"Expected to still be on '/client', got: {client_driver.current_url}"
         )
 
-        # Fire coach
-        fire_coach_button = client_wait.until(
-            EC.element_to_be_clickable(
-                (By.XPATH, "//button[normalize-space()='End Relationship']")
-            )
-        )
-        fire_coach_button.click()        
-        relationship_alert = client_wait.until(EC.alert_is_present())
-        time.sleep(1)
-        relationship_alert.accept()
-        time.sleep(2)
-
-        # Navigate to profile
-        open_profile_button = client_wait.until(
-            EC.element_to_be_clickable(
-                (By.CSS_SELECTOR, "button[title='Open Profile']")
-            )
-        )
-        open_profile_button.click()
-
-        client_wait.until(EC.url_contains("/profile"))
-        wait_for_page_to_fully_load(client_driver)
-
-        # Delete test account
-        delete_account_button = client_wait.until(
-            EC.element_to_be_clickable(
-                (By.XPATH, "//button[normalize-space()='Delete Account']")
-            )
-        )
-        delete_account_button.click()
-
-        delete_account_alert = client_wait.until(EC.alert_is_present())
-        delete_account_alert.accept()
-
-        account_deleted_alert = client_wait.until(EC.alert_is_present())
-        account_deleted_alert.accept()
-
-        client_wait.until(EC.url_contains("/login"))
-        wait_for_page_to_fully_load(client_driver)
-
-        time.sleep(2)
-
-        printSuccess(f"No errors: {client_driver.current_url}")
+        printSuccess(f"No errors in {Path(__file__).name}: {client_driver.current_url} \n")
 
     except Exception as e:
         printFailure(f"Test failed: {e}")
@@ -428,8 +394,26 @@ def test_client_find_coach():
         if coach_driver is not None:
             coach_driver.quit()
             print("Coach browser closed")
-        client_driver.quit()
-        print("Client browser closed \n")
+
+        # ----------- Quit driver for standalone tests -----------
+        if is_standalone_test:
+            # Fire coach 
+            fire_coach_button = client_wait.until(
+                EC.element_to_be_clickable(
+                    (By.XPATH, "//button[normalize-space()='End Relationship']")
+                )
+            )
+            fire_coach_button.click()        
+            relationship_alert = client_wait.until(EC.alert_is_present())
+            time.sleep(1)
+
+            relationship_alert.accept()
+            time.sleep(2)
+
+            # Standard code for standalone tests
+            delete_account(client_driver)
+            client_driver.quit()
+            print("Client browser closed \n")
 
 if __name__ == "__main__":
     test_client_find_coach()

@@ -428,7 +428,7 @@ def signup(
         wait.until(EC.url_contains("/client"))
         wait_for_page_to_fully_load(driver)
 
-        printSuccess(f"Successfully created brand new user \n")
+        print("Successfully created brand new user")
     
     except Exception as e:
         printFailure(f"Test failed: {e} \n")
@@ -436,7 +436,7 @@ def signup(
 
 
 def delete_account(driver, timeout=10):
-    """Delete the current account and wait until the login page is visible."""
+    """Delete the current account, then wait until the login page is visible."""
 
     wait = WebDriverWait(driver, timeout)
 
@@ -473,6 +473,10 @@ def delete_account(driver, timeout=10):
         f"Successfully deleted account and returned to: {driver.current_url}"
     )
 
+def printNotice(string):
+    TURQUOISE = "\033[36m"
+    RESET = "\033[0m"
+    print(f"{TURQUOISE}[!]{RESET} {string}")
 
 def printSuccess(string):
     GREEN = "\033[32m"
@@ -483,3 +487,8 @@ def printFailure(string):
     RED = "\033[31m"
     RESET = "\033[0m"
     print(f"{RED}[x]{RESET} {string}")
+
+def printCongratulation(string):
+    YELLOW = "\033[33m"
+    RESET = "\033[0m"
+    print(f"{YELLOW}[*]{RESET} {string}")

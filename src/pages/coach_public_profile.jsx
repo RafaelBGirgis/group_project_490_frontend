@@ -31,35 +31,35 @@ function SolidStar({ className }) {
 function Stars({ rating }) {
   const full = Math.floor(rating);
   const half = rating - full >= 0.25;
+  // Each child in this array MUST carry a unique key — without one React
+  // logs the "Each child in a list should have a unique 'key' prop" warning
+  // and falls back to index reconciliation, which corrupts hydration when
+  // the rating changes between renders.
   const stars = [];
 
-  {/* full star */}
-  for (let i = 0; i < full; i++)
-    stars.push(<SolidStar className="w-[1em] h-[1em]" />);
+  // Filled stars
+  for (let i = 0; i < full; i++) {
+    stars.push(<SolidStar key={`full-${i}`} className="w-[1em] h-[1em]" />);
+  }
 
-  {/* half star */}
+  // Half star (at most one)
   if (half) {
     stars.push(
-    <span key="half" className="relative w-[1em] h-[1em]">
-      {/* grey background*/}
-      <SolidStar className="absolute w-[1em] h-[1em] text-gray-600" />
-
-      {/* yellow half star */}
-      <span className="absolute overflow-hidden w-1/2 text-yellow-400">
-        <SolidStar className="w-[1em] h-[1em]" />
+      <span key="half" className="relative w-[1em] h-[1em]">
+        <SolidStar className="absolute w-[1em] h-[1em] text-gray-600" />
+        <span className="absolute overflow-hidden w-1/2 text-yellow-400">
+          <SolidStar className="w-[1em] h-[1em]" />
+        </span>
       </span>
-    </span>
     );
   }
 
-  {/* empty star */}
-  for (let i = stars.length; i < 5; i++)
-    stars.push(<SolidStar className="w-[1em] h-[1em] text-gray-600" />);
+  // Empty stars to pad to 5
+  for (let i = stars.length; i < 5; i++) {
+    stars.push(<SolidStar key={`empty-${i}`} className="w-[1em] h-[1em] text-gray-600" />);
+  }
 
-  {/* render stars array */}
-  return (
-    <> {stars} </>
-  );
+  return <>{stars}</>;
 }
 
 function Modal({ open, title, children, onClose }) {
@@ -338,13 +338,23 @@ export default function CoachPublicProfilePage() {
           }
         }
 
-        const [reviewResponse, reportResponse] = await Promise.all([
-          fetchCoachReviews(coachId).catch(() => ({ reviews: [] })),
-          fetchCoachReports(coachId).catch(() => ({ reports: [] })),
-        ]);
-
-        setReviews(Array.isArray(reviewResponse?.reviews) ? reviewResponse.reviews : []);
-        setReports(Array.isArray(reportResponse?.reports) ? reportResponse.reports : []);
+        // Reviews + reports are scoped to verified, hire-able coaches.
+        // Admins reviewing a pending applicant aren't acting as a client, so
+        // the review route 403s on their token and the report route is
+        // similarly client-only. Skip the calls in admin mode rather than
+        // letting them fail silently — keeps the console clean and avoids
+        // a wasted round trip per profile open.
+        if (adminMode) {
+          setReviews([]);
+          setReports([]);
+        } else {
+          const [reviewResponse, reportResponse] = await Promise.all([
+            fetchCoachReviews(coachId).catch(() => ({ reviews: [] })),
+            fetchCoachReports(coachId).catch(() => ({ reports: [] })),
+          ]);
+          setReviews(Array.isArray(reviewResponse?.reviews) ? reviewResponse.reviews : []);
+          setReports(Array.isArray(reportResponse?.reports) ? reportResponse.reports : []);
+        }
       } catch (error) {
         setActionError(error.message || "Unable to load this coach profile.");
       } finally {
@@ -357,10 +367,19 @@ export default function CoachPublicProfilePage() {
 
   useEffect(() => {
     if (!coachId || !availabilityRange.from || !availabilityRange.to) return;
+    // Skip for admin review of pending applicants — the availability route
+    // is gated to client/coach roles for the *target* coach (and unverified
+    // coaches don't have availability anyway), so the request 404s. Admins
+    // are reviewing the static profile (certs/experience/bio/pricing); the
+    // availability calendar is a hire-flow concern, not a vetting concern.
+    if (adminMode) {
+      setAvailabilityRows([]);
+      return;
+    }
     fetchCoachAvailabilityWindows(coachId, availabilityRange.from, availabilityRange.to)
       .then((rows) => setAvailabilityRows(Array.isArray(rows) ? rows : []))
       .catch(() => setAvailabilityRows([]));
-  }, [coachId, availabilityRange]);
+  }, [coachId, availabilityRange, adminMode]);
 
   const userInitials = useMemo(() => {
     const name = account?.name || "";

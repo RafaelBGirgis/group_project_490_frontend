@@ -44,7 +44,6 @@ import {
   fetchDailyStepsSurvey,
   fetchStepHistory,
   fetchWorkoutHistory,
-  fetchWorkoutHistoryEnriched,
 } from "../api/survey";
 import { getConversationWithAccount } from "../api/chat";
 import {
@@ -62,7 +61,6 @@ import {
 import { getCoachAccessState, getImmediateCoachAccessState } from "../utils/roleAccess";
 import { getImmediateRoleState, resolveRoleState } from "../utils/sessionAuth";
 import { setLastRoleContext } from "../utils/sessionCache";
-import WorkoutJournal from "../components/workout_journal";
 
 const role = "client";
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -170,6 +168,10 @@ export default function ClientDash() {
   const [todayPlans, setTodayPlans] = useState([]);
   const [planLookup, setPlanLookup] = useState({});
   const [selectedCwpData, setSelectedCwpData] = useState(null); // { cwp, plan, occurrenceStart, occurrenceEnd }
+  const [completedCount, setCompletedCount] = useState(0);
+  // Set of cwp.id values already logged today. Populated from server history on
+  // load (survives page refresh) and updated optimistically on each log action.
+  const [loggedCwpIds, setLoggedCwpIds] = useState(new Set());
   const [crudReady, setCrudReady] = useState(false);
   const [coach, setCoach] = useState(null);
   const [coachRating, setCoachRating] = useState(null);
@@ -380,6 +382,40 @@ export default function ClientDash() {
       setTodayPlans(filtered);
       setPlanLookup(lookup);
       saveDayCache(dateIso, { plans: filtered, planLookup: lookup });
+
+      // For today's tab only: fetch workout history and mark already-logged CWPs
+      // so the Log button stays disabled after a page refresh.
+      if (activeDay === TODAY_IDX) {
+        try {
+          const history = await fetchWorkoutHistory({ limit: 200 });
+          const todayStr = dateIso; // "YYYY-MM-DD"
+          const loggedActivityIds = new Set(
+            history
+              .filter((h) => {
+                const ts = h.last_updated || h.created_at;
+                return ts && new Date(ts).toISOString().slice(0, 10) === todayStr;
+              })
+              .map((h) => h.workout_plan_activity_id)
+              .filter(Boolean)
+          );
+          if (loggedActivityIds.size > 0) {
+            const alreadyDone = new Set();
+            filtered.forEach((cwp) => {
+              const plan = lookup[cwp.workout_plan_id];
+              const actIds = (plan?.activities ?? []).map((a) => a.id);
+              if (actIds.some((id) => loggedActivityIds.has(id))) {
+                alreadyDone.add(cwp.id);
+              }
+            });
+            if (alreadyDone.size > 0) {
+              setLoggedCwpIds((prev) => new Set([...prev, ...alreadyDone]));
+              setCompletedCount((prev) => prev + alreadyDone.size);
+            }
+          }
+        } catch {
+          // History fetch is best-effort — don't block the plan list.
+        }
+      }
     } catch {
       setTodayPlans([]);
     } finally {
@@ -395,6 +431,12 @@ export default function ClientDash() {
       setTodayPlans(cached.plans || []);
       setPlanLookup(cached.planLookup || {});
     }
+  }, [activeDay]);
+
+  // Reset completed count + logged set when day changes
+  useEffect(() => {
+    setCompletedCount(0);
+    setLoggedCwpIds(new Set());
   }, [activeDay]);
 
   useEffect(() => { loadPlansForDay(); }, [loadPlansForDay]);
@@ -416,10 +458,27 @@ export default function ClientDash() {
     });
   }
 
-  /*  log a workout activity via popup  */
+  /*  log a workout activity via popup — refresh calories + progress ring  */
   const handleLogWorkoutActivity = async (activityData) => {
     const localDate = getWeekDateForIdx(activeDay);
     await logWorkoutActivityForCwp({ ...activityData, local_date: localDate });
+    // Mark this CWP as logged — disables the Log button immediately
+    if (activityData.cwp_id != null) {
+      setLoggedCwpIds((prev) => new Set([...prev, activityData.cwp_id]));
+    }
+    // Increment local completed count immediately for the progress ring
+    setCompletedCount((prev) => prev + 1);
+    // Re-fetch calories so burned total + ring update without a page reload
+    try {
+      const calories = await fetchCaloriesToday();
+      setCaloriesBurned(calories.calories_burned);
+      setCaloriesConsumed(calories.calories_consumed);
+      if (Number.isFinite(calories.calories_goal) && calories.calories_goal > 0) {
+        setCaloriesGoal(calories.calories_goal);
+      }
+    } catch {
+      // Non-fatal — ring will update on next full refresh.
+    }
   };
 
   /*  delete a scheduled plan via popup  */
@@ -518,40 +577,11 @@ export default function ClientDash() {
     }
   };
 
-  /*  workout journal fetch callback  */
-  const journalFetchDayData = useCallback(async (isoDate) => {
-    const [y, mo, d] = isoDate.split("-").map(Number);
-    const from_dt = new Date(y, mo - 1, d, 0, 0, 0).toISOString();
-    const to_dt = new Date(y, mo - 1, d, 23, 59, 59).toISOString();
-
-    const [cwps, allPlans, allLogs] = await Promise.all([
-      listMyScheduledPlans({ from_dt, to_dt }).catch(() => []),
-      searchWorkoutPlans({ limit: 200 }).catch(() => []),
-      fetchWorkoutHistoryEnriched({ limit: 200 }).catch(() => []),
-    ]);
-
-    const lookup = {};
-    allPlans.forEach((p) => { lookup[p.id] = p; });
-
-    const logs = allLogs.filter((l) => {
-      const ts = l.last_updated || l.created_at;
-      if (!ts) return false;
-      try { return new Date(ts).toISOString().slice(0, 10) === isoDate; } catch { return false; }
-    });
-
-    const filtered = cwps.filter((cwp) =>
-      (cwp.occurrences ?? []).some((occ) => {
-        const s = new Date(occ.start_dt);
-        return `${s.getFullYear()}-${String(s.getMonth() + 1).padStart(2, "0")}-${String(s.getDate()).padStart(2, "0")}` === isoDate;
-      })
-    );
-
-    return { cwps: filtered, planLookup: lookup, logs };
-  }, []);
 
   /*  derived values  */
   const totalCount = todayPlans.reduce((sum, cwp) => sum + (planLookup[cwp.workout_plan_id]?.activities?.length ?? 0), 0);
-  const completedCount = 0; // tracked per-session inside WorkoutPlanPopup
+  // completedCount is incremented locally on each handleLogWorkoutActivity call.
+  // It resets to 0 when the day tab changes (different day = fresh state).
   const stepsGoal = account?.daily_steps_goal ?? 10000;
   const stepsPercent = pct(stepCount ?? 0, stepsGoal);
   // Net calories = consumed − burned. This is what counts toward the goal:
@@ -804,16 +834,22 @@ export default function ClientDash() {
                       sub={timeLabel}
                       right={
                         activeDay === TODAY_IDX ? (
-                          <button
-                            className={`text-xs border rounded-full px-3 py-1 transition-colors ${crudReady
-                              ? "text-blue-400 border-blue-500/50 hover:bg-blue-500/10 cursor-pointer"
-                              : "text-gray-600 border-gray-700 opacity-50 cursor-not-allowed"
-                              }`}
-                            onClick={crudReady ? () => openCwpPopup(cwp) : undefined}
-                            disabled={!crudReady}
-                          >
-                            Log →
-                          </button>
+                          loggedCwpIds.has(cwp.id) ? (
+                            <span className="text-[10px] px-3 py-1.5 rounded-full border border-green-500/30 text-green-400">
+                              Done ✓
+                            </span>
+                          ) : (
+                            <button
+                              className={`text-xs border rounded-full px-3 py-1 transition-colors ${crudReady
+                                  ? "text-blue-400 border-blue-500/50 hover:bg-blue-500/10 cursor-pointer"
+                                  : "text-gray-600 border-gray-700 opacity-50 cursor-not-allowed"
+                                }`}
+                              onClick={crudReady ? () => openCwpPopup(cwp) : undefined}
+                              disabled={!crudReady}
+                            >
+                              Log →
+                            </button>
+                          )
                         ) : null
                       }
                     />
@@ -957,12 +993,6 @@ export default function ClientDash() {
           )}
         </DashboardCard>
 
-        {/*  WORKOUT JOURNAL  */}
-        <SectionHeader label="WORKOUT JOURNAL" role={role} />
-
-        <DashboardCard role={role} title="Workout Journal">
-          <WorkoutJournal fetchDayData={journalFetchDayData} accent="#3B82F6" />
-        </DashboardCard>
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════

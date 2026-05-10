@@ -10,14 +10,37 @@ import { apiGet, apiPost, withQuery } from "./api";
 
 const BASE = "/roles/client/fitness/daily-survey";
 
+/**
+ * Returns { local_date, tz_offset_minutes } for the calling browser.
+ *
+ * local_date        — YYYY-MM-DD in the user's local timezone (NOT UTC).
+ * tz_offset_minutes — JS `getTimezoneOffset()` convention: positive for zones
+ *                     west of UTC (e.g. EDT = +240).  The backend inverts this
+ *                     to compute the correct UTC window.
+ *
+ * Sending these on every "today" and "start" call fixes the late-night bug
+ * where UTC has already ticked to the next day but the client is still on the
+ * previous one (e.g. 10 PM EDT = 2 AM UTC next day).
+ */
+function localDateParams() {
+  const now = new Date();
+  const local_date = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("-");
+  const tz_offset_minutes = now.getTimezoneOffset(); // positive for UTC-N
+  return { local_date, tz_offset_minutes };
+}
+
 /*  mood / wellbeing  */
 
 export function fetchDailyMoodSurvey() {
-  return apiGet(`${BASE}/today`);
+  return apiGet(withQuery(`${BASE}/today`, localDateParams()));
 }
 
 export function startDailyMoodSurvey() {
-  return apiPost(`${BASE}/start`, {});
+  return apiPost(withQuery(`${BASE}/start`, localDateParams()), {});
 }
 
 /**
@@ -32,11 +55,11 @@ export function submitDailyMoodSurvey(payload) {
 /*  body metrics  */
 
 export function fetchDailyBodyMetricsSurvey() {
-  return apiGet(`${BASE}/body-metrics/today`);
+  return apiGet(withQuery(`${BASE}/body-metrics/today`, localDateParams()));
 }
 
 export function startDailyBodyMetricsSurvey() {
-  return apiPost(`${BASE}/body-metrics/start`, {});
+  return apiPost(withQuery(`${BASE}/body-metrics/start`, localDateParams()), {});
 }
 
 /**
@@ -51,11 +74,11 @@ export function submitDailyBodyMetricsSurvey(payload) {
 /*  steps  */
 
 export function fetchDailyStepsSurvey() {
-  return apiGet(`${BASE}/steps/today`);
+  return apiGet(withQuery(`${BASE}/steps/today`, localDateParams()));
 }
 
 export function startDailyStepsSurvey() {
-  return apiPost(`${BASE}/steps/start`, {});
+  return apiPost(withQuery(`${BASE}/steps/start`, localDateParams()), {});
 }
 
 /**
@@ -64,6 +87,7 @@ export function startDailyStepsSurvey() {
 export function submitDailyStepsSurvey(payload) {
   return apiPost(`${BASE}/steps/submit`, payload);
 }
+
 
 /*  combined helpers  */
 

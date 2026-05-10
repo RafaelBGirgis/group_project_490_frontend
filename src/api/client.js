@@ -546,19 +546,19 @@ function normalizeCoachItem(coach) {
       : [];
   const certifications = Array.isArray(coach.certifications)
     ? coach.certifications.map((cert) => ({
-        name: cert.certification_name || cert.name || "Certification",
-        organization: cert.certification_organization || cert.organization || "Organization",
-        year: cert.certification_date || cert.year || "",
-        description: cert.certification_score || cert.description || "",
-      }))
+      name: cert.certification_name || cert.name || "Certification",
+      organization: cert.certification_organization || cert.organization || "Organization",
+      year: cert.certification_date || cert.year || "",
+      description: cert.certification_score || cert.description || "",
+    }))
     : [];
   const experiences = Array.isArray(coach.experiences)
     ? coach.experiences.map((experience) => ({
-        title: experience.experience_title || experience.title || "Experience",
-        organization: experience.experience_name || experience.organization || experience.issuer || "",
-        year: formatExperienceYear(experience.experience_start, experience.experience_end, experience.year),
-        description: experience.experience_description || experience.description || "",
-      }))
+      title: experience.experience_title || experience.title || "Experience",
+      organization: experience.experience_name || experience.organization || experience.issuer || "",
+      year: formatExperienceYear(experience.experience_start, experience.experience_end, experience.year),
+      description: experience.experience_description || experience.description || "",
+    }))
     : [];
 
   return {
@@ -630,7 +630,7 @@ function normalizeClientCoachRequest(item) {
             ? Number(item.relationship.id)
             : item.client_coach_relationship?.id != null
               ? Number(item.client_coach_relationship.id)
-          : null,
+              : null,
     updated_at: item.updated_at || item.last_updated || item.created_at || null,
   };
 }
@@ -786,11 +786,11 @@ function normalizeUploadResponse(response) {
 
   return resolvedUrl
     ? {
-        ...response,
-        url: resolvedUrl,
-        public_url: response.public_url || resolvedUrl,
-        pfp_url: response.pfp_url || resolvedUrl,
-      }
+      ...response,
+      url: resolvedUrl,
+      public_url: response.public_url || resolvedUrl,
+      pfp_url: response.pfp_url || resolvedUrl,
+    }
     : response;
 }
 

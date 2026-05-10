@@ -16,34 +16,85 @@ import {
 } from "../api/chat";
 import { apiPost, withQuery } from "../api/api";
 import { ROLE_THEMES } from "../components/theme";
-import { getCoachAccessState } from "../utils/roleAccess";
+import { getCoachAccessState, getImmediateCoachAccessState } from "../utils/roleAccess";
+import { getImmediateRoleState, resolveRoleState } from "../utils/sessionAuth";
+import { getLastRoleContext } from "../utils/sessionCache";
 
 export default function MessagesPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const preselectedAccount = searchParams.get("account");
+  const immediateRoleState = getImmediateRoleState();
+  const immediateCoachAccess = getImmediateCoachAccessState();
+  const lastRoleContext = getLastRoleContext();
 
   const [account, setAccount] = useState(null);
   const [loadingAccount, setLoadingAccount] = useState(true);
-  const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
+  const [roleState, setRoleState] = useState(immediateRoleState);
+  const [canSwitchToCoach, setCanSwitchToCoach] = useState(
+    immediateCoachAccess.canAccessCoach
+  );
+  const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(immediateRoleState.hasAdminRole);
 
   useEffect(() => {
     fetchMe()
       .then(async (me) => {
         setAccount(me);
-        const coachAccess = await getCoachAccessState(me);
+        const roleState = await resolveRoleState().catch(() => immediateRoleState);
+        setRoleState(roleState);
+        const coachAccess = await getCoachAccessState(me, roleState).catch(
+          () => immediateCoachAccess
+        );
         setCanSwitchToCoach(coachAccess.canAccessCoach);
+        setCanSwitchToAdmin(Boolean(roleState.hasAdminRole));
       })
       .catch(() => {})
       .finally(() => setLoadingAccount(false));
   }, []);
 
-  const role = account?.admin_id
+  const accountRole = !account
+    ? null
+    : account.admin_id
+      ? "admin"
+      : account.coach_id
+        ? "coach"
+        : "client";
+  const fallbackRole = roleState.hasAdminRole
     ? "admin"
-    : account?.coach_id
+    : roleState.hasCoachRole
       ? "coach"
       : "client";
+  const navbarRole =
+    lastRoleContext?.role ||
+    (accountRole === "admin" ? fallbackRole : accountRole);
+  const role = accountRole || fallbackRole;
   const theme = ROLE_THEMES[role] || ROLE_THEMES.client;
+  const navbarSwitchOptions =
+    navbarRole === "coach"
+      ? [
+          { label: "Client", to: "/client" },
+          ...(canSwitchToAdmin ? [{ label: "Admin", to: "/admin" }] : []),
+        ]
+      : navbarRole === "admin"
+        ? [
+            ...(canSwitchToCoach ? [{ label: "Coach", to: "/coach" }] : []),
+            ...(roleState.hasClientRole ? [{ label: "Client", to: "/client" }] : []),
+          ]
+      : [
+          ...(canSwitchToCoach ? [{ label: "Coach", to: "/coach" }] : []),
+          ...(canSwitchToAdmin ? [{ label: "Admin", to: "/admin" }] : []),
+        ];
+  const dashboardContextAction = lastRoleContext
+    ? {
+        label:
+          lastRoleContext.role === "admin"
+            ? "Admin Dashboard"
+            : lastRoleContext.role === "coach"
+            ? "Coach Dashboard"
+            : "Client Dashboard",
+        to: lastRoleContext.dashboardPath,
+      }
+    : null;
 
   const [conversations, setConversations] = useState([]);
   const [activeChat, setActiveChat] = useState(null);
@@ -328,7 +379,13 @@ export default function MessagesPage() {
   if (loadingAccount) {
     return (
       <div className="min-h-screen" style={{ backgroundColor: "#080D19" }}>
-        <Navbar role={role} userName="?" />
+        <Navbar
+          role={navbarRole}
+          userName="?"
+          hideProfile={Boolean(immediateRoleState.hasAdminRole)}
+          switchOptions={navbarSwitchOptions}
+          contextAction={dashboardContextAction}
+        />
         <div className="max-w-7xl mx-auto px-6 py-6">
           <div className="h-[calc(100vh-120px)] rounded-2xl border border-white/6 bg-[#0F1729] animate-pulse" />
         </div>
@@ -338,7 +395,13 @@ export default function MessagesPage() {
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: "#080D19" }}>
-      <Navbar role={role} userName={userInitials} canSwitchToCoach={canSwitchToCoach} />
+      <Navbar
+        role={navbarRole}
+        userName={userInitials}
+        hideProfile={Boolean(account?.admin_id)}
+        switchOptions={navbarSwitchOptions}
+        contextAction={dashboardContextAction}
+      />
 
       <div className="max-w-7xl mx-auto px-6 py-6">
         {chatError ? (

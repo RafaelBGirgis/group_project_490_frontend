@@ -61,8 +61,9 @@ import {
   rememberTerminatedCoachId,
   rememberTerminatedRelationshipId,
 } from "../utils/terminatedRelationships";
-import { getCoachAccessState } from "../utils/roleAccess";
-import { resolveRoleState } from "../utils/sessionAuth";
+import { getCoachAccessState, getImmediateCoachAccessState } from "../utils/roleAccess";
+import { getImmediateRoleState, resolveRoleState } from "../utils/sessionAuth";
+import { setLastRoleContext } from "../utils/sessionCache";
 import WorkoutJournal from "../components/workout_journal";
 
 const role = "client";
@@ -85,6 +86,8 @@ function getWeekDateForIdx(weekdayIdx) {
 
 export default function ClientDash() {
   const navigate = useNavigate();
+  const immediateRoleState = getImmediateRoleState();
+  const immediateCoachAccess = getImmediateCoachAccessState();
 
   /*  auth guard  */
   const [authed, setAuthed] = useState(false);
@@ -92,6 +95,10 @@ export default function ClientDash() {
   useEffect(() => {
     setAuthed(true);
   }, [navigate]);
+
+  useEffect(() => {
+    setLastRoleContext({ role: "client", dashboardPath: "/client" });
+  }, []);
 
   /*  overlay state  */
   const [overlay, setOverlay] = useState(null); // "workout" | "coach" | "availability" | "meals" | "survey" | "steps" | null
@@ -172,8 +179,10 @@ export default function ClientDash() {
   const [availableMeals, setAvailableMeals] = useState([]);
   const [loading, setLoading]           = useState(true);
   const [relationshipId, setRelationshipId] = useState(null);
-  const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
-  const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(false);
+  const [canSwitchToCoach, setCanSwitchToCoach] = useState(
+    immediateCoachAccess.canAccessCoach
+  );
+  const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(immediateRoleState.hasAdminRole);
   const [pendingCoachRequest, setPendingCoachRequest] = useState(null);
   const [approvedCoachRequest, setApprovedCoachRequest] = useState(null);
   // Tracks whether there's something worth polling for (pending request or active coach).
@@ -243,8 +252,8 @@ export default function ClientDash() {
         if (me.daily_calorie_budget) setCaloriesGoal(me.daily_calorie_budget);
         const roleState = await resolveRoleState();
         setCanSwitchToAdmin(roleState.hasAdminRole);
-        const coachAccess = await getCoachAccessState(me);
-        setCanSwitchToCoach(roleState.hasAdminRole || coachAccess.canAccessCoach);
+        const coachAccess = await getCoachAccessState(me, roleState);
+        setCanSwitchToCoach(coachAccess.canAccessCoach);
 
         if (me.client_id) {
           setClientId(me.client_id);

@@ -30,14 +30,10 @@ import {
   updateCoachInformation,
 } from "../api/coach";
 import AvailabilityCalendar from "../components/availability/AvailabilityCalendar";
-import { getCoachAccessState } from "../utils/roleAccess";
-import { resolveRoleState } from "../utils/sessionAuth";
+import { getCoachAccessState, getImmediateCoachAccessState } from "../utils/roleAccess";
+import { getImmediateRoleState, resolveRoleState } from "../utils/sessionAuth";
 import { clearAuth } from "../api/auth";
-import { listMyScheduledPlans, searchWorkoutPlans } from "../api/plan_my_week";
-import WorkoutPlanPopup from "../components/plan_my_week/workout_plan_popup";
-import { loadWeekCache, saveWeekCache } from "../utils/scheduleCache";
-import WorkoutJournal from "../components/workout_journal";
-import { fetchWorkoutHistoryEnriched } from "../api/survey";
+import { setLastRoleContext } from "../utils/sessionCache";
 
 const PRIMARY_GOALS = [
   "Weight Loss",
@@ -100,7 +96,7 @@ const normalizeGenderToSignupValue = (value) => {
   return value || "";
 };
 
-const buildAccountUpdatePayload = ({ name, age, email, bio, pfp_url, gender, dailyStepsGoal, dailyCalorieBudget }) => {
+const buildAccountUpdatePayload = ({ name, age, email, bio, pfp_url, gender }) => {
   const payload = {};
 
   if (name) {
@@ -121,14 +117,6 @@ const buildAccountUpdatePayload = ({ name, age, email, bio, pfp_url, gender, dai
   }
   if (gender) {
     payload.gender = gender;
-  }
-  const parsedStepsGoal = Number(dailyStepsGoal);
-  if (Number.isFinite(parsedStepsGoal) && parsedStepsGoal > 0) {
-    payload.daily_steps_goal = parsedStepsGoal;
-  }
-  const parsedCalorieBudget = Number(dailyCalorieBudget);
-  if (Number.isFinite(parsedCalorieBudget) && parsedCalorieBudget > 0) {
-    payload.daily_calorie_budget = parsedCalorieBudget;
   }
 
   return payload;
@@ -161,6 +149,8 @@ function ProfilePage({ role = "client" }) {
   const navigate = useNavigate();
   const location = useLocation();
   const isCoach = role === "coach";
+  const immediateRoleState = getImmediateRoleState();
+  const immediateCoachAccess = getImmediateCoachAccessState();
 
   const accent = isCoach ? "#F59E0B" : "#3B82F6";
   const accentSoft = isCoach ? "rgba(245, 158, 11, 0.12)" : "rgba(59, 130, 246, 0.12)";
@@ -184,8 +174,6 @@ function ProfilePage({ role = "client" }) {
     profilePicture: null,
     pricingInterval: "",
     amount: "",
-    dailyStepsGoal: "",
-    dailyCalorieBudget: "",
   });
 
   // Unified profile data from API
@@ -236,9 +224,11 @@ function ProfilePage({ role = "client" }) {
     exp_date: "",
   });
   const [showPaymentForm, setShowPaymentForm] = useState(false);
-  const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
-  const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(false);
-  const [hasCoachStatus, setHasCoachStatus] = useState(false);
+  const [canSwitchToCoach, setCanSwitchToCoach] = useState(
+    immediateCoachAccess.canAccessCoach
+  );
+  const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(immediateRoleState.hasAdminRole);
+  const [hasCoachStatus, setHasCoachStatus] = useState(immediateCoachAccess.hasCoachRecord);
   const [progressPicPage, setProgressPicPage] = useState(0);
   const PICS_PER_PAGE = 6;
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
@@ -274,9 +264,6 @@ function ProfilePage({ role = "client" }) {
   const [availabilityRange, setAvailabilityRange] = useState({ from: null, to: null });
   const [availabilityMessage, setAvailabilityMessage] = useState("");
   const [availabilityError, setAvailabilityError] = useState("");
-  const [cwpLookup, setCwpLookup] = useState({});
-  const [planLookup, setPlanLookup] = useState({});
-  const [selectedCwpData, setSelectedCwpData] = useState(null);
 
   const availabilityListFn = isCoach ? listSelfAvailability : listClientAvailability;
   const availabilityBusyFn = isCoach ? listSelfBusySlots : listClientBusySlots;
@@ -285,72 +272,19 @@ function ProfilePage({ role = "client" }) {
 
   const refreshAvailability = useCallback(async (fromIso, toIso) => {
     if (!fromIso || !toIso) return;
-
-    // Paint from cache immediately
-    const cached = loadWeekCache(fromIso);
-    if (cached) {
-      setAvailabilityRows(cached.availabilities || []);
-      setAvailabilityBusy(cached.busySlots || []);
-      if (!isCoach) {
-        const cwpMap = {};
-        (cached.cwps || []).forEach((c) => { cwpMap[c.id] = c; });
-        setCwpLookup(cwpMap);
-        const planMap = {};
-        (cached.plans || []).forEach((p) => { planMap[p.id] = p; });
-        setPlanLookup(planMap);
-      }
-    }
-
-    const fetches = [
+    const [rows, busy] = await Promise.all([
       availabilityListFn(fromIso, toIso).catch(() => []),
       availabilityBusyFn(fromIso, toIso).catch(() => []),
-      ...(!isCoach ? [
-        listMyScheduledPlans({ from_dt: fromIso, to_dt: toIso }).catch(() => []),
-        searchWorkoutPlans({ limit: 200 }).catch(() => []),
-      ] : []),
-    ];
-    const [rows, busy, cwps, allPlans] = await Promise.all(fetches);
-
-    const freshAvail = Array.isArray(rows) ? rows : [];
-    const freshBusy = Array.isArray(busy) ? busy : [];
-    setAvailabilityRows(freshAvail);
-    setAvailabilityBusy(freshBusy);
-
-    if (!isCoach) {
-      const cwpMap = {};
-      (cwps || []).forEach((c) => { cwpMap[c.id] = c; });
-      setCwpLookup(cwpMap);
-      const planMap = {};
-      (allPlans || []).forEach((p) => { planMap[p.id] = p; });
-      setPlanLookup(planMap);
-      saveWeekCache(fromIso, { availabilities: freshAvail, busySlots: freshBusy, cwps: cwps || [], plans: allPlans || [] });
-    } else {
-      saveWeekCache(fromIso, { availabilities: freshAvail, busySlots: freshBusy });
-    }
-  }, [availabilityListFn, availabilityBusyFn, isCoach]);
+    ]);
+    setAvailabilityRows(Array.isArray(rows) ? rows : []);
+    setAvailabilityBusy(Array.isArray(busy) ? busy : []);
+  }, [availabilityListFn, availabilityBusyFn]);
 
   useEffect(() => {
     if (availabilityRange.from && availabilityRange.to) {
       refreshAvailability(availabilityRange.from, availabilityRange.to);
     }
   }, [availabilityRange, refreshAvailability]);
-
-  function isoDateStr(date) {
-    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-  }
-
-  const handleBusySlotClick = useCallback((seg) => {
-    if (seg.source !== "workout_plan" || seg.source_id == null) return;
-    const cwp = cwpLookup[seg.source_id];
-    if (!cwp) return;
-    const plan = planLookup[cwp.workout_plan_id] ?? null;
-    const slotDate = isoDateStr(seg.start);
-    const occ = (cwp.occurrences ?? []).find((o) => {
-      const s = new Date(o.start_dt);
-      return isoDateStr(s) === slotDate;
-    }) ?? { start_dt: seg.start.toISOString(), end_dt: seg.end.toISOString() };
-    setSelectedCwpData({ cwp, plan, occurrenceStart: occ.start_dt, occurrenceEnd: occ.end_dt });
-  }, [cwpLookup, planLookup]);
 
   const fullName = useMemo(
     () => `${profile.firstName} ${profile.lastName}`.trim(),
@@ -379,6 +313,13 @@ function ProfilePage({ role = "client" }) {
     setSaveMessage(location.state.successMessage || "Application successfully sent.");
     navigate(location.pathname, { replace: true, state: {} });
   }, [location.pathname, location.state, navigate]);
+
+  useEffect(() => {
+    setLastRoleContext({
+      role: isCoach ? "coach" : "client",
+      dashboardPath: isCoach ? "/coach" : "/client",
+    });
+  }, [isCoach]);
 
   // Scroll to a section anchor (e.g. #availability) on mount or hash change.
   useEffect(() => {
@@ -428,7 +369,7 @@ function ProfilePage({ role = "client" }) {
           resolveRoleState().catch(() => null),
         ]);
         const data = meData;
-        const coachAccess = await getCoachAccessState(data);
+        const coachAccess = await getCoachAccessState(data, roleState);
         setCanSwitchToAdmin(Boolean(roleState?.hasAdminRole));
         setCanSwitchToCoach(coachAccess.canAccessCoach);
         setHasCoachStatus(coachAccess.hasCoachRecord);
@@ -464,8 +405,6 @@ function ProfilePage({ role = "client" }) {
           bio: acct.bio || "",
           primaryGoal: resolveClientPrimaryGoal(clientDetails),
           profilePicture: acct.pfp_url || null,
-          dailyStepsGoal: acct.daily_steps_goal != null ? String(acct.daily_steps_goal) : "",
-          dailyCalorieBudget: acct.daily_calorie_budget != null ? String(acct.daily_calorie_budget) : "",
         };
 
         setProfile((prev) => ({ ...prev, ...nextProfile }));
@@ -632,8 +571,6 @@ function ProfilePage({ role = "client" }) {
         bio: profile.bio,
         pfp_url: profilePictureUrl,
         gender: profile.gender,
-        dailyStepsGoal: profile.dailyStepsGoal,
-        dailyCalorieBudget: profile.dailyCalorieBudget,
       });
       if (Object.keys(accountPayload).length > 0) {
         await updateAccount(accountPayload);
@@ -1122,31 +1059,6 @@ function ProfilePage({ role = "client" }) {
       .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
       .join(" ");
 
-  const journalFetchDayData = useCallback(async (isoDate) => {
-    const [y, mo, d] = isoDate.split("-").map(Number);
-    const from_dt = new Date(y, mo - 1, d, 0, 0, 0).toISOString();
-    const to_dt = new Date(y, mo - 1, d, 23, 59, 59).toISOString();
-    const [cwps, allPlans, allLogs] = await Promise.all([
-      listMyScheduledPlans({ from_dt, to_dt }).catch(() => []),
-      searchWorkoutPlans({ limit: 200 }).catch(() => []),
-      fetchWorkoutHistoryEnriched({ limit: 200 }).catch(() => []),
-    ]);
-    const lookup = {};
-    allPlans.forEach((p) => { lookup[p.id] = p; });
-    const logs = allLogs.filter((l) => {
-      const ts = l.last_updated || l.created_at;
-      if (!ts) return false;
-      try { return new Date(ts).toISOString().slice(0, 10) === isoDate; } catch { return false; }
-    });
-    const filtered = cwps.filter((cwp) =>
-      (cwp.occurrences ?? []).some((occ) => {
-        const s = new Date(occ.start_dt);
-        return `${s.getFullYear()}-${String(s.getMonth() + 1).padStart(2, "0")}-${String(s.getDate()).padStart(2, "0")}` === isoDate;
-      })
-    );
-    return { cwps: filtered, planLookup: lookup, logs };
-  }, []);
-
   return (
     <div className="min-h-screen bg-[#080D19] text-white">
       <Navbar
@@ -1334,7 +1246,6 @@ function ProfilePage({ role = "client" }) {
               ] : [
                 { id: "personal", label: "Personal" },
                 { id: "telemetry", label: "Progress" },
-                { id: "journal", label: "Workout Journal" },
                 { id: "availability", label: "Availability" },
                 { id: "subscription", label: "Subscription & Payment" },
               ]}
@@ -1429,20 +1340,6 @@ function ProfilePage({ role = "client" }) {
                         ))}
                       </select>
                     </div>
-                    <Input
-                      label="Daily Steps Goal"
-                      value={profile.dailyStepsGoal}
-                      onChange={(v) => handleProfileChange("dailyStepsGoal", v)}
-                      placeholder="10000"
-                      disabled={profileInputsDisabled}
-                    />
-                    <Input
-                      label="Daily Calorie Budget"
-                      value={profile.dailyCalorieBudget}
-                      onChange={(v) => handleProfileChange("dailyCalorieBudget", v)}
-                      placeholder="2000"
-                      disabled={profileInputsDisabled}
-                    />
                   </div>
 
                   <div className="mt-4">
@@ -1523,12 +1420,6 @@ function ProfilePage({ role = "client" }) {
               </Panel>
             )}
 
-            {!isCoach && (
-              <Panel id="journal" title="Workout Journal" accent={accent} {...panelProps("journal")}>
-                <WorkoutJournal fetchDayData={journalFetchDayData} accent={accent} />
-              </Panel>
-            )}
-
             <Panel id="availability" title="Availability" accent={accent} {...panelProps("availability")}>
               {availabilityMessage ? (
                 <div className="mb-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">
@@ -1546,7 +1437,6 @@ function ProfilePage({ role = "client" }) {
                 role={isCoach ? "coach" : "client"}
                 mode="edit"
                 onRangeChange={(from, to) => setAvailabilityRange({ from, to })}
-                onBusySlotClick={!isCoach ? handleBusySlotClick : undefined}
                 onCreate={async (payload) => {
                   setAvailabilityError("");
                   setAvailabilityMessage("");
@@ -1703,17 +1593,6 @@ function ProfilePage({ role = "client" }) {
           </div>
         </div>
       </div>
-
-      {selectedCwpData && (
-        <WorkoutPlanPopup
-          cwp={selectedCwpData.cwp}
-          plan={selectedCwpData.plan}
-          occurrenceStart={selectedCwpData.occurrenceStart}
-          occurrenceEnd={selectedCwpData.occurrenceEnd}
-          isToday={false}
-          onClose={() => setSelectedCwpData(null)}
-        />
-      )}
 
       {showPaymentDialog && selectedInvoiceForPayment && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">

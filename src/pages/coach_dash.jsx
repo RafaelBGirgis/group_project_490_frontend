@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { useState, useEffect, useCallback } from "react";
 import {
   Navbar,
@@ -29,8 +29,9 @@ import {
   denyClientRequest,
 } from "../api/coach";
 import { getConversationWithAccount } from "../api/chat";
-import { getCoachAccessState } from "../utils/roleAccess";
-import { resolveRoleState } from "../utils/sessionAuth";
+import { getCoachAccessState, getImmediateCoachAccessState } from "../utils/roleAccess";
+import { getImmediateRoleState, resolveRoleState } from "../utils/sessionAuth";
+import { setLastRoleContext } from "../utils/sessionCache";
 import SessionsDetail from "../components/overlays/sessions_detail";
 import ReviewsDetail from "../components/overlays/reviews_detail";
 import ClientProfile from "../components/overlays/client_profile";
@@ -147,12 +148,18 @@ function formatCoachEarnings(value) {
 
 export default function CoachDashboard() {
   const navigate = useNavigate();
+  const immediateRoleState = getImmediateRoleState();
+  const immediateCoachAccess = getImmediateCoachAccessState();
 
   /*  auth guard  */
   const [authed, setAuthed] = useState(false);
   useEffect(() => {
     setAuthed(true);
   }, [navigate]);
+
+  useEffect(() => {
+    setLastRoleContext({ role: "coach", dashboardPath: "/coach" });
+  }, []);
 
   /*  overlay  */
   const [overlay, setOverlay] = useState(null);
@@ -172,7 +179,7 @@ export default function CoachDashboard() {
   const [clientRequests, setClientRequests] = useState([]);
   const [clientRequestDetails, setClientRequestDetails] = useState({});
   const [requestActionId, setRequestActionId] = useState(null);
-  const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(false);
+  const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(immediateRoleState.hasAdminRole);
   const [chatActionId, setChatActionId] = useState(null);
   const [selectedClient, setSelectedClient] = useState(null);
   const [clientSearchTerm, setClientSearchTerm] = useState("");
@@ -433,6 +440,14 @@ export default function CoachDashboard() {
   const lastName = nameParts.slice(1).join(" ") || "";
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good Morning" : hour < 17 ? "Good Afternoon" : "Good Evening";
+  const shouldBlockCoachPage =
+    immediateRoleState.roleNames.length > 0 &&
+    !immediateRoleState.hasAdminRole &&
+    !immediateCoachAccess.canAccessCoach;
+
+  if (shouldBlockCoachPage) {
+    return <Navigate to="/profile" replace />;
+  }
 
   /*  loading skeleton  */
   if (loading) {

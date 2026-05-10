@@ -25,9 +25,6 @@ export default function SignupPage() {
     email: "",
     password: "",
     confirmPassword: "",
-    age: "",
-    gender: "",
-    bio: "",
   });
   const [error, setError] = useState("");
 
@@ -72,29 +69,18 @@ export default function SignupPage() {
       return;
     }
 
-    const parsedAge = Number(formData.age);
-    if (!Number.isInteger(parsedAge) || parsedAge <= 0) {
-      setError("Please enter a valid age");
-      return;
-    }
-
     try {
       const data = await signupRequest(
         formData.email,
         formData.password,
         formData.name,
-        parsedAge,
-        formData.gender,
         undefined,
-        formData.bio.trim() || undefined
+        undefined
       );
       storeToken(data.access_token);
       saveSignupPrefill({
         name: formData.name,
         email: formData.email,
-        age: parsedAge,
-        gender: formData.gender,
-        bio: formData.bio.trim(),
       });
       const account = await fetchMe();
       window.location.href = await resolvePostSignupPath(account);
@@ -230,41 +216,6 @@ export default function SignupPage() {
 
               <div>
                 <label className="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-400">
-                  Age
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  name="age"
-                  placeholder="25"
-                  value={formData.age}
-                  onChange={handleChange}
-                  className="w-full rounded-xl border border-white/10 bg-[#0B1220] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-blue-400/60 focus:ring-2 focus:ring-blue-500/20"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-400">
-                  Gender
-                </label>
-                <select
-                  name="gender"
-                  value={formData.gender}
-                  onChange={handleChange}
-                  className="w-full rounded-xl border border-white/10 bg-[#0B1220] px-4 py-3 text-sm text-white outline-none transition focus:border-blue-400/60 focus:ring-2 focus:ring-blue-500/20"
-                  required
-                >
-                  <option value="">Select gender</option>
-                  <option value="Male">Male</option>
-                  <option value="Female">Female</option>
-                  <option value="Non-Binary">Non-binary</option>
-                  <option value="Prefer_Not_to_Say">Prefer not to say</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-400">
                   Password
                 </label>
                 <input
@@ -290,20 +241,6 @@ export default function SignupPage() {
                   onChange={handleChange}
                   className="w-full rounded-xl border border-white/10 bg-[#0B1220] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-blue-400/60 focus:ring-2 focus:ring-blue-500/20"
                   required
-                />
-              </div>
-
-              <div>
-                <label className="mb-2 block text-xs font-semibold uppercase tracking-widest text-slate-400">
-                  Bio (Optional)
-                </label>
-                <textarea
-                  name="bio"
-                  placeholder="Tell us about your fitness goals"
-                  value={formData.bio}
-                  onChange={handleChange}
-                  rows={3}
-                  className="w-full rounded-xl border border-white/10 bg-[#0B1220] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-blue-400/60 focus:ring-2 focus:ring-blue-500/20"
                 />
               </div>
 

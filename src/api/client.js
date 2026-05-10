@@ -1,5 +1,6 @@
 import { apiDelete, apiFetch, apiGet, apiPatch, apiPost, apiPut, withQuery } from "./api";
 import { clearAuth } from "./auth";
+import { cacheAccountSnapshot, cacheRoleHintsFromAccount } from "../utils/sessionCache";
 
 const WEEKDAY_NAMES = [
   "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
@@ -13,7 +14,10 @@ const GOAL_ENUM_MAP = {
 
 export async function fetchMe() {
   try {
-    return await apiGet("/me");
+    const result = await apiGet("/me");
+    cacheAccountSnapshot(result);
+    cacheRoleHintsFromAccount(result);
+    return result;
   } catch (error) {
     if (error?.status === 401) {
       clearAuth();

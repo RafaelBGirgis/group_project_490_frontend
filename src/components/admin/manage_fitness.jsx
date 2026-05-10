@@ -8,7 +8,7 @@ import {
   // equipment
   listAdminEquipment, createAdminEquipment, updateAdminEquipment, deleteAdminEquipment,
   // plans
-  listAdminPlans, updateAdminPlan, deleteAdminPlan, unhideAdminPlan,
+  listAdminPlans, createAdminPlan, updateAdminPlan, deleteAdminPlan, unhideAdminPlan,
 } from "../../api/admin";
 
 const TABS = [
@@ -363,10 +363,11 @@ function ActivitiesTab() {
   const [rows, setRows] = useState([]);
   const [workouts, setWorkouts] = useState([]);
   const [filterWorkout, setFilterWorkout] = useState("all");
-  // Default off: hidden rows are forked-old VCS versions and the PATCH endpoint
-  // 404s if you try to edit one. The "Show hidden" toggle reveals them with
+  // Default on: shows both current and forked-old VCS versions. Hidden rows are
+  // read-only (cannot edit); toggling off hides the old forked versions to clean
+  // up the view. Like Workouts, the "Show hidden" toggle reveals forks with
   // an Unhide affordance instead of an Edit button.
-  const [showHidden, setShowHidden] = useState(false);
+  const [showHidden, setShowHidden] = useState(true);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState(null);
@@ -744,6 +745,7 @@ function PlansTab() {
   const [showHidden, setShowHidden] = useState(true);
   const [publicOnly, setPublicOnly] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
 
   async function refresh() {
@@ -793,6 +795,7 @@ function PlansTab() {
           <input type="checkbox" checked={publicOnly} onChange={(e) => setPublicOnly(e.target.checked)} className="accent-red-500" />
           Public only
         </label>
+        <PrimaryBtn onClick={() => setCreating(true)}>+ New Plan</PrimaryBtn>
       </SectionToolbar>
 
       {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300 mb-3">{error}</div>}
@@ -840,6 +843,12 @@ function PlansTab() {
           onSubmit={async (patch) => { await updateAdminPlan(editing.id, patch); setEditing(null); refresh(); }}
         />
       )}
+      {creating && (
+        <PlanCreateModal
+          onClose={() => setCreating(false)}
+          onSubmit={async (payload) => { await createAdminPlan(payload); setCreating(false); refresh(); }}
+        />
+      )}
     </div>
   );
 }
@@ -870,8 +879,8 @@ function PlanEditModal({ plan, onClose, onSubmit }) {
       }
     >
       <div className="rounded-lg bg-blue-500/5 border border-blue-500/20 p-3 text-xs text-blue-300">
-        Plan edits always create a new version (VCS fork). The old version is hidden but stays referenced by any
-        scheduled CWPs and existing telemetry.
+        Plan names and visibility are edited in-place. The old version stays referenced by any
+        scheduled CWPs and existing telemetry. Activities cannot be edited here—they live on the activities tab.
       </div>
       <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} className="w-full" /></Field>
       <label className="flex items-center gap-2 text-sm text-gray-300">
@@ -886,6 +895,45 @@ function PlanEditModal({ plan, onClose, onSubmit }) {
           ))}
         </ul>
       </div>
+    </Modal>
+  );
+}
+
+function PlanCreateModal({ onClose, onSubmit }) {
+  const [name, setName] = useState("");
+  const [isPublic, setIsPublic] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function save() {
+    setBusy(true); setErr("");
+    try { await onSubmit({ strata_name: name.trim(), is_public: isPublic, activities: [] }); }
+    catch (e) { setErr(e?.message || "Save failed"); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <Modal
+      title="New Workout Plan"
+      onClose={onClose}
+      footer={
+        <div className="flex justify-end gap-2">
+          {err && <p className="text-xs text-red-300 mr-auto">{err}</p>}
+          <GhostBtn onClick={onClose}>Cancel</GhostBtn>
+          <PrimaryBtn onClick={save} disabled={busy || !name.trim()}>{busy ? "Creating…" : "Create"}</PrimaryBtn>
+        </div>
+      }
+    >
+      <div className="rounded-lg bg-blue-500/5 border border-blue-500/20 p-3 text-xs text-blue-300">
+        Create an empty plan first. Add activities by editing the plan after creation,
+        or by managing activities on the Activities tab and linking them to this plan.
+      </div>
+      <Field label="Plan Name"><Input value={name} onChange={(e) => setName(e.target.value)} className="w-full" placeholder="e.g., Full-Body Strength" /></Field>
+      <label className="flex items-center gap-2 text-sm text-gray-300">
+        <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} className="accent-red-500" />
+        Listed publicly in Browse Plans
+      </label>
+      <p className="text-xs text-gray-500 mt-2">You can add activities to this plan after creation.</p>
     </Modal>
   );
 }

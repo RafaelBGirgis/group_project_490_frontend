@@ -185,7 +185,7 @@ export default function ClientDash() {
   );
   const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(immediateRoleState.hasAdminRole);
   const [pendingCoachRequest, setPendingCoachRequest] = useState(null);
-  const [approvedCoachRequest, setApprovedCoachRequest] = useState(null);
+  const [_approvedCoachRequest, setApprovedCoachRequest] = useState(null);
   // Tracks whether there's something worth polling for (pending request or active coach).
   // Using a ref so the interval callback reads fresh state without needing to restart.
   const shouldPollRef = useRef(false);
@@ -1206,7 +1206,7 @@ function AppreciationCard({ appreciation }) {
   const isLoading = appreciation === null;
   const isEmpty = appreciation === "";
   return (
-    <div className="rounded-2xl border border-white/6 bg-[#0F1729] p-4 flex flex-col justify-between min-h-[80px]">
+    <div className="rounded-2xl border border-white/6 bg-[#0F1729] p-4 flex h-fit flex-col gap-2">
       <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-2">
         Something to remember
       </p>
@@ -1214,8 +1214,7 @@ function AppreciationCard({ appreciation }) {
         <p className="text-xs text-gray-600 italic">Loading…</p>
       ) : isEmpty ? (
         <p className="text-xs text-gray-600 italic leading-relaxed">
-          Nothing logged yet. Fill in today&apos;s mood check-in to start
-          building a list of things you&apos;re grateful for.
+          Nothing logged yet. Fill in today's mood check-in to start
         </p>
       ) : (
         <p className="text-sm text-white leading-relaxed italic">

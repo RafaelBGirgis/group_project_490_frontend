@@ -45,7 +45,6 @@ import {
   fetchStepHistory,
   fetchWorkoutHistory,
   fetchWorkoutHistoryEnriched,
-  fetchRandomAppreciation,
 } from "../api/survey";
 import { getConversationWithAccount } from "../api/chat";
 import {
@@ -190,7 +189,8 @@ export default function ClientDash() {
   const [requestStatusMessage, setRequestStatusMessage] = useState("");
   const [openingCoachChat, setOpeningCoachChat] = useState(false);
   const [terminatingRelationship, setTerminatingRelationship] = useState(false);
-  const [appreciation, setAppreciation] = useState(null);
+  // appreciation state removed alongside <AppreciationCard /> — restore both
+  // when the teammate's appreciation feature merges in.
 
   const refreshCoachRelationshipState = useCallback(async () => {
     const [requestList, myCoach] = await Promise.all([
@@ -292,17 +292,24 @@ export default function ClientDash() {
     if (!clientId) return;
     refreshSurveyStatus();
 
-    fetchRandomAppreciation().then((data) => {
-      if (data?.todays_appreciation) setAppreciation(data.todays_appreciation);
-    }).catch(() => { });
+    // fetchRandomAppreciation() removed — pairs with the AppreciationCard
+    // that's not on this branch. Re-add when the appreciation feature merges.
 
     (async () => {
+      // YYYY-MM-DD in local time, used to scope meal lookups to today only.
+      // Without this, fetchMealsToday returns the most recent N meals across
+      // history, which can leak yesterday's meals into the dashboard card.
+      const todayIso = (() => {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      })();
+
       try {
-        const [telemetry, meals] =
+        const [telemetry, calories, meals] =
           await Promise.all([
             fetchTelemetryToday(clientId).catch(() => ({ step_count: 0 })),
-            fetchCaloriesToday(),
-            fetchMealsToday(clientId).catch(() => []),
+            fetchCaloriesToday().catch(() => ({})),
+            fetchMealsToday(clientId, { onDate: todayIso }).catch(() => []),
           ]);
 
         setStepCount(telemetry.step_count);
@@ -310,8 +317,12 @@ export default function ClientDash() {
         // the right columns (CompletedWorkoutActivity.estimated_calories for
         // burned; MealIngredient.calories via CompletedMealActivity for
         // consumed) and is scoped to today.
-        setCaloriesBurned(calories.calories_burned);
-        setCaloriesConsumed(calories.calories_consumed);
+        if (Number.isFinite(calories.calories_burned)) {
+          setCaloriesBurned(calories.calories_burned);
+        }
+        if (Number.isFinite(calories.calories_consumed)) {
+          setCaloriesConsumed(calories.calories_consumed);
+        }
         if (Number.isFinite(calories.calories_goal) && calories.calories_goal > 0) {
           setCaloriesGoal(calories.calories_goal);
         }
@@ -430,8 +441,12 @@ export default function ClientDash() {
   // (e.g. after building+logging a custom meal in two steps).
   const handleAfterMealLog = async () => {
     try {
+      // Recompute today's-only YYYY-MM-DD here too — `Date` resolves locally
+      // so a refresh just before midnight still rolls over correctly.
+      const d = new Date();
+      const todayIso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
       const [refreshed, telemetry] = await Promise.all([
-        fetchMealsToday(clientId),
+        fetchMealsToday(clientId, { onDate: todayIso }),
         fetchTelemetryToday(clientId),
       ]);
       setPrescribedMeals(refreshed);
@@ -652,7 +667,8 @@ export default function ClientDash() {
               }
               onClick={() => setOverlay("steps")}
             />
-            <AppreciationCard appreciation={appreciation} />
+            {/* AppreciationCard removed — component lives on a teammate's
+                branch that hasn't merged. Re-add once it lands. */}
           </div>
 
           <DashboardCard role={role} className="items-center">

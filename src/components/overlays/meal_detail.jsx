@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { fetchMyPrescribedMeals, createMeal } from "../../api/meals";
 import { searchFoods, fetchFoodDetail } from "../../api/foods";
-import { updateLoggedMeal, deleteLoggedMeal } from "../../api/client";
+import { updateLoggedMeal, deleteLoggedMeal, fetchMealHistory } from "../../api/client";
 
 const MEAL_KINDS = ["breakfast", "lunch", "dinner", "snack"];
 
@@ -172,6 +172,13 @@ export default function MealDetail({ meals = [], onLogMeal, onAfterLog }) {
           }}
           onError={setError}
         />
+      </div>
+
+      {/* Past meals — collapsible so the overlay isn't overwhelming on
+          first open. Loads its own data only when expanded so we don't pay
+          the round-trip cost when the user never opens it. */}
+      <div className="border-t border-white/5 pt-4">
+        <PastMealsSection todayIso={todayIso()} />
       </div>
     </div>
   );
@@ -352,6 +359,127 @@ function groupByKind(items, getKind) {
 /* ═══════════════════════════════════════════════════════════════════════════
    BUILD CUSTOM — search USDA, add foods with grams, pick kind, save + log
    ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PAST MEALS — collapsible history of every meal the client has logged
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function PastMealsSection({ todayIso }) {
+  const [open, setOpen] = useState(false);
+  const [history, setHistory] = useState(null); // null = not loaded
+  const [loading, setLoading] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const all = await fetchMealHistory(undefined, { limit: 200 });
+      // Strip out today's meals — those already render in "Logged Today"
+      // above. The history section is for *past* days only.
+      const past = (all || []).filter((m) => {
+        if (!m.logged_at) return true; // unknown date → keep so it's not lost
+        const d = new Date(m.logged_at);
+        const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        return iso !== todayIso;
+      });
+      setHistory(past);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Group past meals by their YYYY-MM-DD so each date renders as its own
+  // section with a daily kcal subtotal — same pattern as the coach's
+  // Meal History view.
+  const groups = useMemo(() => {
+    if (!history) return [];
+    const map = new Map();
+    for (const m of history) {
+      if (!m.logged_at) continue;
+      const d = new Date(m.logged_at);
+      const dateKey = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+      const sortKey = d.getTime();
+      if (!map.has(dateKey)) map.set(dateKey, { dateKey, sortKey, meals: [] });
+      map.get(dateKey).meals.push(m);
+    }
+    return [...map.values()].sort((a, b) => b.sortKey - a.sortKey);
+  }, [history]);
+
+  if (!open) {
+    return (
+      <button
+        onClick={async () => {
+          setOpen(true);
+          if (history === null) await load();
+        }}
+        className="w-full border border-white/10 text-gray-300 rounded-xl py-3 text-sm font-medium hover:bg-white/5 transition-colors"
+      >
+        📅 View Past Meals
+      </button>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-gray-500 uppercase tracking-widest">Past Meals</p>
+        <button
+          onClick={() => setOpen(false)}
+          className="text-gray-500 hover:text-gray-300 text-xs"
+        >
+          Hide
+        </button>
+      </div>
+
+      {loading ? (
+        <p className="text-gray-500 text-sm text-center py-4">Loading…</p>
+      ) : !history || history.length === 0 ? (
+        <p className="text-gray-500 text-sm text-center py-4">
+          No past meals yet — logs from earlier days will show up here.
+        </p>
+      ) : (
+        groups.map((g) => {
+          const dayKcal = g.meals.reduce((acc, m) => acc + (m.calories || 0), 0);
+          return (
+            <div key={g.dateKey} className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] text-gray-300 uppercase tracking-widest font-semibold">
+                  {g.dateKey}
+                </p>
+                <p className="text-[10px] text-orange-400 font-semibold">
+                  {Math.round(dayKcal)} kcal · {g.meals.length} meal{g.meals.length === 1 ? "" : "s"}
+                </p>
+              </div>
+              {g.meals.map((m) => (
+                <div
+                  key={m.id}
+                  className="flex items-center justify-between rounded-lg bg-[#0A1020] border border-white/5 px-3 py-2"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-white text-sm truncate">
+                      {m.meal_name || "Unnamed meal"}
+                      {m.meal_kind && (
+                        <span className="ml-2 text-[10px] uppercase tracking-widest text-gray-500">
+                          · {m.meal_kind}
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-gray-500 text-[10px]">
+                      P {Math.round(m.protein_g || 0)}g · C {Math.round(m.carbs_g || 0)}g · F {Math.round(m.fat_g || 0)}g
+                    </p>
+                  </div>
+                  <p className="text-orange-400 font-bold text-xs whitespace-nowrap ml-3">
+                    {Math.round(m.calories || 0)} kcal
+                  </p>
+                </div>
+              ))}
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
 
 function BuildCustomTab({ onLogMeal, onError }) {
   const [open, setOpen] = useState(false);

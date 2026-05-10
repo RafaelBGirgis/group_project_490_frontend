@@ -288,14 +288,17 @@ export async function deleteClientBusySlot(id) {
 }
 
 /**
- * Fetch the meals the client has logged via the daily survey (newest first).
- * Backend now returns enriched rows with meal_name + per-meal macros joined
- * from meal_food/food, so the dashboard can render without follow-up fetches.
+ * Fetch logged meals (newest first). Backend returns enriched rows with
+ * meal_name + per-meal macros joined from meal_food/food, so the UI can
+ * render without follow-up fetches.
+ *
+ * Pass `onDate` (YYYY-MM-DD) to scope to a single day — used by the
+ * overlay's "Logged Today" section. Omit for full history.
  */
-export async function fetchMealsToday(_clientId, { skip = 0, limit = 100 } = {}) {
+export async function fetchMealsToday(_clientId, { skip = 0, limit = 100, onDate } = {}) {
   try {
     const result = await apiGet(
-      withQuery("/roles/client/telemetry/query/meals", { skip, limit })
+      withQuery("/roles/client/telemetry/query/meals", { skip, limit, on_date: onDate })
     );
     if (!Array.isArray(result)) return [];
     return result.map((row) => ({
@@ -304,6 +307,7 @@ export async function fetchMealsToday(_clientId, { skip = 0, limit = 100 } = {})
       on_demand_meal_id: row.on_demand_meal_id ?? null,
       meal_id: row.meal_id ?? null,
       meal_name: row.meal_name ?? "Unnamed meal",
+      meal_kind: row.meal_kind ?? null,
       calories: Number(row.calories) || 0,
       protein_g: Number(row.protein_g) || 0,
       carbs_g: Number(row.carbs_g) || 0,
@@ -313,6 +317,15 @@ export async function fetchMealsToday(_clientId, { skip = 0, limit = 100 } = {})
   } catch {
     return [];
   }
+}
+
+/**
+ * Fetch full meal history (no date filter) — used by the "Meal History"
+ * section on the client overlay. Same shape as fetchMealsToday, just
+ * without the date filter so the user gets every past meal.
+ */
+export async function fetchMealHistory(clientId, { skip = 0, limit = 200 } = {}) {
+  return fetchMealsToday(clientId, { skip, limit });
 }
 
 /**

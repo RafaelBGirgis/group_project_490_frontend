@@ -819,11 +819,10 @@ export default function ClientDash() {
                             </span>
                           ) : (
                             <button
-                              className={`text-xs border rounded-full px-3 py-1 transition-colors ${
-                                crudReady
+                              className={`text-xs border rounded-full px-3 py-1 transition-colors ${crudReady
                                   ? "text-blue-400 border-blue-500/50 hover:bg-blue-500/10 cursor-pointer"
                                   : "text-gray-600 border-gray-700 opacity-50 cursor-not-allowed"
-                              }`}
+                                }`}
                               onClick={crudReady ? () => openCwpPopup(cwp) : undefined}
                               disabled={!crudReady}
                             >

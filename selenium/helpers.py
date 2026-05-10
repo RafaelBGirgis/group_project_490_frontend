@@ -281,7 +281,7 @@ def signup(
         # Fill baseline metrics
         age_input = wait.until(
             EC.presence_of_element_located(
-                (By.CSS_SELECTOR, "input[placeholder='Age']")
+                (By.CSS_SELECTOR, "input[placeholder='Age (13–120)']")
             )
         )
 
@@ -290,12 +290,12 @@ def signup(
 
         weight_input = wait.until(
             EC.presence_of_element_located(
-                (By.CSS_SELECTOR, "input[placeholder='Weight (e.g. 165 lbs)']")
+                (By.XPATH, "//input[contains(@placeholder, 'Weight in lbs')]")
             )
         )
 
         weight_input.clear()
-        weight_input.send_keys("165 lbs")
+        weight_input.send_keys("165")
 
         # Select gender
         gender_select = Select(
@@ -310,29 +310,11 @@ def signup(
         # Optional bio
         bio_input = wait.until(
             EC.presence_of_element_located(
-                (By.CSS_SELECTOR, "textarea[placeholder='Biography for coach (optional)']")
+                (By.CSS_SELECTOR, "textarea[placeholder='Tell us about yourself! (optional)']")
             )
         )
         bio_input.clear()
         bio_input.send_keys(DEFAULT_ONBOARDING_BIO)
-
-        # Daily targets
-        daily_step_goal_input = wait.until(
-            EC.presence_of_element_located(
-                (By.CSS_SELECTOR, "input[placeholder='Daily step goal (default 10,000)']")
-            )
-        )
-        daily_calorie_goal_input = wait.until(
-            EC.presence_of_element_located(
-                (By.CSS_SELECTOR, "input[placeholder='Daily calorie goal (default 2,000)']")
-            )
-        )
-
-        daily_step_goal_input.clear()
-        daily_step_goal_input.send_keys("8000")
-
-        daily_calorie_goal_input.clear()
-        daily_calorie_goal_input.send_keys("1800")
 
         # --------------------------------------AVAILABILITY--------------------------------------
         try:

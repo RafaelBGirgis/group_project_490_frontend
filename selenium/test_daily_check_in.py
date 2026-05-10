@@ -126,8 +126,8 @@ def test_daily_check_in(driver=None, keep_driver=False):
         body_metrics_section_button.click()
 
         weight_input = wait.until(
-            EC.presence_of_element_located(
-                (By.XPATH, "//input[@type='number' and @placeholder='e.g. 175']")
+            EC.element_to_be_clickable(
+                (By.CSS_SELECTOR, "input[type='number'][min='1'][max='600'][step='1']")
             )
         )
         weight_input.clear()
@@ -150,7 +150,7 @@ def test_daily_check_in(driver=None, keep_driver=False):
             )
         )
         print("[OK] Submitted Body Metrics")
-        time.sleep(1)
+        time.sleep(2)
 
         close_daily_check_in_button = wait.until(
             EC.element_to_be_clickable(

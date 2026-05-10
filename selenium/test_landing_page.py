@@ -42,12 +42,13 @@ def test_landing_page(driver=None, keep_driver=False):
         wait_for_page_to_fully_load(driver)
         wait.until(EC.presence_of_element_located((By.LINK_TEXT, "Log in")))
         print("Landing page loaded successfully")
+        time.sleep(2)
 
         print("Scrolling down slowly...")
-        scroll(driver, "down", 0.01, 20)
+        scroll(driver, "down", 0.01, 15)
 
         print("Scrolling up...")
-        scroll(driver, "up", 0.01, 20)
+        scroll(driver, "up", 0.01, 15)
 
         print("Clicking signup link...")
         signup_link = wait.until(

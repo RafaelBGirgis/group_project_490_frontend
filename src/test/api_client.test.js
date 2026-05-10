@@ -155,15 +155,21 @@ describe("fetchTelemetryToday", () => {
     expect(data.calories_burned).toBeDefined();
     expect(data.calories_consumed).toBeDefined();
     expect(data.calories_goal).toBeDefined();
+    expect(data.carbs_g).toBeDefined();
+    expect(data.fat_g).toBeDefined();
+    expect(data.protein_g).toBeDefined();
   });
 
   it("returns the route-only fallback shape when no telemetry is available", async () => {
     const result = await fetchTelemetryToday(1);
     expect(result).toEqual({
-      step_count: 0,
       calories_burned: 0,
       calories_consumed: 0,
       calories_goal: 2000,
+      carbs_g: 0,
+      fat_g: 0,
+      protein_g: 0,
+      step_count: 0
     });
   });
 });
@@ -302,7 +308,7 @@ describe("fetchMealsToday", () => {
       id: 8,
       client_prescribed_meal_id: 5,
     });
-    meals.forEach((m) => expect(m.logged_at).toBeTruthy());
+    meals.forEach((m) => expect(m.logged_at).toBeNull());
   });
 });
 

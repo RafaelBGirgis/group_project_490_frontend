@@ -514,11 +514,11 @@ function genderSymbol(gender) {
   const key = String(gender).trim().toLowerCase().replace(/\s+/g, "_").replace(/-/g, "_");
   switch (key) {
     case "male":
-      return { glyph: "♂", label: "Male", className: "text-blue-400" };
+      return { glyph: "♂", label: "Male", className: "text-lg font-black leading-none text-blue-400" };
     case "female":
-      return { glyph: "♀", label: "Female", className: "text-pink-400" };
+      return { glyph: "♀", label: "Female", className: "text-lg font-black leading-none text-pink-400" };
     case "non_binary":
-      return { glyph: "🜬", label: "Non-binary", className: "text-purple-300" };
+      return { glyph: "🜬", label: "Non-binary", className: "text-lg font-black leading-none text-purple-300" };
     case "prefer_not_to_say":
       return null;
     default:
@@ -623,20 +623,20 @@ function LeaderboardPanel({ mode, boardMode, activeCategory, rows, categoryId, o
                   </div>
                   <LeaderboardAvatar row={row} isFirst={isFirst} />
                   <div className="min-w-0">
-                    <p className="flex items-center gap-2 truncate font-bold text-white">
-                      <span className="truncate">{row.name}</span>
-                      {row.age != null ? (
-                        <span className="shrink-0 text-xs font-semibold text-slate-400">· {row.age}</span>
-                      ) : null}
-                      {sym ? (
-                        <span
-                          className={`shrink-0 text-base font-bold leading-none ${sym.className}`}
-                          title={sym.label}
-                          aria-label={sym.label}
-                        >
-                          {sym.glyph}
-                        </span>
-                      ) : null}
+                    <p className="flex min-w-0 items-center gap-2 truncate font-bold leading-none text-white">
+                      <span className="truncate leading-none">{row.name}</span>
+                      <span className="inline-flex shrink-0 items-center gap-1 leading-none text-slate-400">
+                        {row.age != null ? <span className="text-xs font-semibold leading-none">· {row.age}</span> : null}
+                        {sym ? (
+                          <span
+                            className={`inline-flex items-center justify-center ${sym.className}`}
+                            title={sym.label}
+                            aria-label={sym.label}
+                          >
+                            {sym.glyph}
+                          </span>
+                        ) : null}
+                      </span>
                     </p>
                     <p className="truncate text-xs text-slate-500">{row.badge}</p>
                   </div>

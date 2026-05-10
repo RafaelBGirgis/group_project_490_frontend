@@ -264,6 +264,7 @@ export async function listAdminActivities({ workout_id, include_hidden = true, s
 export async function createAdminActivity(payload) { return apiPost(`${FB}/activities`, payload); }
 export async function updateAdminActivity(id, patch) { return apiPatch(`${FB}/activities/${id}`, patch); }
 export async function deleteAdminActivity(id) { return apiDelete(`${FB}/activities/${id}`); }
+export async function unhideAdminActivity(id) { return apiPost(`${FB}/activities/${id}/unhide`, {}); }
 
 // Equipment
 export async function listAdminEquipment({ text, skip = 0, limit = 100 } = {}) {

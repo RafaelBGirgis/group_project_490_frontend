@@ -4,7 +4,7 @@ import {
   listAdminWorkouts, createAdminWorkout, updateAdminWorkout,
   deleteAdminWorkout, unhideAdminWorkout,
   // activities
-  listAdminActivities, createAdminActivity, updateAdminActivity, deleteAdminActivity,
+  listAdminActivities, createAdminActivity, updateAdminActivity, deleteAdminActivity, unhideAdminActivity,
   // equipment
   listAdminEquipment, createAdminEquipment, updateAdminEquipment, deleteAdminEquipment,
   // plans
@@ -363,7 +363,10 @@ function ActivitiesTab() {
   const [rows, setRows] = useState([]);
   const [workouts, setWorkouts] = useState([]);
   const [filterWorkout, setFilterWorkout] = useState("all");
-  const [showHidden, setShowHidden] = useState(true);
+  // Default off: hidden rows are forked-old VCS versions and the PATCH endpoint
+  // 404s if you try to edit one. The "Show hidden" toggle reveals them with
+  // an Unhide affordance instead of an Edit button.
+  const [showHidden, setShowHidden] = useState(false);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState(null);
@@ -400,6 +403,11 @@ function ActivitiesTab() {
   async function handleDelete(a) {
     if (!window.confirm("Hide this activity tier? Coach pickers will exclude it; existing logs survive.")) return;
     await deleteAdminActivity(a.id);
+    refresh();
+  }
+
+  async function handleUnhide(a) {
+    await unhideAdminActivity(a.id);
     refresh();
   }
 
@@ -475,8 +483,14 @@ function ActivitiesTab() {
                 {Number(a.estimated_calories_per_unit_frequency).toFixed(2)}
               </span>
               <div className="col-span-2 flex justify-end gap-2">
-                <GhostBtn onClick={() => setEditing(a)}>Edit</GhostBtn>
-                <DangerBtn onClick={() => handleDelete(a)}>Hide</DangerBtn>
+                {a.is_hidden ? (
+                  <GhostBtn onClick={() => handleUnhide(a)}>Unhide</GhostBtn>
+                ) : (
+                  <>
+                    <GhostBtn onClick={() => setEditing(a)}>Edit</GhostBtn>
+                    <DangerBtn onClick={() => handleDelete(a)}>Hide</DangerBtn>
+                  </>
+                )}
               </div>
             </div>
           ))

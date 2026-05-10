@@ -464,7 +464,7 @@ export async function fetchCoachReviews(coachId) {
   }
 }
 
-export async function fetchCoachWorkoutPlans(coachId) {
+export async function fetchCoachWorkoutPlans(_coachId) {
   // TODO: Implement API endpoint to fetch coach workout plans
   // For now, returning empty array as we migrate away from localStorage caching
   return [];
@@ -682,7 +682,10 @@ function mapCertificationToBackend(certification) {
 }
 
 function mapExperienceToBackend(experience) {
-  const { start, end } = parseExperienceDates(experience.year || experience.experience_start);
+  const { start, end } = parseExperienceDates(
+    experience.startDate || experience.experience_start || experience.year,
+    experience.endDate || experience.experience_end,
+  );
   return {
     experience_name: experience.organization || experience.experience_name || "Organization",
     experience_title: experience.title || experience.experience_title || "Experience",
@@ -692,25 +695,23 @@ function mapExperienceToBackend(experience) {
   };
 }
 
-function parseExperienceDates(value) {
-  const text = String(value || "").trim();
-  const years = [...text.matchAll(/\d{4}/g)].map((match) => match[0]);
-  if (years.length >= 2) {
-    return {
-      start: `${years[0]}-01-01`,
-      end: `${years[1]}-12-31`,
-    };
-  }
-  if (years.length === 1) {
-    return {
-      start: `${years[0]}-01-01`,
-      end: `${years[0]}-12-31`,
-    };
-  }
-  const today = new Date().getFullYear();
+function parseExperienceDates(startValue, endValue) {
+  const toDateString = (value, fallbackSide) => {
+    const text = String(value || "").trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+    if (/^\d{4}$/.test(text)) {
+      return fallbackSide === "end" ? `${text}-12-31` : `${text}-01-01`;
+    }
+    return "";
+  };
+
+  const start = toDateString(startValue, "start");
+  const end = toDateString(endValue, "end") || start;
+  const currentYear = new Date().getFullYear();
+
   return {
-    start: `${today}-01-01`,
-    end: `${today}-12-31`,
+    start: start || `${currentYear}-01-01`,
+    end: end || `${currentYear}-12-31`,
   };
 }
 

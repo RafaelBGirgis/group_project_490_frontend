@@ -1,16 +1,16 @@
 from pathlib import Path
 
 from helpers import createDriver
-from helpers import scroll
 from helpers import delete_account
+from helpers import printCongratulation
+from helpers import printFailure
 from helpers import printNotice
 from helpers import printSuccess
-from helpers import printFailure
-from helpers import printCongratulation
+from helpers import scroll
 
 from test_client_find_coach import test_client_find_coach
-from test_landing_page import test_landing_page
 from test_daily_check_in import test_daily_check_in
+from test_landing_page import test_landing_page
 from test_signup import test_signup
 
 
@@ -25,36 +25,47 @@ def test_client_dashboard(driver=None):
         is_standalone_test = True
 
     # ---------------------- Test code -----------------------
+    failures = []
+    tests = [
+        test_landing_page,
+        test_signup,
+        test_daily_check_in,
+        test_client_find_coach,
+    ]
+
     try:
-        # Add pre-signup tests here
-        test_landing_page(driver)
-        test_signup(driver)
-
-        # Scroll through website
         printNotice(f"Running {Path(__file__).name}")
-        printSuccess(f"Currently in: {driver.current_url}")
-        print("Scrolling through website...")
-        scroll(driver, "down", 0.01, 10)
-        scroll(driver, "up", 0.01, 10)
-        print("Testing dashboard features... \n")
 
-        # Add post-signup tests here
-        test_daily_check_in(driver)
-        test_client_find_coach(driver)
+        for test_func in tests:
+            try:
+                driver = test_func(driver, keep_driver=True)
 
-        printCongratulation(f"All tests passed!: {driver.current_url} \n")
+                if test_func is test_signup and driver is not None:
+                    printSuccess(f"Currently in: {driver.current_url}")
+                    print("Scrolling through website...")
+                    scroll(driver, "down", 0.01, 10)
+                    scroll(driver, "up", 0.01, 10)
+                    print("Testing dashboard features... \n")
 
-    except Exception as e:
-        printFailure(f"There was an error: {e} \n")
-        printFailure("Execution is paused so you can inspect the browser.")
-        printFailure("Close the browser manually, then press Enter to end the script.\n")
-        if driver is not None:
-            input()
-        raise
+            except Exception as e:
+                printFailure(f"{test_func.__name__} failed: {e} \n")
+                failures.append((test_func.__name__, str(e)))
+
+                if driver is not None:
+                    driver.quit()
+                    driver = None
+                    printFailure("Shared browser was closed after the failure.\n")
+
+        if failures:
+            printFailure("Some dashboard tests failed:\n")
+            for test_name, error in failures:
+                printFailure(f"- {test_name}: {error}")
+        elif driver is not None:
+            printCongratulation(f"All tests passed!: {driver.current_url} \n")
 
     # ----------- Quit driver for standalone tests -----------
     finally:
-        if is_standalone_test:
+        if is_standalone_test and driver is not None:
             delete_account(driver)
             driver.quit()
             print("Browser closed \n")

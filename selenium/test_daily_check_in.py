@@ -10,11 +10,10 @@ from helpers import delete_account
 from helpers import printNotice
 from helpers import printSuccess
 
-from test_landing_page import test_landing_page
 from test_signup import test_signup
 
 
-def test_daily_check_in(driver=None):
+def test_daily_check_in(driver=None, keep_driver=False):
     """Test the daily check-in workflow: Mood & Wellbeing and Body Metrics"""
 
     # ---------- Create driver for standalone tests ----------
@@ -158,10 +157,11 @@ def test_daily_check_in(driver=None):
         )
 
         printSuccess(f"No errors in {Path(__file__).name}: {driver.current_url} \n")
+        return driver
 
     # ----------- Quit driver for standalone tests -----------
     finally:
-        if is_standalone_test:
+        if is_standalone_test and not keep_driver:
             delete_account(driver)
             driver.quit()
             print("Browser closed \n")

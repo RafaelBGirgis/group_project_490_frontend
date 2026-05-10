@@ -1,21 +1,19 @@
 import time
 from pathlib import Path
 
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support.ui import Select
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import Select
+from selenium.webdriver.support.ui import WebDriverWait
 
 from helpers import createDriver
-from helpers import signup
-from helpers import wait_for_page_to_fully_load
+from helpers import delete_account
+from helpers import printFailure
 from helpers import printNotice
 from helpers import printSuccess
-from helpers import printFailure
 from helpers import scroll
-from helpers import delete_account
+from helpers import wait_for_page_to_fully_load
 from test_signup import test_signup
 
 
@@ -97,7 +95,10 @@ def login_as_coach(coach_driver, email, password):
     submit_button.click()
 
     coach_wait.until(
-        lambda d: any(route in d.current_url for route in ("/client", "/coach", "/admin"))
+        lambda current_driver: any(
+            route in current_driver.current_url
+            for route in ("/client", "/coach", "/admin")
+        )
     )
     coach_driver.get(f"{FRONTEND_URL}/coach")
     coach_wait.until(EC.url_contains("/coach"))
@@ -112,7 +113,7 @@ def login_as_coach(coach_driver, email, password):
     print(f"Coach logged in successfully: {coach_driver.current_url}")
 
 
-def test_client_find_coach(driver=None):
+def test_client_find_coach(driver=None, keep_driver=False):
     # ---------- Create driver for standalone tests ----------
     is_standalone_test = False
 
@@ -121,19 +122,18 @@ def test_client_find_coach(driver=None):
         is_standalone_test = True
     else:
         client_driver = driver
-        
+
     coach_driver = None
+    client_wait = None
 
     # ---------------------- Test code -----------------------
     printNotice(f"Running {Path(__file__).name}")
     try:
         if is_standalone_test:
             test_signup(client_driver)
-            
-        client_wait = WebDriverWait(client_driver, 10)
-       
 
-        # Navigate to /find-coach
+        client_wait = WebDriverWait(client_driver, 10)
+
         print("Navigating to Find Coach page...")
         client_driver.get(f"{FRONTEND_URL}/find-coach")
 
@@ -150,9 +150,7 @@ def test_client_find_coach(driver=None):
 
         print(f"Successfully navigated to: {client_driver.current_url}")
 
-        # Test filter by gender
         print("Testing gender filter...")
-
         gender_select = Select(
             client_wait.until(
                 EC.presence_of_element_located(
@@ -168,9 +166,7 @@ def test_client_find_coach(driver=None):
         wait_for_coaches_to_load(client_driver, client_wait)
         print("Filtered coaches by gender: female")
 
-        # Test filter by highest rating, then most reviewed
         print("Testing sort dropdown...")
-
         sort_select = Select(
             client_wait.until(
                 EC.presence_of_element_located(
@@ -186,7 +182,6 @@ def test_client_find_coach(driver=None):
         wait_for_coaches_to_load(client_driver, client_wait)
         print("Sorted coaches by most reviewed")
 
-        # Test Quick Details
         print("Testing Quick Details and Hide Details...")
         time.sleep(1)
 
@@ -197,9 +192,9 @@ def test_client_find_coach(driver=None):
         time.sleep(1)
         quick_details_button.click()
         print("Quick Details opened successfully")
-        
+
         time.sleep(1)
-        
+
         hide_details_button = client_wait.until(
             EC.element_to_be_clickable(
                 (By.XPATH, "//button[normalize-space()='Hide Details']")
@@ -211,7 +206,6 @@ def test_client_find_coach(driver=None):
         print("Hide Details closed successfully")
         time.sleep(2)
 
-        # Test View Profile
         print("Testing View Profile...")
         view_profile_button = client_wait.until(
             EC.element_to_be_clickable(
@@ -221,7 +215,7 @@ def test_client_find_coach(driver=None):
         ActionChains(client_driver).move_to_element(view_profile_button).perform()
         time.sleep(1)
         view_profile_button.click()
-        
+
         client_wait.until(EC.url_contains("/coaches"))
         wait_for_page_to_fully_load(client_driver)
         client_wait.until(
@@ -232,7 +226,6 @@ def test_client_find_coach(driver=None):
         time.sleep(1)
         print(f"Successfully opened coach profile: {client_driver.current_url}")
 
-        # Scroll through profile, then exit
         print("Scrolling through coach profile...")
         scroll(client_driver, "down", 0.01, 20)
         scroll(client_driver, "up", 0.01, 20)
@@ -248,9 +241,7 @@ def test_client_find_coach(driver=None):
         print("Returned to Find Coach page successfully")
         time.sleep(1)
 
-        # Test Request 'Wii Fit Trainer' Coach
         print("Testing Request Coach for Wii Fit Trainer...")
-
         search_input = client_wait.until(
             EC.presence_of_element_located(
                 (By.CSS_SELECTOR, "input[placeholder='Search by coach name']")
@@ -263,7 +254,9 @@ def test_client_find_coach(driver=None):
         time.sleep(1)
         wait_for_coaches_to_load(client_driver, client_wait)
 
-        wii_fit_card = find_coach_card_by_name(client_driver, client_wait, "Wii Fit Trainer")
+        wii_fit_card = find_coach_card_by_name(
+            client_driver, client_wait, "Wii Fit Trainer"
+        )
 
         request_button = wii_fit_card.find_element(
             By.XPATH,
@@ -272,12 +265,11 @@ def test_client_find_coach(driver=None):
 
         request_button_text = request_button.text.strip()
 
-        # Click 'Request Coach' button
         if "Request Coach" in request_button_text:
             request_button.click()
 
             client_wait.until(
-                lambda d: "Cancel Request" in wii_fit_card.text
+                lambda current_driver: "Cancel Request" in wii_fit_card.text
                 or "Sending..." not in wii_fit_card.text
             )
 
@@ -291,7 +283,6 @@ def test_client_find_coach(driver=None):
         print("Requested coach.")
         time.sleep(1)
 
-        # Return to dashboard to see 'Coach Request Status'
         print("Returning to client dashboard...")
         client_driver.get(f"{FRONTEND_URL}/client")
 
@@ -307,13 +298,11 @@ def test_client_find_coach(driver=None):
             )
         )
 
-        # Hover over 'Coach Request Status' with ActionChains
         ActionChains(client_driver).move_to_element(coach_request_status_card).perform()
         time.sleep(2)
 
         print("Coach Request Status is pending, waiting for response...")
 
-        # -------------------------------------Accepting Request-------------------------------------
         print("Opening coach browser to accept the request...")
         coach_driver = createDriver()
         coach_wait = WebDriverWait(coach_driver, 10)
@@ -322,15 +311,6 @@ def test_client_find_coach(driver=None):
             coach_driver,
             WII_FIT_TRAINER_EMAIL,
             WII_FIT_TRAINER_PASSWORD,
-        )
-
-        client_requests_card = coach_wait.until(
-            EC.presence_of_element_located(
-                (
-                    By.XPATH,
-                    "//h3[contains(normalize-space(), 'Client Requests')]/ancestor::div[contains(@class, 'rounded-2xl')][1]",
-                )
-            )
         )
 
         accept_button = coach_wait.until(
@@ -358,9 +338,7 @@ def test_client_find_coach(driver=None):
                 )
             )
         )
-        coach_wait.until(
-            EC.staleness_of(client_request_card)
-        )
+        coach_wait.until(EC.staleness_of(client_request_card))
 
         print("Coach accepted the client request successfully")
 
@@ -371,7 +349,6 @@ def test_client_find_coach(driver=None):
         coach_driver = None
         print("Coach browser closed")
 
-        # Reload page to check Request Status
         print("Checking if request was accepted...")
         client_driver.refresh()
 
@@ -389,6 +366,7 @@ def test_client_find_coach(driver=None):
         )
 
         printSuccess(f"No errors in {Path(__file__).name}: {client_driver.current_url} \n")
+        return client_driver
 
     except Exception as e:
         printFailure(f"Test failed: {e}")
@@ -400,24 +378,24 @@ def test_client_find_coach(driver=None):
             print("Coach browser closed")
 
         # ----------- Quit driver for standalone tests -----------
-        if is_standalone_test:
-            # Fire coach 
-            fire_coach_button = client_wait.until(
-                EC.element_to_be_clickable(
-                    (By.XPATH, "//button[normalize-space()='End Relationship']")
+        if is_standalone_test and not keep_driver:
+            if client_wait is not None:
+                fire_coach_button = client_wait.until(
+                    EC.element_to_be_clickable(
+                        (By.XPATH, "//button[normalize-space()='End Relationship']")
+                    )
                 )
-            )
-            fire_coach_button.click()        
-            relationship_alert = client_wait.until(EC.alert_is_present())
-            time.sleep(1)
+                fire_coach_button.click()
+                relationship_alert = client_wait.until(EC.alert_is_present())
+                time.sleep(1)
 
-            relationship_alert.accept()
-            time.sleep(2)
+                relationship_alert.accept()
+                time.sleep(2)
 
-            # Standard code for standalone tests
             delete_account(client_driver)
             client_driver.quit()
             print("Client browser closed \n")
+
 
 if __name__ == "__main__":
     test_client_find_coach()

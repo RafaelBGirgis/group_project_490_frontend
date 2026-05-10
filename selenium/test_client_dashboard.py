@@ -12,6 +12,7 @@ from test_client_find_coach import test_client_find_coach
 from test_daily_check_in import test_daily_check_in
 from test_landing_page import test_landing_page
 from test_signup import test_signup
+from test_workout_plan import test_workout_plan
 
 
 def test_client_dashboard(driver=None):
@@ -31,6 +32,7 @@ def test_client_dashboard(driver=None):
         test_signup,
         test_daily_check_in,
         test_client_find_coach,
+        test_workout_plan
     ]
 
     try:
@@ -69,15 +71,6 @@ def test_client_dashboard(driver=None):
             delete_account(driver)
             driver.quit()
             print("Browser closed \n")
-
-
-def test_daily_workout(driver):
-    pass
-    # Hover over Today's Workout
-    # Click on Plan My Week, redirects to '/plan-my-week'
-    # Click on 'Browse Plans'
-    # Complete this later.
-
 
 if __name__ == "__main__":
     test_client_dashboard()

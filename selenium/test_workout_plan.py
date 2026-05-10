@@ -33,7 +33,7 @@ TEST_CLIENT_EMAIL = "client_test@njit.edu"
 TEST_PASSWORD = "password"
 
 
-def test_plan_my_week(driver=None, keep_driver=False):
+def test_workout_plan(driver=None, keep_driver=False):
     """
     Main test for Plan My Week functionality, tests all 4 tabs
     """
@@ -49,7 +49,7 @@ def test_plan_my_week(driver=None, keep_driver=False):
     
     try:
         if is_standalone_test:
-            login(driver, "janedoe@gmail.com")
+            test_signup(driver)
 
         wait = WebDriverWait(driver, 10)
         actions = ActionChains(driver)
@@ -82,7 +82,6 @@ def test_plan_my_week(driver=None, keep_driver=False):
         test_build_plan_tab(driver)
         test_browse_plans_tab(driver)
         test_my_scheduled_tab(driver)
-        test_my_plans_tab(driver)
         
         printSuccess(f"No errors in {Path(__file__).name}: {driver.current_url} \n")
         return driver
@@ -366,33 +365,167 @@ def test_build_plan_tab(driver):
         print("Activity added to plan")
         
         time.sleep(1)
-        
-        # ---- Test Visibility Toggle ----
-        # TODO: Find the "Make Public" or visibility toggle checkbox
-        
-        # TODO: Toggle visibility on/off and verify state changes
-        
-        # ---- Test Schedule/Save Plan ----
-        # TODO: Click "Save and Schedule" or "Schedule Plan" button
-        
-        # TODO: Verify schedule selection modal appears
-        
-        # TODO: Select date range for scheduling (e.g., this week)
-        
-        # TODO: Verify confirmation message appears
-        
-        # TODO: Verify plan appears in "My Scheduled" tab
-        
-        printSuccess("BUILD PLAN tab test passed")
+                
+        printSuccess("'Build Plan' tab test passed")
         
     except Exception as e:
         printFailure(f"BUILD PLAN tab test failed: {str(e)}")
         raise
 
 
-def test_browse_plans_tab(driver):
+def test_browse_plans_tab(driver):   
+    printNotice("Testing BROWSE PLANS tab...")
+    
     try:
-        printSuccess("BROWSE PLANS tab test passed")
+        wait = WebDriverWait(driver, 10)
+
+        print("Clicking on 'Browse Plans' tab...")
+        browse_plans_tab = wait.until(
+            EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Browse Plans')]"))
+        )
+        browse_plans_tab.click()
+
+        browse_search_input = wait.until(
+            EC.element_to_be_clickable(
+                (By.XPATH, "//input[@placeholder='Search plans by name...']")
+            )
+        )
+        browse_search_input.clear()
+        browse_search_input.send_keys("Leg Day")
+        print("Searched for 'Leg Day'")
+
+        leg_day_schedule_button = wait.until(
+            EC.element_to_be_clickable(
+                (
+                    By.XPATH,
+                    "//article[.//h3[normalize-space()='Leg Day']]//button[contains(normalize-space(), 'Schedule')]",
+                )
+            )
+        )
+        leg_day_schedule_button.click()
+
+        schedule_dialog_title = wait.until(
+            EC.presence_of_element_located(
+                (By.XPATH, "//h3[contains(normalize-space(), 'Schedule') and contains(normalize-space(), 'Leg Day')]")
+            )
+        )
+        assert schedule_dialog_title is not None, 'Expected Schedule "Leg Day" dialog to open.'
+
+        wait.until(
+            EC.presence_of_element_located(
+                (
+                    By.XPATH,
+                    "//h3[contains(normalize-space(), 'Schedule') and contains(normalize-space(), 'Leg Day')]"
+                    "/ancestor::div[contains(@class, 'rounded-2xl')][1]"
+                    "//div[contains(@title, 'Available ')]",
+                )
+            )
+        )
+
+        print('Opened Schedule "Leg Day" dialog')
+
+        start_hour_input = wait.until(
+            EC.element_to_be_clickable(
+                (By.XPATH, "//span[normalize-space()='Start time']/following-sibling::div//input[@type='number'][1]")
+            )
+        )
+        start_minute_input = wait.until(
+            EC.element_to_be_clickable(
+                (By.XPATH, "//span[normalize-space()='Start time']/following-sibling::div//input[@type='number'][2]")
+            )
+        )
+        start_ampm_select = Select(
+            wait.until(
+                EC.element_to_be_clickable(
+                    (By.XPATH, "//span[normalize-space()='Start time']/following-sibling::div//select")
+                )
+            )
+        )
+
+        end_hour_input = wait.until(
+            EC.element_to_be_clickable(
+                (By.XPATH, "//span[normalize-space()='End time']/following-sibling::div//input[@type='number'][1]")
+            )
+        )
+        end_minute_input = wait.until(
+            EC.element_to_be_clickable(
+                (By.XPATH, "//span[normalize-space()='End time']/following-sibling::div//input[@type='number'][2]")
+            )
+        )
+        end_ampm_select = Select(
+            wait.until(
+                EC.element_to_be_clickable(
+                    (By.XPATH, "//span[normalize-space()='End time']/following-sibling::div//select")
+                )
+            )
+        )
+
+        for field, value in (
+            (start_hour_input, "9"),
+            (start_minute_input, "00"),
+            (end_hour_input, "11"),
+            (end_minute_input, "00"),
+        ):
+            driver.execute_script(
+                """
+                const element = arguments[0];
+                const value = arguments[1];
+                const valueSetter = Object.getOwnPropertyDescriptor(
+                  window.HTMLInputElement.prototype,
+                  'value'
+                ).set;
+                valueSetter.call(element, value);
+                element.dispatchEvent(new Event('input', { bubbles: true }));
+                element.dispatchEvent(new Event('change', { bubbles: true }));
+                element.blur();
+                """,
+                field,
+                value,
+            )
+        start_ampm_select.select_by_visible_text("AM")
+        end_ampm_select.select_by_visible_text("AM")
+
+        print("Set schedule block time to 9:00 AM - 11:00 AM")
+
+        add_block_button = wait.until(
+            EC.element_to_be_clickable((By.XPATH, "//button[contains(normalize-space(), '+ Add block')]"))
+        )
+        add_block_button.click()
+
+        wait.until(
+            EC.presence_of_element_located(
+                (By.XPATH, "//li[contains(., '9:00 AM') and contains(., '11:00 AM')]")
+            )
+        )
+        print("Added block successfully")
+
+        schedule_button = wait.until(
+            EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='Schedule (1)']"))
+        )
+        schedule_button.click()
+
+        wait.until(
+            EC.presence_of_element_located(
+                (By.XPATH, "//p[contains(normalize-space(), 'Scheduled 1 block(s).')]")
+            )
+        )
+        print("Scheduled plan successfully")
+
+        close_dialog_button = wait.until(
+            EC.element_to_be_clickable(
+                (By.XPATH, "//h3[contains(normalize-space(), 'Schedule') and contains(normalize-space(), 'Leg Day')]/following-sibling::button[1]")
+            )
+        )
+        close_dialog_button.click()
+
+        wait.until(
+            EC.invisibility_of_element_located(
+                (By.XPATH, "//h3[contains(normalize-space(), 'Schedule') and contains(normalize-space(), 'Leg Day')]")
+            )
+        )
+        print("Closed schedule dialog")
+
+        printSuccess("'Browse Plans' tab test passed")
         
     except Exception as e:
         printFailure(f"BROWSE PLANS tab test failed: {str(e)}")
@@ -401,21 +534,28 @@ def test_browse_plans_tab(driver):
 
 def test_my_scheduled_tab(driver):
     try:
-        printSuccess("BROWSE PLANS tab test passed")
+        wait = WebDriverWait(driver, 10)
+
+        print("Clicking on 'My Scheduled' tab...")
+        browse_plans_tab = wait.until(
+            EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'My Scheduled')]"))
+        )
+        browse_plans_tab.click()
+        time.sleep(4)
+
+        print("Scrolling down slowly...")
+        scroll(driver, "down", 0.01, 15)
+
+        print("Scrolling up...")
+        scroll(driver, "up", 0.01, 15)
+
+        printSuccess("'My Scheduled' tab test passed")
         
     except Exception as e:
         printFailure(f"BROWSE PLANS tab test failed: {str(e)}")
         raise
 
 
-def test_my_plans_tab(driver):
-    try:
-        printSuccess("BROWSE PLANS tab test passed")
-    except Exception as e:
-        printFailure(f"MY PLANS tab test failed: {str(e)}")
-        raise
-    
-
 if __name__ == "__main__":
-    test_plan_my_week(keep_driver=True)
+    test_workout_plan(keep_driver=True)
 

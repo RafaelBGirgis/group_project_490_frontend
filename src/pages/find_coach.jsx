@@ -741,6 +741,14 @@ export default function FindCoachPage() {
                     >
                       View Profile
                     </button>
+                    {coach.account_id ? (
+                      <button
+                        onClick={() => navigate(`/client/messages?account=${coach.account_id}`)}
+                        className="flex-1 border border-white/10 text-gray-300 hover:bg-white/5 rounded-xl py-2.5 text-sm font-medium transition-colors"
+                      >
+                        Message
+                      </button>
+                    ) : null}
                     {isRequested ? (
                       <button
                         onClick={() => handleCancelRequest(coach.coach_id)}

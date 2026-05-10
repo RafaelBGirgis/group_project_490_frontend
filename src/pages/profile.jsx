@@ -30,9 +30,10 @@ import {
   updateCoachInformation,
 } from "../api/coach";
 import AvailabilityCalendar from "../components/availability/AvailabilityCalendar";
-import { getCoachAccessState } from "../utils/roleAccess";
-import { resolveRoleState } from "../utils/sessionAuth";
+import { getCoachAccessState, getImmediateCoachAccessState } from "../utils/roleAccess";
+import { getImmediateRoleState, resolveRoleState } from "../utils/sessionAuth";
 import { clearAuth } from "../api/auth";
+import { setLastRoleContext } from "../utils/sessionCache";
 
 const PRIMARY_GOALS = [
   "Weight Loss",
@@ -148,6 +149,8 @@ function ProfilePage({ role = "client" }) {
   const navigate = useNavigate();
   const location = useLocation();
   const isCoach = role === "coach";
+  const immediateRoleState = getImmediateRoleState();
+  const immediateCoachAccess = getImmediateCoachAccessState();
 
   const accent = isCoach ? "#F59E0B" : "#3B82F6";
   const accentSoft = isCoach ? "rgba(245, 158, 11, 0.12)" : "rgba(59, 130, 246, 0.12)";
@@ -221,9 +224,11 @@ function ProfilePage({ role = "client" }) {
     exp_date: "",
   });
   const [showPaymentForm, setShowPaymentForm] = useState(false);
-  const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
-  const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(false);
-  const [hasCoachStatus, setHasCoachStatus] = useState(false);
+  const [canSwitchToCoach, setCanSwitchToCoach] = useState(
+    immediateCoachAccess.canAccessCoach
+  );
+  const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(immediateRoleState.hasAdminRole);
+  const [hasCoachStatus, setHasCoachStatus] = useState(immediateCoachAccess.hasCoachRecord);
   const [progressPicPage, setProgressPicPage] = useState(0);
   const PICS_PER_PAGE = 6;
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
@@ -309,6 +314,13 @@ function ProfilePage({ role = "client" }) {
     navigate(location.pathname, { replace: true, state: {} });
   }, [location.pathname, location.state, navigate]);
 
+  useEffect(() => {
+    setLastRoleContext({
+      role: isCoach ? "coach" : "client",
+      dashboardPath: isCoach ? "/coach" : "/client",
+    });
+  }, [isCoach]);
+
   // Scroll to a section anchor (e.g. #availability) on mount or hash change.
   useEffect(() => {
     if (loadingProfile) return;
@@ -357,7 +369,7 @@ function ProfilePage({ role = "client" }) {
           resolveRoleState().catch(() => null),
         ]);
         const data = meData;
-        const coachAccess = await getCoachAccessState(data);
+        const coachAccess = await getCoachAccessState(data, roleState);
         setCanSwitchToAdmin(Boolean(roleState?.hasAdminRole));
         setCanSwitchToCoach(coachAccess.canAccessCoach);
         setHasCoachStatus(coachAccess.hasCoachRecord);
@@ -685,7 +697,7 @@ function ProfilePage({ role = "client" }) {
 
   const handleLogout = () => {
     clearAuth();
-    window.location.href = "/login";
+    navigate("/login");
   };
 
   const handlePayInvoice = async () => {
@@ -1054,9 +1066,13 @@ function ProfilePage({ role = "client" }) {
         userName={initials}
         userAvatar={profilePicturePreviewUrl}
         switchOptions={[
-          ...(!isCoach && canSwitchToCoach ? [{ label: "Coach", to: "/coach" }] : []),
-          ...(isCoach ? [{ label: "Client", to: "/profile" }] : []),
+          // Profile-vs-profile swaps. Labels reflect destination so users know
+          // they're flipping between profile pages, not jumping to a dashboard.
+          ...(!isCoach && canSwitchToCoach ? [{ label: "Coach Profile", to: "/coach-profile" }] : []),
+          ...(isCoach ? [{ label: "Client Profile", to: "/profile" }] : []),
           ...(canSwitchToAdmin ? [{ label: "Admin", to: "/admin" }] : []),
+          // Always-visible "Dashboard" jumps back to the current role's dash.
+          { label: "Dashboard", to: isCoach ? "/coach" : "/client" },
         ]}
       />
 

@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { useState, useEffect, useCallback } from "react";
 import {
   Navbar,
@@ -29,8 +29,9 @@ import {
   denyClientRequest,
 } from "../api/coach";
 import { getConversationWithAccount } from "../api/chat";
-import { getCoachAccessState } from "../utils/roleAccess";
-import { resolveRoleState } from "../utils/sessionAuth";
+import { getCoachAccessState, getImmediateCoachAccessState } from "../utils/roleAccess";
+import { getImmediateRoleState, resolveRoleState } from "../utils/sessionAuth";
+import { setLastRoleContext } from "../utils/sessionCache";
 import SessionsDetail from "../components/overlays/sessions_detail";
 import ReviewsDetail from "../components/overlays/reviews_detail";
 import ClientProfile from "../components/overlays/client_profile";
@@ -147,12 +148,18 @@ function formatCoachEarnings(value) {
 
 export default function CoachDashboard() {
   const navigate = useNavigate();
+  const immediateRoleState = getImmediateRoleState();
+  const immediateCoachAccess = getImmediateCoachAccessState();
 
   /*  auth guard  */
   const [authed, setAuthed] = useState(false);
   useEffect(() => {
     setAuthed(true);
   }, [navigate]);
+
+  useEffect(() => {
+    setLastRoleContext({ role: "coach", dashboardPath: "/coach" });
+  }, []);
 
   /*  overlay  */
   const [overlay, setOverlay] = useState(null);
@@ -172,7 +179,7 @@ export default function CoachDashboard() {
   const [clientRequests, setClientRequests] = useState([]);
   const [clientRequestDetails, setClientRequestDetails] = useState({});
   const [requestActionId, setRequestActionId] = useState(null);
-  const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(false);
+  const [canSwitchToAdmin, setCanSwitchToAdmin] = useState(immediateRoleState.hasAdminRole);
   const [chatActionId, setChatActionId] = useState(null);
   const [selectedClient, setSelectedClient] = useState(null);
   const [clientSearchTerm, setClientSearchTerm] = useState("");
@@ -433,6 +440,14 @@ export default function CoachDashboard() {
   const lastName = nameParts.slice(1).join(" ") || "";
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good Morning" : hour < 17 ? "Good Afternoon" : "Good Evening";
+  const shouldBlockCoachPage =
+    immediateRoleState.roleNames.length > 0 &&
+    !immediateRoleState.hasAdminRole &&
+    !immediateCoachAccess.canAccessCoach;
+
+  if (shouldBlockCoachPage) {
+    return <Navigate to="/profile" replace />;
+  }
 
   /*  loading skeleton  */
   if (loading) {
@@ -621,6 +636,20 @@ export default function CoachDashboard() {
                       </div>
                     </div>
                     <div className="flex items-center gap-1 transition-opacity">
+                      {request?.detail?.base_account?.id ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/coach/messages?account=${request.detail.base_account.id}`);
+                          }}
+                          className="p-1.5 rounded-lg text-blue-400 hover:bg-blue-500/10 transition-colors"
+                          title="Message"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                          </svg>
+                        </button>
+                      ) : null}
                       <button
                         onClick={(e) => { e.stopPropagation(); handleAcceptRequest(request); }}
                         disabled={requestActionId === request.request_id}

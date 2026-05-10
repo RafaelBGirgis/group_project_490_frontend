@@ -16,11 +16,9 @@ import {
   fetchAdminStats,
   fetchAllUsers,
   updateUserStatus,
+  suspendUser,
+  unsuspendUser,
   deleteUser,
-  fetchExerciseBank,
-  createExercise,
-  updateExercise,
-  deleteExercise,
   fetchAnalytics,
   fetchCoachRequests,
   fetchReports,
@@ -29,14 +27,16 @@ import {
 } from "../api/admin";
 import RoleRequestsDetail from "../components/overlays/role_requests_detail";
 import ReportsDetail from "../components/overlays/reports_detail";
+import ManageFitness from "../components/admin/manage_fitness";
 import { getImmediateRoleState, resolveRoleState } from "../utils/sessionAuth";
 import { setLastRoleContext } from "../utils/sessionCache";
 
 const role = "admin";
-const MUSCLE_GROUPS = ["Chest", "Back", "Shoulders", "Legs", "Arms", "Core", "Cardio"];
-const EQUIPMENT = ["Barbell", "Dumbbell", "Cable", "Machine", "Bodyweight"];
+// MUSCLE_GROUPS / EQUIPMENT removed with the legacy ExerciseForm.
+// ManageFitness uses the real workout_type enum + an equipment table now.
 const USERS_PER_PAGE = 10;
-const EXERCISES_PER_PAGE = 10;
+// EXERCISES_PER_PAGE removed alongside the legacy exercise-bank UI.
+// ManageFitness owns its own pagination per tab.
 
 /* ═══════════════════════════════════════════════════════════════════════
    ANIMATED COUNTER — numbers count up on mount
@@ -279,7 +279,6 @@ export default function AdminDash() {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
   const [users, setUsers] = useState([]);
-  const [exercises, setExercises] = useState([]);
   const [analytics, setAnalytics] = useState(null);
   const [roleRequests, setRoleRequests] = useState([]);
   const [reports, setReports] = useState([]);
@@ -294,12 +293,10 @@ export default function AdminDash() {
   const [userStatusFilter, setUserStatusFilter] = useState("all");
   const [userPage, setUserPage] = useState(1);
 
-  /*  exercise bank state  */
-  const [exSearch, setExSearch] = useState("");
-  const [exGroupFilter, setExGroupFilter] = useState("All");
-  const [exPage, setExPage] = useState(1);
-  const [editingExercise, setEditingExercise] = useState(null);
-  const [newExercise, setNewExercise] = useState(null);
+  /*  exercise bank state was removed — replaced by <ManageFitness />,
+      which manages its own state internally per tab (workouts/activities/
+      equipment/plans). The handlers and pagination state below were also
+      cleaned out alongside the legacy UI.  */
 
   /*  analytics state  */
   const [analyticsPeriod, setAnalyticsPeriod] = useState("daily");
@@ -336,7 +333,6 @@ export default function AdminDash() {
             pending_role_requests: 0,
             active_accounts: 0,
             deactivated_accounts: 0,
-            suspended_accounts: 0,
             signups_30d: 0,
             avg_coach_rating: 0,
             total_coach_reviews: 0,
@@ -349,14 +345,12 @@ export default function AdminDash() {
           fetchAnalytics().catch(() => ({ daily: [], weekly: [], monthly: [] })),
           fetchCoachRequests().catch(() => []),
         ]);
-        const [exerciseResponse, reportsResponse] = await Promise.all([
-          fetchExerciseBank().catch(() => []),
-          fetchReports().catch(() => []),
-        ]);
+        // Exercises are no longer fetched here — ManageFitness loads its
+        // own data per tab (workouts/activities/equipment/plans).
+        const reportsResponse = await fetchReports().catch(() => []);
 
         setStats(s);
         setUsers(u);
-        setExercises(exerciseResponse);
         setAnalytics(an);
         setRoleRequests(requests);
         setReports(reportsResponse);
@@ -404,9 +398,9 @@ export default function AdminDash() {
     const who = kind === "client_on_coach" ? "coach" : "client";
     if (!window.confirm(`Suspend the reported ${who} (${report.reported_name})?`)) return;
     try {
-      await updateUserStatus(report.reported_account_id, "suspended");
+      await suspendUser(report.reported_account_id);
       setUsers((prev) =>
-        prev.map((u) => u.id === report.reported_account_id ? { ...u, status: "suspended" } : u)
+        prev.map((u) => u.id === report.reported_account_id ? { ...u, status: "suspended", is_suspended: true } : u)
       );
       await deleteReport(kind, id).catch(() => {});
       setReports((p) => p.filter((r) => !(r.kind === kind && r.id === id)));
@@ -416,19 +410,22 @@ export default function AdminDash() {
   };
 
   const handleUserStatusChange = async (userId, newStatus) => {
-    // Confirm only when moving an account *out* of active — reactivation is
-    // harmless and shouldn't pop a dialog.
     if (
       newStatus !== "active" &&
       !window.confirm("Suspend this account? They'll be signed out and any active coach/client mappings will be torn down.")
     ) return;
     try {
-      await updateUserStatus(userId, newStatus);
-      setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, status: newStatus } : u));
+      if (newStatus === "suspended") {
+        await suspendUser(userId);
+        setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, status: "suspended", is_suspended: true } : u));
+      } else if (newStatus === "active") {
+        await unsuspendUser(userId);
+        setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, status: "active", is_suspended: false } : u));
+      } else {
+        await updateUserStatus(userId, newStatus);
+        setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, status: newStatus } : u));
+      }
     } catch (e) {
-      // Backend safety errors land here: 400 self-action, 409 last-admin
-      // removal, or 401 expired token. Surface the actual message so the
-      // admin understands why nothing changed.
       window.alert(e?.message || "Action failed");
     }
   };
@@ -443,22 +440,8 @@ export default function AdminDash() {
     }
   };
 
-  const handleSaveExercise = async (exercise) => {
-    if (exercise.id) {
-      await updateExercise(exercise.id, exercise);
-      setExercises((prev) => prev.map((e) => e.id === exercise.id ? { ...e, ...exercise } : e));
-    } else {
-      const result = await createExercise(exercise);
-      setExercises((prev) => [...prev, { ...exercise, id: result.id || Date.now(), created_by: "Admin" }]);
-    }
-    setEditingExercise(null);
-    setNewExercise(null);
-  };
-
-  const handleDeleteExercise = async (exerciseId) => {
-    await deleteExercise(exerciseId);
-    setExercises((prev) => prev.filter((e) => e.id !== exerciseId));
-  };
+  // handleSaveExercise/handleDeleteExercise removed alongside the legacy
+  // exercise-bank UI; ManageFitness owns its own CRUD wiring now.
 
   /*  computed  */
   const pendingRequests = roleRequests.filter((r) => r.is_approved === null);
@@ -478,17 +461,8 @@ export default function AdminDash() {
   const totalUserPages = Math.max(1, Math.ceil(filteredUsers.length / USERS_PER_PAGE));
   const paginatedUsers = filteredUsers.slice((userPage - 1) * USERS_PER_PAGE, userPage * USERS_PER_PAGE);
 
-  const filteredExercises = useMemo(() => {
-    return exercises.filter((e) => {
-      if (exSearch && !e.name.toLowerCase().includes(exSearch.toLowerCase())) return false;
-      if (exGroupFilter !== "All" && e.muscle_group !== exGroupFilter) return false;
-      return true;
-    });
-  }, [exercises, exSearch, exGroupFilter]);
-
-  useEffect(() => { setExPage(1); }, [exSearch, exGroupFilter]);
-  const totalExPages = Math.max(1, Math.ceil(filteredExercises.length / EXERCISES_PER_PAGE));
-  const paginatedExercises = filteredExercises.slice((exPage - 1) * EXERCISES_PER_PAGE, exPage * EXERCISES_PER_PAGE);
+  // filteredExercises / paginatedExercises were dropped with the legacy
+  // exercise bank; ManageFitness handles its own filtering + pagination.
 
   const activeAnalytics = analytics?.[analyticsPeriod] ?? [];
   const shouldBlockAdminPage =
@@ -659,7 +633,7 @@ export default function AdminDash() {
               </p>
               <p className="text-xs text-gray-500 mt-1">
                 {stats?.deactivated_accounts != null
-                  ? `${stats.deactivated_accounts} inactive`
+                  ? `${stats.deactivated_accounts} suspended`
                   : "Users with an active account"}
               </p>
               <div className="absolute -bottom-4 -right-4 w-24 h-24 rounded-full opacity-5 bg-red-500 blur-2xl pointer-events-none" />
@@ -846,15 +820,19 @@ export default function AdminDash() {
                   <div className="col-span-1">
                     <StatusBadge
                       label={user.status}
-                      variant={user.status === "active" ? "success" : "warning"}
+                      variant={
+                        user.status === "active" ? "success"
+                        : user.status === "suspended" ? "warning"
+                        : "error"
+                      }
                       dot
                     />
                   </div>
                   <span className="col-span-2 text-gray-500 text-xs">{user.last_active}</span>
                   <div className="col-span-2 flex justify-end gap-2">
-                    {/* Backend exposes only is_active (true|false). Active rows
-                        get a Suspend action (orange); suspended rows get
-                        Reactivate. Both are wired to /activate and /deactivate. */}
+                    {/* active → Suspend (orange)
+                        suspended → Unsuspend (green) via /unsuspend
+                        inactive (deactivated by self) → disabled pill, can't re-activate from here */}
                     {user.status === "active" ? (
                       <button
                         onClick={() => handleUserStatusChange(user.id, "suspended")}
@@ -862,19 +840,22 @@ export default function AdminDash() {
                       >
                         Suspend
                       </button>
+                    ) : user.status === "suspended" ? (
+                      <button
+                        onClick={() => handleUserStatusChange(user.id, "active")}
+                        className="text-[10px] px-3 py-1.5 rounded-lg border border-green-500/30 text-green-400 hover:bg-green-500/10 transition-colors"
+                      >
+                        Unsuspend
+                      </button>
                     ) : (
-                      user.status === "inactive" ? (
-                        <button disabled className="text-[10px] px-3 py-1.5 rounded-lg border border-gray-500/30 text-gray-400 cursor-not-allowed" title="Cannot reactivate an inactive account">
-                          Inactive
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => handleUserStatusChange(user.id, "active")}
-                          className="text-[10px] px-3 py-1.5 rounded-lg border border-green-500/30 text-green-400 hover:bg-green-500/10 transition-colors"
-                        >
-                          Unsuspend
-                        </button>
-                      ))}
+                      <button
+                        disabled
+                        className="text-[10px] px-3 py-1.5 rounded-lg border border-gray-600/30 text-gray-600 cursor-not-allowed"
+                        title="User self-deactivated; they can reactivate via /deactivated"
+                      >
+                        Inactive
+                      </button>
+                    )}
                     <button
                       onClick={() => handleDeleteUser(user.id)}
                       className="text-[10px] px-3 py-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors"
@@ -959,129 +940,16 @@ export default function AdminDash() {
         </DashboardCard>
 
         {/* ═══════════════════════════════════════════════════════════════
-            EXERCISE BANK
+            FITNESS MANAGEMENT — full CRUD across workouts, activities,
+            equipment, and plans. Replaces the old Exercise-only bank.
+            Component lives in src/components/admin/manage_fitness.jsx and
+            calls the listAdmin / createAdmin / updateAdmin / deleteAdmin
+            helpers in api/admin.js, which hit /roles/admin/fitness on
+            the backend.
             ═══════════════════════════════════════════════════════════════ */}
-        <SectionHeader label="EXERCISE BANK" role={role} />
+        <SectionHeader label="FITNESS MANAGEMENT" role={role} />
 
-        <div className="bg-[#0E1628] rounded-2xl border border-white/5 overflow-hidden">
-          {/* Search, filter, + add */}
-          <div className="p-5 border-b border-white/5">
-            <div className="flex gap-3">
-              <input
-                type="text"
-                placeholder="Search exercises..."
-                value={exSearch}
-                onChange={(e) => setExSearch(e.target.value)}
-                className="flex-1 bg-[#0A1020] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none"
-              />
-              <select
-                value={exGroupFilter}
-                onChange={(e) => setExGroupFilter(e.target.value)}
-                className="bg-[#0A1020] border border-white/10 rounded-xl px-3 py-2.5 text-sm text-gray-300 focus:outline-none"
-              >
-                <option value="All">All Groups</option>
-                {MUSCLE_GROUPS.map((g) => <option key={g} value={g}>{g}</option>)}
-              </select>
-              <button
-                onClick={() => setNewExercise({ name: "", muscle_group: "Chest", equipment: "Barbell" })}
-                className="px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors flex items-center gap-2"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                Add Exercise
-              </button>
-            </div>
-            <p className="text-gray-500 text-xs mt-2">{filteredExercises.length} exercise{filteredExercises.length !== 1 ? "s" : ""} in bank</p>
-          </div>
-
-          {/* Add/Edit inline form */}
-          {(newExercise || editingExercise) && (
-            <div className="p-5 border-b border-white/5 bg-[#0A1020]/50">
-              <ExerciseForm
-                initial={newExercise || editingExercise}
-                onSave={handleSaveExercise}
-                onCancel={() => { setNewExercise(null); setEditingExercise(null); }}
-              />
-            </div>
-          )}
-
-          {/* Exercise list */}
-          <div className="divide-y divide-white/5">
-            <div className="grid grid-cols-12 gap-4 px-5 py-2.5 text-[10px] text-gray-500 uppercase tracking-widest">
-              <span className="col-span-4">Exercise</span>
-              <span className="col-span-2">Muscle Group</span>
-              <span className="col-span-2">Equipment</span>
-              <span className="col-span-2">Added By</span>
-              <span className="col-span-2 text-right">Actions</span>
-            </div>
-
-            {filteredExercises.length === 0 ? (
-              <p className="text-gray-500 text-sm text-center py-8">No exercises match your filters</p>
-            ) : (
-              paginatedExercises.map((ex) => (
-                <div key={ex.id} className="grid grid-cols-12 gap-4 px-5 py-3 items-center hover:bg-white/[0.02] transition-colors">
-                  <span className="col-span-4 text-white text-sm font-medium">{ex.name}</span>
-                  <div className="col-span-2">
-                    <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-red-500/10 text-red-400">{ex.muscle_group}</span>
-                  </div>
-                  <span className="col-span-2 text-gray-400 text-sm">{ex.equipment}</span>
-                  <span className="col-span-2 text-gray-500 text-xs">{ex.created_by}</span>
-                  <div className="col-span-2 flex justify-end gap-2">
-                    <button
-                      onClick={() => setEditingExercise({ ...ex })}
-                      className="text-[10px] px-3 py-1.5 rounded-lg border border-white/10 text-gray-300 hover:bg-white/5 transition-colors"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => handleDeleteExercise(ex.id)}
-                      className="text-[10px] px-3 py-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-
-          {/* Exercise pagination */}
-          {totalExPages > 1 && (
-            <div className="flex items-center justify-between px-5 py-3 border-t border-white/5">
-              <p className="text-gray-500 text-xs">
-                Showing {(exPage - 1) * EXERCISES_PER_PAGE + 1}–{Math.min(exPage * EXERCISES_PER_PAGE, filteredExercises.length)} of {filteredExercises.length}
-              </p>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => setExPage((p) => Math.max(1, p - 1))}
-                  disabled={exPage === 1}
-                  className="text-[10px] px-2.5 py-1.5 rounded-lg border border-white/10 text-gray-400 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  ← Prev
-                </button>
-                {Array.from({ length: totalExPages }, (_, i) => i + 1).map((page) => (
-                  <button
-                    key={page}
-                    onClick={() => setExPage(page)}
-                    className={`text-[10px] min-w-[28px] py-1.5 rounded-lg border transition-colors ${
-                      page === exPage
-                        ? "border-red-500/50 bg-red-500/10 text-red-400"
-                        : "border-white/10 text-gray-500 hover:bg-white/5"
-                    }`}
-                  >
-                    {page}
-                  </button>
-                ))}
-                <button
-                  onClick={() => setExPage((p) => Math.min(totalExPages, p + 1))}
-                  disabled={exPage === totalExPages}
-                  className="text-[10px] px-2.5 py-1.5 rounded-lg border border-white/10 text-gray-400 hover:bg-white/5 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  Next →
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+        <ManageFitness />
 
         {/* ═══════════════════════════════════════════════════════════════
             REPORTS & FLAGS
@@ -1120,7 +988,21 @@ export default function AdminDash() {
           ═══════════════════════════════════════════════════════════════ */}
 
       <Overlay open={overlay === "requests"} onClose={closeOverlay} title="Role Promotion Requests" wide>
-        <RoleRequestsDetail requests={roleRequests} onApprove={handleApprove} onReject={handleReject} />
+        {/* onView routes the admin to the same public coach profile page
+            clients see when browsing for a coach. Reuses normalizeStored
+            CoachProfile, the certifications/experiences UI, the bio, etc.
+            — no separate admin-only render path. */}
+        <RoleRequestsDetail
+          requests={roleRequests}
+          onApprove={handleApprove}
+          onReject={handleReject}
+          onView={(req) => {
+            if (req?.coach_id != null) {
+              navigate(`/coaches/${req.coach_id}`);
+              closeOverlay();
+            }
+          }}
+        />
       </Overlay>
 
       <Overlay open={overlay === "reports"} onClose={closeOverlay} title="Active Reports" wide>
@@ -1130,61 +1012,5 @@ export default function AdminDash() {
   );
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   EXERCISE FORM — inline add/edit for exercise bank
-   ═══════════════════════════════════════════════════════════════════════ */
-
-function ExerciseForm({ initial, onSave, onCancel }) {
-  const [name, setName] = useState(initial.name ?? "");
-  const [muscleGroup, setMuscleGroup] = useState(initial.muscle_group ?? "Chest");
-  const [equipment, setEquipment] = useState(initial.equipment ?? "Barbell");
-
-  return (
-    <div className="flex gap-3 items-end">
-      <div className="flex-1">
-        <label className="text-[10px] text-gray-500 uppercase tracking-widest">Exercise Name</label>
-        <input
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. Bulgarian Split Squat"
-          className="w-full bg-[#080D19] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none mt-1"
-          autoFocus
-        />
-      </div>
-      <div>
-        <label className="text-[10px] text-gray-500 uppercase tracking-widest">Muscle Group</label>
-        <select
-          value={muscleGroup}
-          onChange={(e) => setMuscleGroup(e.target.value)}
-          className="w-full bg-[#080D19] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none mt-1"
-        >
-          {MUSCLE_GROUPS.map((g) => <option key={g} value={g}>{g}</option>)}
-        </select>
-      </div>
-      <div>
-        <label className="text-[10px] text-gray-500 uppercase tracking-widest">Equipment</label>
-        <select
-          value={equipment}
-          onChange={(e) => setEquipment(e.target.value)}
-          className="w-full bg-[#080D19] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none mt-1"
-        >
-          {EQUIPMENT.map((e) => <option key={e} value={e}>{e}</option>)}
-        </select>
-      </div>
-      <button
-        onClick={() => name.trim() && onSave({ ...initial, name: name.trim(), muscle_group: muscleGroup, equipment })}
-        disabled={!name.trim()}
-        className="px-5 py-2 rounded-lg text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors disabled:opacity-40"
-      >
-        {initial.id ? "Update" : "Add"}
-      </button>
-      <button
-        onClick={onCancel}
-        className="px-4 py-2 rounded-lg text-sm border border-white/10 text-gray-400 hover:bg-white/5 transition-colors"
-      >
-        Cancel
-      </button>
-    </div>
-  );
-}
+/* ExerciseForm removed — replaced by per-tab modals inside ManageFitness
+   (WorkoutFormModal, ActivityFormModal, EquipmentFormModal, PlanFormModal). */

@@ -22,6 +22,9 @@ async function handlePostLogin(email) {
     return await resolvePostLoginPath(account);
   } catch (err) {
     const roles = await fetchAuthRoles();
+    if (Array.isArray(roles) && roles.includes("suspended")) {
+      return "/suspended";
+    }
     if (Array.isArray(roles) && roles.includes("deactivated")) {
       return "/deactivated";
     }

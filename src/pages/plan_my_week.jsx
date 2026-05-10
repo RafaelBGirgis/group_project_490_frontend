@@ -15,6 +15,8 @@ import { listAcceptedClients } from "../api/plan_my_week";
 import BuildPlanTab from "../components/plan_my_week/build_plan_tab";
 import BrowsePlansTab from "../components/plan_my_week/browse_plans_tab";
 import ViewPlansTab from "../components/plan_my_week/view_plans_tab";
+import MyPlansTab from "../components/plan_my_week/my_plans_tab";
+import PrevScriptsTab from "../components/plan_my_week/prev_scripts_tab";
 
 export default function PlanMyWeekPage() {
   const [params] = useSearchParams();
@@ -120,13 +122,17 @@ function Inner({ role }) {
 function Tabs() {
   const { state, dispatch } = usePlanMyWeek();
   const theme = ROLE_THEMES[state.role] ?? ROLE_THEMES.client;
+  const isClient = state.role === "client";
   const TABS = useMemo(
     () => [
       { key: "build", label: "Build Plan" },
       { key: "browse", label: "Browse Plans" },
       { key: "view", label: "My Scheduled" },
+      ...(isClient
+        ? [{ key: "my_plans", label: "My Plans" }]
+        : [{ key: "prev_scripts", label: "Previous Scripts" }]),
     ],
-    []
+    [isClient]
   );
 
   return (
@@ -148,7 +154,7 @@ function Tabs() {
         ))}
         {state.role === "coach" && state.selectedClientId != null ? (
           <div className="ml-auto flex items-center gap-2 text-xs text-gray-400">
-            <span>Client #{state.selectedClientId}</span>
+            <span>{state.selectedClientName || `Client #${state.selectedClientId}`}</span>
             <button
               className={`${theme.tagText} hover:underline`}
               onClick={() => dispatch({ type: "SELECT_CLIENT", clientId: null })}
@@ -162,6 +168,8 @@ function Tabs() {
       {state.activeTab === "build" ? <BuildPlanTab /> : null}
       {state.activeTab === "browse" ? <BrowsePlansTab /> : null}
       {state.activeTab === "view" ? <ViewPlansTab /> : null}
+      {state.activeTab === "my_plans" ? <MyPlansTab /> : null}
+      {state.activeTab === "prev_scripts" ? <PrevScriptsTab /> : null}
     </div>
   );
 }
@@ -225,7 +233,7 @@ function ClientPicker() {
           {clients.map((c) => (
             <button
               key={c.client_id}
-              onClick={() => dispatch({ type: "SELECT_CLIENT", clientId: c.client_id })}
+              onClick={() => dispatch({ type: "SELECT_CLIENT", clientId: c.client_id, clientName: c.name || null })}
               className="text-left rounded-xl border border-white/10 bg-[#0F1729] hover:bg-[#13192A] p-4 flex items-center gap-3 transition-colors"
             >
               <ProfileAvatar src={c.pfp_url} alt={c.name} name={c.name} size="lg" />

@@ -8,17 +8,10 @@ import {
   fetchMyCoach,
   requestCoach,
   deleteCoachRequest,
-  fetchCoachReviews,
-  createCoachReview,
-  fetchCoachReports,
-  createCoachReport,
 } from "../api/client";
 import { getCoachAccessState } from "../utils/roleAccess";
 import { resolveRoleState } from "../utils/sessionAuth";
-import {
-  forgetTerminatedCoachId,
-  getRememberedTerminatedCoachIds,
-} from "../utils/terminatedRelationships";
+import { forgetTerminatedCoachId } from "../utils/terminatedRelationships";
 
 const role = "client";
 
@@ -30,6 +23,24 @@ function SolidStar({ className }) {
   );
 }
 
+const INTERVAL_ABBREV = {
+  monthly: "/mo",
+  yearly: "/yr",
+  annually: "/yr",
+  weekly: "/wk",
+  daily: "/day",
+};
+
+function formatRateTag(coach) {
+  const amount = String(coach?.amount || "").trim();
+  const interval = String(coach?.pricingInterval || "").trim().toLowerCase();
+  if (!amount && !interval) return null;
+  const parsed = Number(amount);
+  const amountLabel = Number.isFinite(parsed) && amount !== "" ? `$${parsed % 1 === 0 ? parsed : parsed.toFixed(2)}` : amount;
+  const abbrev = INTERVAL_ABBREV[interval] || (interval ? `/${interval}` : "");
+  return `${amountLabel}${abbrev}`;
+}
+
 function extractSpecialties(coaches) {
   const set = new Set();
   coaches.forEach((coach) => {
@@ -38,56 +49,6 @@ function extractSpecialties(coaches) {
   return Array.from(set).sort();
 }
 
-function buildLatestRequestsByCoach(requests) {
-  const latestByCoachId = {};
-
-  (Array.isArray(requests) ? requests : []).forEach((item) => {
-    const coachId = Number(item?.coach_id);
-    if (!Number.isFinite(coachId)) return;
-
-    const previous = latestByCoachId[coachId];
-    const previousTime = new Date(previous?.updated_at || 0).getTime();
-    const currentTime = new Date(item?.updated_at || 0).getTime();
-
-    if (!previous || currentTime >= previousTime) {
-      latestByCoachId[coachId] = item;
-    }
-  });
-
-  return latestByCoachId;
-}
-
-function buildCoachRequestState(requests, myCoach) {
-  const latestByCoachId = buildLatestRequestsByCoach(requests);
-  const terminatedCoachIds = new Set(getRememberedTerminatedCoachIds());
-  const activeCoachId = Number(myCoach?.coach_id);
-  const hasActiveCoach = Number.isFinite(activeCoachId) && Number(myCoach?.relationship_id) > 0;
-  const actionableByCoachId = {};
-
-  Object.values(latestByCoachId).forEach((item) => {
-    const coachId = Number(item?.coach_id);
-    if (!Number.isFinite(coachId)) return;
-
-    const isHistoricalApproved =
-      item?.status === "approved" &&
-      (!hasActiveCoach || coachId !== activeCoachId);
-
-    if (terminatedCoachIds.has(coachId) && isHistoricalApproved) {
-      return;
-    }
-
-    if (isHistoricalApproved) {
-      return;
-    }
-
-    actionableByCoachId[coachId] = item;
-  });
-
-  return {
-    historyByCoachId: latestByCoachId,
-    actionableByCoachId,
-  };
-}
 
 function Stars({ rating }) {
   const full = Math.floor(rating);
@@ -138,22 +99,11 @@ export default function FindCoachPage() {
   const [sortBy, setSortBy] = useState("avg_rating");
 
   const [requesting, setRequesting] = useState(null);
-  const [requestedIds, setRequestedIds] = useState(new Set());
-  const [pendingRequests, setPendingRequests] = useState({});
-  const [requestHistory, setRequestHistory] = useState({});
   const [requestError, setRequestError] = useState("");
-  const [reviewError, setReviewError] = useState("");
   const [canSwitchToCoach, setCanSwitchToCoach] = useState(false);
   const [hasClientRole, setHasClientRole] = useState(false);
-
-  const [expandedId, setExpandedId] = useState(null);
-  const [coachReviews, setCoachReviews] = useState({});
-  const [coachReports, setCoachReports] = useState({});
-  const [loadingDetailsId, setLoadingDetailsId] = useState(null);
-  const [reviewDrafts, setReviewDrafts] = useState({});
-  const [reportDrafts, setReportDrafts] = useState({});
-  const [submittingReviewId, setSubmittingReviewId] = useState(null);
-  const [submittingReportId, setSubmittingReportId] = useState(null);
+  const [activePendingRequest, setActivePendingRequest] = useState(null);
+  const [hasActiveCoach, setHasActiveCoach] = useState(false);
 
   useEffect(() => {
     fetchMe()
@@ -176,21 +126,15 @@ export default function FindCoachPage() {
       fetchMyCoach().catch(() => null),
     ])
       .then(([requests, myCoach]) => {
-        const { historyByCoachId, actionableByCoachId } = buildCoachRequestState(requests, myCoach);
-        setRequestHistory(historyByCoachId);
-        setPendingRequests(actionableByCoachId);
-        setRequestedIds(
-          new Set(
-            Object.values(actionableByCoachId)
-              .filter((item) => item?.status !== "rejected")
-              .map((item) => Number(item.coach_id))
-          )
-        );
+        setHasActiveCoach(myCoach?.relationship_id != null);
+        const pending = (Array.isArray(requests) ? requests : []).find(
+          (r) => r.status === "pending"
+        ) || null;
+        setActivePendingRequest(pending);
       })
       .catch(() => {
-        setRequestHistory({});
-        setPendingRequests({});
-        setRequestedIds(new Set());
+        setActivePendingRequest(null);
+        setHasActiveCoach(false);
       });
   }, [account?.id]);
 
@@ -231,37 +175,16 @@ export default function FindCoachPage() {
 
   const allSpecialties = useMemo(() => extractSpecialties(coaches), [coaches]);
 
-  const loadCoachDetails = async (coachId) => {
-    setLoadingDetailsId(coachId);
-    try {
-      const [reviewsResponse, reportsResponse] = await Promise.all([
-        fetchCoachReviews(coachId).catch(() => ({ reviews: [] })),
-        fetchCoachReports(coachId).catch(() => ({ reports: [] })),
-      ]);
-
-      setCoachReviews((prev) => ({
-        ...prev,
-        [coachId]: Array.isArray(reviewsResponse?.reviews) ? reviewsResponse.reviews : [],
-      }));
-      setCoachReports((prev) => ({
-        ...prev,
-        [coachId]: Array.isArray(reportsResponse?.reports) ? reportsResponse.reports : [],
-      }));
-    } finally {
-      setLoadingDetailsId(null);
-    }
-  };
-
-  const toggleExpanded = async (coachId) => {
-    if (expandedId === coachId) {
-      setExpandedId(null);
-      return;
-    }
-
-    setExpandedId(coachId);
-    if (!coachReviews[coachId] || !coachReports[coachId]) {
-      await loadCoachDetails(coachId);
-    }
+  const refreshRequestState = async () => {
+    const [requests, myCoach] = await Promise.all([
+      fetchMyCoachRequests(),
+      fetchMyCoach().catch(() => null),
+    ]);
+    setHasActiveCoach(myCoach?.relationship_id != null);
+    const pending = (Array.isArray(requests) ? requests : []).find(
+      (r) => r.status === "pending"
+    ) || null;
+    setActivePendingRequest(pending);
   };
 
   const handleRequest = async (coachId) => {
@@ -269,26 +192,12 @@ export default function FindCoachPage() {
       setRequestError("You need to finish client onboarding before requesting a coach.");
       return;
     }
-
     setRequestError("");
     setRequesting(coachId);
     try {
       await requestCoach(account.client_id, coachId);
       forgetTerminatedCoachId(coachId);
-      const [requests, myCoach] = await Promise.all([
-        fetchMyCoachRequests(),
-        fetchMyCoach().catch(() => null),
-      ]);
-      const { historyByCoachId, actionableByCoachId } = buildCoachRequestState(requests, myCoach);
-      setRequestHistory(historyByCoachId);
-      setPendingRequests(actionableByCoachId);
-      setRequestedIds(
-        new Set(
-          Object.values(actionableByCoachId)
-            .filter((item) => item?.status !== "rejected")
-            .map((item) => Number(item.coach_id))
-        )
-      );
+      await refreshRequestState();
     } catch (error) {
       setRequestError(error.message || "Unable to send coach request.");
     } finally {
@@ -296,27 +205,13 @@ export default function FindCoachPage() {
     }
   };
 
-  const handleCancelRequest = async (coachId) => {
-    const requestId = pendingRequests[coachId]?.request_id;
-    if (!requestId) return;
+  const handleCancelRequest = async () => {
+    if (!activePendingRequest?.request_id) return;
     setRequestError("");
-    setRequesting(coachId);
+    setRequesting(activePendingRequest.coach_id);
     try {
-      await deleteCoachRequest(requestId);
-      const [requests, myCoach] = await Promise.all([
-        fetchMyCoachRequests(),
-        fetchMyCoach().catch(() => null),
-      ]);
-      const { historyByCoachId, actionableByCoachId } = buildCoachRequestState(requests, myCoach);
-      setRequestHistory(historyByCoachId);
-      setPendingRequests(actionableByCoachId);
-      setRequestedIds(
-        new Set(
-          Object.values(actionableByCoachId)
-            .filter((item) => item?.status !== "rejected")
-            .map((item) => Number(item.coach_id))
-        )
-      );
+      await deleteCoachRequest(activePendingRequest.request_id);
+      await refreshRequestState();
     } catch (error) {
       setRequestError(error.message || "Unable to cancel coach request.");
     } finally {
@@ -324,49 +219,7 @@ export default function FindCoachPage() {
     }
   };
 
-  const handleReviewSubmit = async (coachId) => {
-    const requestEntry = pendingRequests[coachId];
-    const hasRelationshipHistory = Boolean(
-      requestEntry?.relationship_id
-      || requestEntry?.status === "approved"
-    );
-    if (!hasRelationshipHistory) {
-      setReviewError("You can leave a review only if you have or had a relationship with this coach.");
-      return;
-    }
-
-    const draft = reviewDrafts[coachId] || { rating: 5, review_text: "" };
-    if (!draft.review_text?.trim()) return;
-
-    setReviewError("");
-    setSubmittingReviewId(coachId);
-    try {
-      await createCoachReview(coachId, draft.rating, draft.review_text.trim());
-      await loadCoachDetails(coachId);
-      setReviewDrafts((prev) => ({
-        ...prev,
-        [coachId]: { rating: 5, review_text: "" },
-      }));
-    } catch (error) {
-      setReviewError(error.message || "Unable to submit coach review.");
-    } finally {
-      setSubmittingReviewId(null);
-    }
-  };
-
-  const handleReportSubmit = async (coachId) => {
-    const draft = reportDrafts[coachId] || "";
-    if (!draft.trim()) return;
-
-    setSubmittingReportId(coachId);
-    try {
-      await createCoachReport(coachId, draft.trim());
-      await loadCoachDetails(coachId);
-      setReportDrafts((prev) => ({ ...prev, [coachId]: "" }));
-    } finally {
-      setSubmittingReportId(null);
-    }
-  };
+  const isLocked = hasActiveCoach || activePendingRequest !== null;
 
   const userInitials = account?.name
     ? account.name.split(" ").map((name) => name[0]).join("").toUpperCase()
@@ -496,9 +349,21 @@ export default function FindCoachPage() {
           </div>
         )}
 
-        {reviewError && (
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-            {reviewError}
+        {isLocked && (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200 flex items-center justify-between gap-4">
+            <span>
+              {hasActiveCoach
+                ? "You already have an active coach. Manage your relationship from the dashboard."
+                : `You have a pending request to ${activePendingRequest?.coach_name || "a coach"}. You cannot send new requests until it's resolved.`}
+            </span>
+            {activePendingRequest && (
+              <button
+                onClick={() => navigate(`/coaches/${activePendingRequest.coach_id}?from=dashboard`)}
+                className="shrink-0 rounded-lg border border-amber-400/40 px-3 py-1 text-xs font-medium text-amber-300 hover:bg-amber-500/10"
+              >
+                View Request
+              </button>
+            )}
           </div>
         )}
 
@@ -527,25 +392,22 @@ export default function FindCoachPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {coaches.map((coach) => {
-              const isExpanded = expandedId === coach.coach_id;
-              const isRequested = requestedIds.has(coach.coach_id);
+              const isThisPending = activePendingRequest?.coach_id === coach.coach_id;
               const isRequesting = requesting === coach.coach_id;
-              const requestEntry = pendingRequests[coach.coach_id];
-              const historyEntry = requestHistory[coach.coach_id];
-              const requestStatus = requestEntry?.status || null;
-              const canReview = Boolean(
-                historyEntry?.relationship_id
-                || historyEntry?.status === "approved"
-              );
               const initials = coach.name?.split(" ").map((name) => name[0]).join("") ?? "?";
-              const reviews = coachReviews[coach.coach_id] || [];
-              const reports = coachReports[coach.coach_id] || [];
+
+              const rateTag = formatRateTag(coach);
 
               return (
                 <div
                   key={coach.coach_id}
-                  className="rounded-2xl border border-white/6 bg-[#0F1729] p-5 hover:border-blue-500/20 transition-colors"
+                  className="relative rounded-2xl border border-white/6 bg-[#0F1729] p-5 hover:border-blue-500/20 transition-colors"
                 >
+                  {rateTag && (
+                    <span className="absolute top-4 right-4 rounded-full bg-emerald-500/15 border border-emerald-500/25 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-400 leading-tight">
+                      {rateTag}
+                    </span>
+                  )}
                   <div className="flex items-start gap-4">
                     <div className="w-14 h-14 rounded-full bg-blue-900/40 flex items-center justify-center text-blue-400 font-bold text-lg shrink-0">
                       {initials}
@@ -598,143 +460,7 @@ export default function FindCoachPage() {
                     </div>
                   </div>
 
-                  {isExpanded && (
-                    <div className="mt-4 pt-3 border-t border-white/5 space-y-3">
-                      {coach.bio ? (
-                        <div>
-                          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">About</p>
-                          <p className="text-gray-300 text-xs leading-relaxed">{coach.bio}</p>
-                        </div>
-                      ) : null}
-
-                      {coach.certifications?.length > 0 ? (
-                        <div>
-                          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Certifications</p>
-                          <div className="space-y-1">
-                            {coach.certifications.map((certification, index) => (
-                              <div key={`${certification.name}-${index}`} className="flex items-center gap-2">
-                                <span className="text-blue-400 text-xs">✓</span>
-                                <span className="text-gray-300 text-xs">{certification.name}</span>
-                                <span className="text-gray-600 text-[10px]">— {certification.organization}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-
-                      <div>
-                        <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Recent Reviews</p>
-                        {loadingDetailsId === coach.coach_id ? (
-                          <p className="text-gray-500 text-xs">Loading reviews...</p>
-                        ) : reviews.length === 0 ? (
-                          <p className="text-gray-500 text-xs">No reviews yet.</p>
-                        ) : (
-                          <div className="space-y-2">
-                            {reviews.slice(0, 3).map((review) => (
-                              <div key={review.id} className="rounded-xl bg-[#0B1220] px-3 py-2">
-                                <div className="flex items-center justify-between">
-                                  <span className="text-yellow-400 text-[11px]">
-                                    {"★".repeat(Math.max(0, Math.round(Number(review.rating || 0))))}
-                                  </span>
-                                  <span className="text-[10px] text-gray-600">
-                                    {review.last_updated
-                                      ? new Date(review.last_updated).toLocaleDateString()
-                                      : ""}
-                                  </span>
-                                </div>
-                                <p className="mt-1 text-xs text-gray-300">{review.review_text}</p>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <div className="rounded-xl bg-[#0B1220] p-3">
-                          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Leave Review</p>
-                          <select
-                            value={reviewDrafts[coach.coach_id]?.rating ?? 5}
-                            onChange={(e) =>
-                              setReviewDrafts((prev) => ({
-                                ...prev,
-                                [coach.coach_id]: {
-                                  rating: Number(e.target.value),
-                                  review_text: prev[coach.coach_id]?.review_text ?? "",
-                                },
-                              }))
-                            }
-                            className="mb-2 w-full rounded-lg border border-white/10 bg-[#080D19] px-3 py-2 text-xs text-gray-300 outline-none"
-                          >
-                            {[5, 4, 3, 2, 1].map((value) => (
-                              <option key={value} value={value}>
-                                {value} star{value !== 1 ? "s" : ""}
-                              </option>
-                            ))}
-                          </select>
-                          <textarea
-                            value={reviewDrafts[coach.coach_id]?.review_text ?? ""}
-                            onChange={(e) =>
-                              setReviewDrafts((prev) => ({
-                                ...prev,
-                                [coach.coach_id]: {
-                                  rating: prev[coach.coach_id]?.rating ?? 5,
-                                  review_text: e.target.value,
-                                },
-                              }))
-                            }
-                            rows={3}
-                            placeholder="Share your experience with this coach"
-                            className="w-full rounded-lg border border-white/10 bg-[#080D19] px-3 py-2 text-xs text-white outline-none placeholder:text-gray-600"
-                          />
-                          <button
-                            onClick={() => handleReviewSubmit(coach.coach_id)}
-                            disabled={!canReview || submittingReviewId === coach.coach_id}
-                            className="mt-2 w-full rounded-lg bg-blue-600 py-2 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:bg-blue-900/40"
-                          >
-                            {submittingReviewId === coach.coach_id
-                              ? "Submitting..."
-                              : canReview
-                                ? "Submit Review"
-                                : "Review After Approval"}
-                          </button>
-                        </div>
-
-                        <div className="rounded-xl bg-[#0B1220] p-3">
-                          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">Report Coach</p>
-                          <p className="mb-2 text-xs text-gray-400">
-                            {reports.length} submitted report{reports.length !== 1 ? "s" : ""}
-                          </p>
-                          <textarea
-                            value={reportDrafts[coach.coach_id] ?? ""}
-                            onChange={(e) =>
-                              setReportDrafts((prev) => ({
-                                ...prev,
-                                [coach.coach_id]: e.target.value,
-                              }))
-                            }
-                            rows={3}
-                            placeholder="Describe the issue you want to report"
-                            className="w-full rounded-lg border border-white/10 bg-[#080D19] px-3 py-2 text-xs text-white outline-none placeholder:text-gray-600"
-                          />
-                          <button
-                            onClick={() => handleReportSubmit(coach.coach_id)}
-                            disabled={submittingReportId === coach.coach_id}
-                            className="mt-2 w-full rounded-lg border border-red-500/30 bg-red-900/20 py-2 text-xs font-medium text-red-300 transition-colors hover:bg-red-900/30 disabled:opacity-50"
-                          >
-                            {submittingReportId === coach.coach_id ? "Submitting..." : "Submit Report"}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
                   <div className="flex gap-2 mt-4">
-                    <button
-                      onClick={() => toggleExpanded(coach.coach_id)}
-                      className="flex-1 border border-white/10 text-gray-300 hover:bg-white/5 rounded-xl py-2.5 text-sm font-medium transition-colors"
-                    >
-                      {isExpanded ? "Hide Details" : "Quick Details"}
-                    </button>
                     <button
                       onClick={() => navigate(`/coaches/${coach.coach_id}`)}
                       className="flex-1 border border-white/10 text-gray-300 hover:bg-white/5 rounded-xl py-2.5 text-sm font-medium transition-colors"
@@ -749,15 +475,15 @@ export default function FindCoachPage() {
                         Message
                       </button>
                     ) : null}
-                    {isRequested ? (
+                    {isThisPending ? (
                       <button
-                        onClick={() => handleCancelRequest(coach.coach_id)}
-                        disabled={requestStatus !== "pending" || isRequesting}
-                        className="flex-1 bg-green-900/30 text-green-400 border border-green-500/30 rounded-xl py-2.5 text-sm font-medium disabled:cursor-default disabled:opacity-70"
+                        onClick={handleCancelRequest}
+                        disabled={isRequesting}
+                        className="flex-1 bg-amber-900/30 text-amber-400 border border-amber-500/30 rounded-xl py-2.5 text-sm font-medium disabled:opacity-70"
                       >
-                        {isRequesting ? "Cancelling..." : requestStatus === "approved" ? "Approved" : requestStatus === "rejected" ? "Rejected" : "Cancel Request"}
+                        {isRequesting ? "Cancelling..." : "Cancel Request"}
                       </button>
-                    ) : (
+                    ) : !isLocked ? (
                       <button
                         onClick={() => handleRequest(coach.coach_id)}
                         disabled={isRequesting}
@@ -765,7 +491,7 @@ export default function FindCoachPage() {
                       >
                         {isRequesting ? "Sending..." : "Request Coach"}
                       </button>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               );

@@ -34,6 +34,9 @@ import { getCoachAccessState, getImmediateCoachAccessState } from "../utils/role
 import { getImmediateRoleState, resolveRoleState } from "../utils/sessionAuth";
 import { clearAuth } from "../api/auth";
 import { setLastRoleContext } from "../utils/sessionCache";
+import { listMyScheduledPlans, searchWorkoutPlans } from "../api/plan_my_week";
+import WorkoutJournal from "../components/workout_journal";
+import { fetchWorkoutHistoryEnriched } from "../api/survey";
 
 const PRIMARY_GOALS = [
   "Weight Loss",
@@ -96,7 +99,7 @@ const normalizeGenderToSignupValue = (value) => {
   return value || "";
 };
 
-const buildAccountUpdatePayload = ({ name, age, email, bio, pfp_url, gender }) => {
+const buildAccountUpdatePayload = ({ name, age, email, bio, pfp_url, gender, dailyStepsGoal, dailyCalorieBudget }) => {
   const payload = {};
 
   if (name) {
@@ -117,6 +120,14 @@ const buildAccountUpdatePayload = ({ name, age, email, bio, pfp_url, gender }) =
   }
   if (gender) {
     payload.gender = gender;
+  }
+  const parsedStepsGoal = Number(dailyStepsGoal);
+  if (Number.isFinite(parsedStepsGoal) && parsedStepsGoal > 0) {
+    payload.daily_steps_goal = parsedStepsGoal;
+  }
+  const parsedCalorieBudget = Number(dailyCalorieBudget);
+  if (Number.isFinite(parsedCalorieBudget) && parsedCalorieBudget > 0) {
+    payload.daily_calorie_budget = parsedCalorieBudget;
   }
 
   return payload;
@@ -174,6 +185,8 @@ function ProfilePage({ role = "client" }) {
     profilePicture: null,
     pricingInterval: "",
     amount: "",
+    dailyStepsGoal: "",
+    dailyCalorieBudget: "",
   });
 
   // Unified profile data from API
@@ -405,6 +418,8 @@ function ProfilePage({ role = "client" }) {
           bio: acct.bio || "",
           primaryGoal: resolveClientPrimaryGoal(clientDetails),
           profilePicture: acct.pfp_url || null,
+          dailyStepsGoal: acct.daily_steps_goal != null ? String(acct.daily_steps_goal) : "",
+          dailyCalorieBudget: acct.daily_calorie_budget != null ? String(acct.daily_calorie_budget) : "",
         };
 
         setProfile((prev) => ({ ...prev, ...nextProfile }));
@@ -552,6 +567,25 @@ function ProfilePage({ role = "client" }) {
     }
   };
 
+  const journalFetchDayData = useCallback(async (isoDate) => {
+    const [y, mo, d] = isoDate.split("-").map(Number);
+    const from_dt = new Date(y, mo - 1, d, 0, 0, 0).toISOString();
+    const to_dt = new Date(y, mo - 1, d, 23, 59, 59).toISOString();
+    const [cwps, allPlans, allLogs] = await Promise.all([
+      listMyScheduledPlans({ from_dt, to_dt }).catch(() => []),
+      searchWorkoutPlans({ limit: 200 }).catch(() => []),
+      fetchWorkoutHistoryEnriched({ limit: 200 }).catch(() => []),
+    ]);
+    const lookup = {};
+    allPlans.forEach((p) => { lookup[p.id] = p; });
+    const logs = allLogs.filter((l) => {
+      const ts = l.last_updated || l.created_at;
+      if (!ts) return false;
+      try { return new Date(ts).toISOString().slice(0, 10) === isoDate; } catch { return false; }
+    });
+    return { cwps: Array.isArray(cwps) ? cwps : [], planLookup: lookup, logs };
+  }, []);
+
   const savePersonal = () =>
     runSectionSave("personal", async () => {
       let profilePictureUrl =
@@ -571,6 +605,8 @@ function ProfilePage({ role = "client" }) {
         bio: profile.bio,
         pfp_url: profilePictureUrl,
         gender: profile.gender,
+        dailyStepsGoal: profile.dailyStepsGoal,
+        dailyCalorieBudget: profile.dailyCalorieBudget,
       });
       if (Object.keys(accountPayload).length > 0) {
         await updateAccount(accountPayload);
@@ -1246,6 +1282,7 @@ function ProfilePage({ role = "client" }) {
               ] : [
                 { id: "personal", label: "Personal" },
                 { id: "telemetry", label: "Progress" },
+                { id: "journal", label: "Workout Journal" },
                 { id: "availability", label: "Availability" },
                 { id: "subscription", label: "Subscription & Payment" },
               ]}
@@ -1340,6 +1377,20 @@ function ProfilePage({ role = "client" }) {
                         ))}
                       </select>
                     </div>
+                    <Input
+                      label="Daily Steps Goal"
+                      value={profile.dailyStepsGoal}
+                      onChange={(v) => handleProfileChange("dailyStepsGoal", v)}
+                      placeholder="10000"
+                      disabled={profileInputsDisabled}
+                    />
+                    <Input
+                      label="Daily Calorie Budget"
+                      value={profile.dailyCalorieBudget}
+                      onChange={(v) => handleProfileChange("dailyCalorieBudget", v)}
+                      placeholder="2000"
+                      disabled={profileInputsDisabled}
+                    />
                   </div>
 
                   <div className="mt-4">
@@ -1417,6 +1468,12 @@ function ProfilePage({ role = "client" }) {
                     </div>
                   );
                 })()}
+              </Panel>
+            )}
+
+            {!isCoach && (
+              <Panel id="journal" title="Workout Journal" accent={accent} {...panelProps("journal")}>
+                <WorkoutJournal fetchDayData={journalFetchDayData} accent={accent} />
               </Panel>
             )}
 

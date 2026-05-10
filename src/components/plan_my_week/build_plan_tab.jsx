@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   estimateCalories,
   intensityLabel,
   usePlanMyWeek,
 } from "../../contexts/plan_my_week_context";
+import { formatDuration } from "../../utils/duration";
 import {
   assignPlanToSelf,
   createWorkoutPlan,
@@ -12,24 +13,22 @@ import {
 import { ROLE_THEMES } from "../theme";
 import WorkoutGrid from "./workout_grid";
 import ActivityConfig from "./activity_config";
-import ScheduleBlocks from "./schedule_blocks";
+import ScheduleDialog from "./schedule_dialog";
 
 export default function BuildPlanTab() {
   const { state, dispatch } = usePlanMyWeek();
   const theme = ROLE_THEMES[state.role] ?? ROLE_THEMES.client;
+  const isCoach = state.role === "coach";
+
   const [workoutGridOpen, setWorkoutGridOpen] = useState(false);
   const [pickedWorkout, setPickedWorkout] = useState(null);
   const [editingDraftId, setEditingDraftId] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [configError, setConfigError] = useState("");
+  const [isPublic, setIsPublic] = useState(false);
 
   const totalCalories = useMemo(
-    () =>
-      state.draftPlan.activities.reduce(
-        (sum, a) => sum + Number(a.estimated_calories || 0),
-        0
-      ),
+    () => state.draftPlan.activities.reduce((sum, a) => sum + Number(a.estimated_calories || 0), 0),
     [state.draftPlan.activities]
   );
 
@@ -38,168 +37,155 @@ export default function BuildPlanTab() {
     [state.draftPlan.activities, editingDraftId]
   );
 
-  async function handleSave() {
-    setError("");
-    setSuccess("");
+  function openScheduler() {
+    setConfigError("");
     if (!state.draftPlan.strata_name.trim()) {
-      setError("Plan needs a name.");
+      setConfigError("Give your plan a name before scheduling.");
       return;
     }
     if (!state.draftPlan.activities.length) {
-      setError("Add at least one activity to the plan.");
+      setConfigError("Add at least one activity before scheduling.");
       return;
     }
-    setSaving(true);
-    try {
-      const planResp = await createWorkoutPlan({
-        strata_name: state.draftPlan.strata_name.trim(),
-        activities: state.draftPlan.activities.map((a) => ({
-          workout_activity_id: a.workout_activity_id,
-          planned_reps: a.workout_type === "rep" ? Number(a.planned_reps || 0) : null,
-          planned_sets: a.workout_type === "rep" ? Number(a.planned_sets || 0) : null,
-          planned_duration:
-            a.workout_type === "duration" ? Number(a.planned_duration || 0) : null,
-        })),
-      });
-      const newPlanId = planResp?.workout_plan_id ?? planResp?.id;
-      if (!newPlanId) throw new Error("Backend did not return a plan id.");
+    setScheduleOpen(true);
+  }
 
-      // If schedule blocks were drafted, schedule the new plan immediately.
-      if (state.pendingBlocks.length) {
-        const blocks = state.pendingBlocks.map(toApiBlock);
-        if (state.role === "coach") {
-          if (state.selectedClientId == null) {
-            throw new Error("No client selected to prescribe for.");
-          }
-          await prescribePlanToClient({
-            workout_plan_id: newPlanId,
-            client_id: state.selectedClientId,
-            blocks,
-          });
-        } else {
-          await assignPlanToSelf({ workout_plan_id: newPlanId, blocks });
-        }
-        setSuccess(
-          `Saved plan "${state.draftPlan.strata_name}" and scheduled ${state.pendingBlocks.length} block${state.pendingBlocks.length === 1 ? "" : "s"}.`
-        );
-      } else {
-        setSuccess(`Saved plan "${state.draftPlan.strata_name}".`);
-      }
-      dispatch({ type: "CLEAR_DRAFT" });
-    } catch (e) {
-      setError(e?.message || "Failed to save plan.");
-    } finally {
-      setSaving(false);
+  async function handleBuildSave(apiBlocks) {
+    const planResp = await createWorkoutPlan({
+      strata_name: state.draftPlan.strata_name.trim(),
+      is_public: isCoach ? isPublic : false,
+      activities: state.draftPlan.activities.map((a) => ({
+        workout_activity_id: a.workout_activity_id,
+        planned_reps: a.workout_type === "rep" ? Number(a.planned_reps || 0) : null,
+        planned_sets: a.workout_type === "rep" ? Number(a.planned_sets || 0) : null,
+        planned_duration: a.workout_type === "duration" ? Number(a.planned_duration || 0) : null,
+      })),
+    });
+    const newPlanId = planResp?.workout_plan_id ?? planResp?.id;
+    if (!newPlanId) throw new Error("Backend did not return a plan id.");
+
+    if (state.role === "coach") {
+      if (state.selectedClientId == null) throw new Error("No client selected to prescribe for.");
+      await prescribePlanToClient({
+        workout_plan_id: newPlanId,
+        client_id: state.selectedClientId,
+        blocks: apiBlocks,
+      });
+    } else {
+      await assignPlanToSelf({ workout_plan_id: newPlanId, blocks: apiBlocks });
     }
+    dispatch({ type: "CLEAR_DRAFT" });
+    setScheduleOpen(false);
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-      {/* LEFT — plan details + activities */}
-      <section className="lg:col-span-2 space-y-4">
-        <div className="rounded-xl border border-white/10 bg-[#0F1729] p-4">
-          <label className="block text-xs uppercase tracking-widest text-gray-500 mb-1">Plan name</label>
-          <input
-            value={state.draftPlan.strata_name}
-            onChange={(e) => dispatch({ type: "SET_PLAN_NAME", name: e.target.value })}
-            placeholder="e.g. Upper Body — Push Focus"
-            className="w-full bg-[#0A1020] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-600"
-          />
-        </div>
-
-        <div className="rounded-xl border border-white/10 bg-[#0F1729] p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm uppercase tracking-widest text-gray-500">Activities</h2>
-            <button
-              onClick={() => setWorkoutGridOpen(true)}
-              className={`px-3 py-1.5 rounded-lg text-white text-xs font-semibold ${theme.btnPrimary}`}
-            >
-              + Add activity
-            </button>
+    <div className="space-y-4">
+      {/* Plan name + public toggle */}
+      <div className="rounded-xl border border-white/10 bg-[#0F1729] p-4">
+        <div className="flex gap-4 items-center">
+          <div className="flex-1">
+            <label className="block text-xs uppercase tracking-widest text-gray-500 mb-1">Plan name</label>
+            <input
+              value={state.draftPlan.strata_name}
+              onChange={(e) => dispatch({ type: "SET_PLAN_NAME", name: e.target.value })}
+              placeholder="e.g. Upper Body — Push Focus"
+              className="w-full bg-[#0A1020] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-600"
+            />
           </div>
-          {state.draftPlan.activities.length === 0 ? (
-            <p className="text-sm text-gray-500 py-6 text-center">
-              No activities yet. Click <span className={theme.tagText}>+ Add activity</span> to pick a workout.
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {state.draftPlan.activities.map((a) => (
-                <li
-                  key={a._draft_id}
-                  className="flex items-center justify-between rounded-lg border border-white/5 bg-[rgba(255,255,255,0.02)] px-3 py-2"
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-white truncate">{a.workout_name}</p>
-                    <p className="text-xs text-gray-400">
-                      {intensityLabel(a)} ·{" "}
-                      {a.workout_type === "duration"
-                        ? `${a.planned_duration || 0}s`
-                        : `${a.planned_reps || 0}×${a.planned_sets || 0}`}
-                      {" · "}
-                      ~{a.estimated_calories} cal
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs">
-                    <button
-                      className="text-blue-300 hover:underline"
-                      onClick={() => {
-                        setPickedWorkout({
-                          id: a.workout_id,
-                          name: a.workout_name,
-                          workout_type: a.workout_type,
-                        });
-                        setEditingDraftId(a._draft_id);
-                      }}
-                    >
-                      edit
-                    </button>
-                    <button
-                      className="text-red-300 hover:underline"
-                      onClick={() => dispatch({ type: "REMOVE_ACTIVITY", draftId: a._draft_id })}
-                    >
-                      remove
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-          {state.draftPlan.activities.length > 0 ? (
-            <div className="text-xs text-gray-500 text-right">
-              Total estimated calories: <span className={`${theme.tagText} font-semibold`}>{totalCalories.toFixed(2)}</span>
+          {isCoach && (
+            <div className="shrink-0 flex flex-col items-center">
+              <p className="text-xs uppercase tracking-widest text-gray-500 mb-1">Publish</p>
+              <button
+                type="button"
+                onClick={() => setIsPublic((v) => !v)}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  isPublic ? theme.btnPrimary : "bg-white/10"
+                }`}
+                title={isPublic ? "Visible in Browse Plans" : "Private — only you can see it"}
+              >
+                <span
+                  className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                    isPublic ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+              </button>
             </div>
-          ) : null}
+          )}
         </div>
-      </section>
+      </div>
 
-      {/* RIGHT — schedule blocks + save */}
-      <aside className="space-y-4">
-        <ScheduleBlocks />
-
-        {error ? (
-          <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">{error}</div>
+      {/* Activities */}
+      <div className="rounded-xl border border-white/10 bg-[#0F1729] p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm uppercase tracking-widest text-gray-500">Activities</h2>
+          <button
+            onClick={() => setWorkoutGridOpen(true)}
+            className={`px-3 py-1.5 rounded-lg text-white text-xs font-semibold ${theme.btnPrimary}`}
+          >
+            + Add activity
+          </button>
+        </div>
+        {state.draftPlan.activities.length === 0 ? (
+          <p className="text-sm text-gray-500 py-6 text-center">
+            No activities yet. Click <span className={theme.tagText}>+ Add activity</span> to pick a workout.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {state.draftPlan.activities.map((a) => (
+              <li
+                key={a._draft_id}
+                className="flex items-center justify-between rounded-lg border border-white/5 bg-[rgba(255,255,255,0.02)] px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-white truncate">{a.workout_name}</p>
+                  <p className="text-xs text-gray-400">
+                    {intensityLabel(a)} ·{" "}
+                    {a.workout_type === "duration"
+                      ? formatDuration(a.planned_duration || 0)
+                      : `${a.planned_reps || 0}×${a.planned_sets || 0}`}
+                    {" · "}
+                    ~{a.estimated_calories} cal
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 text-xs">
+                  <button
+                    className="text-blue-300 hover:underline"
+                    onClick={() => {
+                      setPickedWorkout({ id: a.workout_id, name: a.workout_name, workout_type: a.workout_type });
+                      setEditingDraftId(a._draft_id);
+                    }}
+                  >
+                    edit
+                  </button>
+                  <button
+                    className="text-red-300 hover:underline"
+                    onClick={() => dispatch({ type: "REMOVE_ACTIVITY", draftId: a._draft_id })}
+                  >
+                    remove
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        {state.draftPlan.activities.length > 0 ? (
+          <div className="text-xs text-gray-500 text-right">
+            Total estimated calories:{" "}
+            <span className={`${theme.tagText} font-semibold`}>{totalCalories.toFixed(2)}</span>
+          </div>
         ) : null}
-        {success ? (
-          <div className="rounded-lg border border-green-500/30 bg-green-500/10 p-3 text-sm text-green-300">{success}</div>
-        ) : null}
+      </div>
 
-        <button
-          disabled={saving}
-          onClick={handleSave}
-          className={`w-full py-2.5 rounded-lg disabled:opacity-50 text-sm font-semibold ${theme.btnPrimary}`}
-        >
-          {saving
-            ? "Saving…"
-            : state.pendingBlocks.length
-              ? `Save plan & schedule ${state.pendingBlocks.length} block${state.pendingBlocks.length === 1 ? "" : "s"}`
-              : "Save plan"}
-        </button>
-        <p className="text-xs text-gray-500">
-          Plans must be saved before they can be scheduled. Blocks are validated against the
-          {state.role === "coach" ? " client's " : " your "}recurring availability — if any
-          block falls outside your availability or overlaps an existing booking, the whole save fails.
-        </p>
-      </aside>
+      {configError ? (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">{configError}</div>
+      ) : null}
+
+      <button
+        onClick={openScheduler}
+        className={`w-full py-2.5 rounded-lg text-sm font-semibold text-white ${theme.btnPrimary}`}
+      >
+        Next: Schedule →
+      </button>
 
       {workoutGridOpen ? (
         <WorkoutGrid
@@ -216,10 +202,7 @@ export default function BuildPlanTab() {
         <ActivityConfig
           workout={pickedWorkout}
           editingDraft={editingDraft}
-          onClose={() => {
-            setPickedWorkout(null);
-            setEditingDraftId(null);
-          }}
+          onClose={() => { setPickedWorkout(null); setEditingDraftId(null); }}
           onSubmit={(activity) => {
             if (editingDraftId) {
               dispatch({ type: "UPDATE_ACTIVITY", draftId: editingDraftId, patch: activity });
@@ -231,19 +214,18 @@ export default function BuildPlanTab() {
           }}
         />
       ) : null}
+
+      {scheduleOpen ? (
+        <ScheduleDialog
+          plan={null}
+          planName={state.draftPlan.strata_name || "New plan"}
+          mode="build"
+          onBuildSave={handleBuildSave}
+          onClose={() => setScheduleOpen(false)}
+        />
+      ) : null}
     </div>
   );
-
-  // helper: convert local block representation → ISO datetimes for the API
-  function toApiBlock(b) {
-    const start = `${b.date_iso}T${String(b.start_hour).padStart(2, "0")}:00:00`;
-    const end =
-      b.end_hour >= 24
-        ? // shift to next day midnight
-          `${addDays(b.date_iso, 1)}T00:00:00`
-        : `${b.date_iso}T${String(b.end_hour).padStart(2, "0")}:00:00`;
-    return { start_dt: start, end_dt: end };
-  }
 }
 
 function addDays(iso, days) {
@@ -256,5 +238,4 @@ function addDays(iso, days) {
   return `${yy}-${mm}-${dd}`;
 }
 
-// also export the helper for reuse by other components
 export { addDays };

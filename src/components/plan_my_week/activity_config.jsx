@@ -3,16 +3,8 @@ import { listWorkoutActivities } from "../../api/plan_my_week";
 import { estimateCalories, intensityLabel } from "../../contexts/plan_my_week_context";
 import { ROLE_THEMES } from "../theme";
 import { usePlanMyWeek } from "../../contexts/plan_my_week_context";
+import { HMSDuration } from "../HMSDuration";
 
-/**
- * Lets the user pick an intensity option (one of the WorkoutActivity rows
- * for the chosen Workout) and set planned reps/sets or duration.
- *
- * Props:
- *   workout: { id, name, workout_type }
- *   editingDraft: existing draft to prefill from (may be null)
- *   onClose, onSubmit(activityDraft)
- */
 export default function ActivityConfig({ workout, editingDraft, onClose, onSubmit }) {
   const { state } = usePlanMyWeek();
   const theme = ROLE_THEMES[state.role] ?? ROLE_THEMES.client;
@@ -24,7 +16,14 @@ export default function ActivityConfig({ workout, editingDraft, onClose, onSubmi
   );
   const [reps, setReps] = useState(editingDraft?.planned_reps ?? "");
   const [sets, setSets] = useState(editingDraft?.planned_sets ?? "");
-  const [duration, setDuration] = useState(editingDraft?.planned_duration ?? "");
+  const [duration, setDuration] = useState(editingDraft?.planned_duration ?? 0);
+
+  // Intensity-as-input state. Stays as a string so the user can type freely;
+  // the closest stored value is auto-selected as they type, and snaps on blur.
+  const [intensityInput, setIntensityInput] = useState(
+    editingDraft?.intensity_value != null ? String(editingDraft.intensity_value) : ""
+  );
+  const [selectedMeasure, setSelectedMeasure] = useState(editingDraft?.intensity_measure ?? "");
 
   useEffect(() => {
     let alive = true;
@@ -33,22 +32,72 @@ export default function ActivityConfig({ workout, editingDraft, onClose, onSubmi
       .then((rows) => {
         if (!alive) return;
         setActivities(rows);
-        if (selectedActivityId == null && rows.length) {
-          setSelectedActivityId(rows[0].id);
+        // Pick a sensible default unit + value once activities load.
+        if (rows.length) {
+          if (!selectedMeasure) {
+            const firstMeasure = rows[0].intensity_measure || "";
+            setSelectedMeasure(firstMeasure);
+          }
+          if (selectedActivityId == null) {
+            setSelectedActivityId(rows[0].id);
+            if (!intensityInput) {
+              setIntensityInput(rows[0].intensity_value != null ? String(rows[0].intensity_value) : "");
+            }
+          }
         }
       })
       .catch((e) => alive && setError(e?.message || "Failed to load activities"))
       .finally(() => alive && setLoading(false));
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workout.id]);
+
+  // Distinct intensity_measure values across activities — drives the unit
+  // picker layout (text vs dropdown).
+  const uniqueMeasures = useMemo(() => {
+    const seen = new Set();
+    activities.forEach((a) => {
+      const m = a.intensity_measure || "";
+      if (m) seen.add(m);
+    });
+    return [...seen];
+  }, [activities]);
+  const hasMultipleMeasures = uniqueMeasures.length > 1;
+
+  // When multiple measures exist, only consider activities matching the chosen unit.
+  const candidateActivities = useMemo(() => {
+    if (!hasMultipleMeasures) return activities;
+    return activities.filter((a) => (a.intensity_measure || "") === selectedMeasure);
+  }, [activities, hasMultipleMeasures, selectedMeasure]);
+
+  // As the user types an intensity value, coerce selection toward the
+  // closest stored intensity_value within the candidate set.
+  useEffect(() => {
+    if (!candidateActivities.length) return;
+    const typed = parseFloat(intensityInput);
+    if (!Number.isFinite(typed)) {
+      setSelectedActivityId(candidateActivities[0].id);
+      return;
+    }
+    let closest = candidateActivities[0];
+    let minDiff = Math.abs(Number(closest.intensity_value ?? 0) - typed);
+    for (const a of candidateActivities) {
+      const diff = Math.abs(Number(a.intensity_value ?? 0) - typed);
+      if (diff < minDiff) { minDiff = diff; closest = a; }
+    }
+    setSelectedActivityId(closest.id);
+  }, [intensityInput, candidateActivities]);
 
   const selected = useMemo(
     () => activities.find((a) => a.id === selectedActivityId) || null,
     [activities, selectedActivityId]
   );
+
+  const handleIntensityBlur = () => {
+    if (selected?.intensity_value != null) {
+      setIntensityInput(String(selected.intensity_value));
+    }
+  };
 
   const calories = useMemo(() => {
     if (!selected) return 0;
@@ -67,7 +116,7 @@ export default function ActivityConfig({ workout, editingDraft, onClose, onSubmi
       return;
     }
     if (workout.workout_type === "duration") {
-      if (!Number(duration)) {
+      if (!duration) {
         setError("Duration must be greater than zero.");
         return;
       }
@@ -85,7 +134,7 @@ export default function ActivityConfig({ workout, editingDraft, onClose, onSubmi
       calories_per_unit_frequency: Number(selected.estimated_calories_per_unit_frequency),
       planned_reps: workout.workout_type === "rep" ? Number(reps) : null,
       planned_sets: workout.workout_type === "rep" ? Number(sets) : null,
-      planned_duration: workout.workout_type === "duration" ? Number(duration) : null,
+      planned_duration: workout.workout_type === "duration" ? duration : null,
       estimated_calories: calories,
     });
   }
@@ -118,41 +167,50 @@ export default function ActivityConfig({ workout, editingDraft, onClose, onSubmi
           <>
             <div>
               <label className="block text-xs uppercase tracking-widest text-gray-500 mb-1">Intensity</label>
-              <div className="space-y-1">
-                {activities.map((a) => (
-                  <label
-                    key={a.id}
-                    className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border cursor-pointer ${
-                      selectedActivityId === a.id
-                        ? `${theme.borderAccent} ${theme.tagBg}`
-                        : "border-white/10 hover:border-white/20"
-                    }`}
+              <div className="flex items-stretch gap-2">
+                <input
+                  type="number"
+                  step="any"
+                  value={intensityInput}
+                  onChange={(e) => setIntensityInput(e.target.value)}
+                  onBlur={handleIntensityBlur}
+                  placeholder="Enter intensity"
+                  className={`${inputCls} flex-1`}
+                  list={`intensity-options-${workout.id}`}
+                />
+                <datalist id={`intensity-options-${workout.id}`}>
+                  {candidateActivities.map((a) => (
+                    <option key={a.id} value={a.intensity_value ?? ""} />
+                  ))}
+                </datalist>
+                {hasMultipleMeasures ? (
+                  <select
+                    value={selectedMeasure}
+                    onChange={(e) => setSelectedMeasure(e.target.value)}
+                    className={`${inputCls} w-24`}
                   >
-                    <span className="flex items-center gap-2">
-                      <input
-                        type="radio"
-                        name="intensity"
-                        checked={selectedActivityId === a.id}
-                        onChange={() => setSelectedActivityId(a.id)}
-                      />
-                      <span className="text-sm">{intensityLabel(a)}</span>
-                    </span>
-                    <span className="text-[11px] text-gray-400">
-                      {Number(a.estimated_calories_per_unit_frequency).toFixed(2)} cal·{workout.workout_type === "duration" ? "sec" : "rep"}
-                    </span>
-                  </label>
-                ))}
+                    {uniqueMeasures.map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                ) : uniqueMeasures[0] ? (
+                  <span className="flex items-center px-3 text-sm text-gray-300 bg-[#0A1020] border border-white/10 rounded-lg">
+                    {uniqueMeasures[0]}
+                  </span>
+                ) : null}
               </div>
+              {selected ? (
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Snaps to nearest tier: <span className={theme.tagText}>{intensityLabel(selected)}</span>
+                  {" · "}
+                  {Number(selected.estimated_calories_per_unit_frequency).toFixed(2)} cal·{workout.workout_type === "duration" ? "sec" : "rep"}
+                </p>
+              ) : null}
             </div>
 
             {workout.workout_type === "duration" ? (
-              <Field label="Duration (seconds)">
-                <input
-                  type="number"
-                  value={duration}
-                  onChange={(e) => setDuration(e.target.value)}
-                  className={inputCls}
-                />
+              <Field label="Duration">
+                <HMSDuration value={duration} onChange={setDuration} />
               </Field>
             ) : (
               <div className="grid grid-cols-2 gap-2">
@@ -169,6 +227,8 @@ export default function ActivityConfig({ workout, editingDraft, onClose, onSubmi
               <span className="text-xs uppercase tracking-widest text-gray-500">Estimated calories</span>
               <span className={`text-sm font-semibold ${theme.tagText}`}>{calories.toFixed(2)} cal</span>
             </div>
+
+            {error ? <p className="text-xs text-red-300">{error}</p> : null}
 
             <div className="flex justify-end gap-2 pt-2">
               <button onClick={onClose} className="px-4 py-2 text-sm border border-white/10 rounded-lg">Cancel</button>

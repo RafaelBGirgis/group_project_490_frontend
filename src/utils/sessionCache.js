@@ -41,10 +41,43 @@ function updateCache(mutator) {
   return next;
 }
 
+/**
+ * All localStorage key prefixes and exact keys that are user-scoped.
+ * Anything matching these must be wiped on logout, token expiry, or login
+ * as a different account — two accounts must never share client-side state.
+ *
+ * Add new prefixes here whenever a new cache is introduced.
+ */
+const USER_SCOPED_PREFIXES = [
+  "tf:session-cache:",   // sessionCache.js  (tf:session-cache:v1)
+  "sched:day:",          // scheduleCache.js (sched:day:v1:YYYY-MM-DD)
+  "sched:week:",         // scheduleCache.js (sched:week:v1:YYYY-MM-DD)
+  "coach_request_resolution:", // coachRequests.js
+  "pending_coach_requests:",   // coachRequests.js
+  "coach_profile:",            // profile.jsx / coach_public_profile.jsx
+];
+
+const USER_SCOPED_EXACT_KEYS = [
+  "active_client_id",
+  "terminated_relationship_ids",  // terminatedRelationships.js
+  "terminated_coach_ids",          // terminatedRelationships.js
+];
+
 export function clearSessionCache() {
   if (typeof localStorage === "undefined") return;
   try {
-    localStorage.removeItem(SESSION_CACHE_KEY);
+    // Collect matching keys first to avoid mutating while iterating.
+    const toRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key) continue;
+      if (USER_SCOPED_EXACT_KEYS.includes(key)) {
+        toRemove.push(key);
+      } else if (USER_SCOPED_PREFIXES.some((p) => key.startsWith(p))) {
+        toRemove.push(key);
+      }
+    }
+    toRemove.forEach((key) => localStorage.removeItem(key));
   } catch {
     // Best-effort only.
   }
@@ -57,12 +90,31 @@ export function getCachedRoleState() {
 export function cacheRoleState(roleState) {
   if (!roleState) return getCachedRoleState();
 
+  // If the server says deactivated or suspended, wipe the old roles immediately
+  // so stale cache can't override the redirect. Don't merge — replace.
+  if (roleState.isDeactivated || roleState.isSuspended) {
+    return updateCache((current) => ({
+      ...current,
+      roleState: {
+        roleNames: [],
+        hasClientRole: false,
+        hasCoachRole: false,
+        hasAdminRole: false,
+        needsClientOnboarding: true,
+        isDeactivated: Boolean(roleState.isDeactivated),
+        isSuspended: Boolean(roleState.isSuspended),
+      },
+    })).roleState;
+  }
+
   return updateCache((current) => {
     const previousRoleNames = Array.isArray(current.roleState?.roleNames)
       ? current.roleState.roleNames
       : [];
     const nextRoleNames = Array.isArray(roleState.roleNames) ? roleState.roleNames : [];
-    const mergedRoleNames = [...new Set([...previousRoleNames, ...nextRoleNames])];
+    // Only keep roles the *fresh* response actually confirms. Don't accumulate
+    // stale roles — if the server didn't return "coach" this time, drop it.
+    const mergedRoleNames = nextRoleNames.length > 0 ? nextRoleNames : previousRoleNames;
 
     return {
       ...current,
@@ -72,6 +124,8 @@ export function cacheRoleState(roleState) {
         hasCoachRole: mergedRoleNames.includes("coach"),
         hasAdminRole: mergedRoleNames.includes("admin"),
         needsClientOnboarding: !mergedRoleNames.includes("client"),
+        isDeactivated: false,
+        isSuspended: false,
       },
     };
   }).roleState;

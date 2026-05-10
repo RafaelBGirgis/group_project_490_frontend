@@ -31,6 +31,9 @@ function readCookie(name) {
 }
 
 export async function login(email, password) {
+  // Clear any previous user's cache BEFORE the new session begins.
+  // This prevents two accounts from sharing client-side state.
+  clearAuth();
   return apiPost("/auth/login", {
     email: String(email || "").trim(),
     password,
@@ -38,6 +41,8 @@ export async function login(email, password) {
 }
 
 export async function signup(email, password, name, pfp_url, gcp_user_id) {
+  // Same guard as login — always start with a clean slate.
+  clearAuth();
   return apiPost("/auth/signup", {
     email: String(email || "").trim(),
     password,
@@ -63,8 +68,24 @@ export async function refreshToken(email, password) {
 }
 
 export function clearAuth() {
-  localStorage.removeItem("jwt");
-  localStorage.removeItem("active_client_id");
+  // Wipe ALL of localStorage rather than removing a known list of keys.
+  // The previous version only cleared `jwt` + `active_client_id` and missed
+  // every cache key feature work has accreted (role hints, schedule cache,
+  // terminated-relationship pins, plan_my_week selections, etc.). When a
+  // user logs out and a different account logs in on the same browser, any
+  // surviving keys from the prior session leak into the new one — surfacing
+  // as ghost data on the dashboard. clear() makes that class of bug
+  // impossible.
+  try {
+    localStorage.clear();
+  } catch {
+    // Some browsers (Safari private mode, locked-down enterprise profiles)
+    // throw on .clear(). Fall back to the explicit keys + the session cache
+    // helper so we at least nuke the auth-critical pieces.
+    localStorage.removeItem("jwt");
+    localStorage.removeItem("active_client_id");
+  }
+  try { sessionStorage.clear(); } catch { /* same fallback rationale */ }
   clearSessionCache();
   SESSION_COOKIE_NAMES.forEach((name) => {
     document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;

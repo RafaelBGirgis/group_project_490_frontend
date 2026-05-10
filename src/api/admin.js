@@ -1,4 +1,4 @@
-import { apiDelete, apiGet, apiPost, withQuery } from "./api";
+import { apiDelete, apiGet, apiPatch, apiPost, withQuery } from "./api";
 
 export async function fetchCoachRequests({ skip = 0, limit = 100 } = {}) {
   const result = await apiGet(withQuery("/roles/admin/query/coach_requests", { skip, limit }));
@@ -109,8 +109,6 @@ export async function fetchAdminStats() {
   const now = Date.now();
   const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
   const active_accounts = users.filter((u) => u.is_active).length;
-  const deactivated_accounts = users.filter((u) => u.status === "inactive").length;
-  const suspended_accounts = users.filter((u) => u.status === "suspended").length;
   const signups_30d = users.filter((u) => {
     if (!u.created_at) return false;
     const t = new Date(u.created_at).getTime();
@@ -122,9 +120,8 @@ export async function fetchAdminStats() {
     total_clients: users.filter((item) => item.role === "client").length,
     total_coaches: users.filter((item) => item.role === "coach").length,
     pending_role_requests: requests.length,
-    active_accounts: active_accounts,
-    deactivated_accounts: deactivated_accounts,
-    suspended_accounts: suspended_accounts,
+    active_accounts,
+    deactivated_accounts: users.length - active_accounts,
     signups_30d,
     avg_coach_rating: reviewStats.avg_coach_rating,
     total_coach_reviews: reviewStats.total_coach_reviews,
@@ -153,9 +150,16 @@ export async function fetchAllUsers({ sortBy = "name", sortDir = "asc", skip = 0
  * routes instead) or if the target is the last remaining active admin.
  */
 export async function updateUserStatus(userId, newStatus) {
-  // Use explicit suspend/unsuspend admin endpoints
-  const action = newStatus === "active" ? "unsuspend" : "suspend";
+  const action = newStatus === "active" ? "activate" : "deactivate";
   return apiPost(`/roles/admin/accounts/${userId}/${action}`, {});
+}
+
+export async function suspendUser(userId) {
+  return apiPost(`/roles/admin/accounts/${userId}/suspend`, {});
+}
+
+export async function unsuspendUser(userId) {
+  return apiPost(`/roles/admin/accounts/${userId}/unsuspend`, {});
 }
 
 /**
@@ -170,25 +174,124 @@ export async function deleteUser(userId) {
   return apiDelete(`/roles/admin/accounts/${userId}`);
 }
 
-export async function fetchExerciseBank() {
-  throw new Error("The backend route list does not include an exercise bank endpoint.");
+/* ─── Admin Fitness Bank ───────────────────────────────────────────────────
+ * Full CRUD over Workouts, WorkoutActivities, Equipment, and WorkoutPlans.
+ * Edits create a VCS fork (clone + hide old version) when the row is referenced
+ * by telemetry or any plan. Deletes soft-hide via is_hidden.
+ */
+
+// ─── Exercise Bank aliases ────────────────────────────────────────────────────
+// admin_dash.jsx uses a flat "exercise" model: { id, name, muscle_group,
+// equipment, created_by }. The real backend stores workouts + activities
+// separately. We normalise at the API layer so the UI doesn't need to change.
+
+function normalizeWorkoutToExercise(w) {
+  // equipment may come back as a plain string, a single object {id, name, ...},
+  // or an array of such objects depending on what the fitness bank endpoint joins.
+  let equipmentStr = "";
+  if (Array.isArray(w.equipment)) {
+    equipmentStr = w.equipment.map((e) => (typeof e === "object" ? (e.name ?? "") : e)).filter(Boolean).join(", ");
+  } else if (typeof w.equipment === "object" && w.equipment !== null) {
+    equipmentStr = w.equipment.name ?? "";
+  } else {
+    equipmentStr = w.equipment ?? "";
+  }
+
+  return {
+    id: w.id,
+    name: w.name ?? "",
+    muscle_group: w.workout_type ?? "General",
+    equipment: equipmentStr,
+    created_by: w.created_by_name ?? w.created_by ?? "Admin",
+    is_hidden: w.is_hidden ?? false,
+    _raw: w,
+  };
 }
 
-export async function createExercise(exercise) {
-  void exercise;
-  throw new Error("The backend route list does not include an exercise creation endpoint.");
+export async function fetchExerciseBank({ text, muscle_group, skip = 0, limit = 100 } = {}) {
+  const workouts = await listAdminWorkouts({
+    text: text || undefined,
+    workout_type: muscle_group !== "All" ? muscle_group : undefined,
+    include_hidden: false,
+    skip,
+    limit,
+  });
+  return workouts.map(normalizeWorkoutToExercise);
 }
 
-export async function updateExercise(exerciseId, exercise) {
-  void exerciseId;
-  void exercise;
-  throw new Error("The backend route list does not include an exercise update endpoint.");
+export async function createExercise({ name, muscle_group, equipment }) {
+  return createAdminWorkout({ name, workout_type: muscle_group, equipment });
 }
 
-export async function deleteExercise(exerciseId) {
-  void exerciseId;
-  throw new Error("The backend route list does not include an exercise deletion endpoint.");
+export async function updateExercise(id, { name, muscle_group, equipment }) {
+  return updateAdminWorkout(id, { name, workout_type: muscle_group, equipment });
 }
+
+export async function deleteExercise(id) {
+  return deleteAdminWorkout(id);
+}
+
+const FB = "/roles/admin/fitness";
+
+// Workouts
+export async function listAdminWorkouts({ text, workout_type, include_hidden = true, skip = 0, limit = 50 } = {}) {
+  const url = withQuery(`${FB}/workouts`, {
+    text: text || undefined,
+    workout_type: workout_type || undefined,
+    include_hidden,
+    skip,
+    limit,
+  });
+  const r = await apiGet(url);
+  return Array.isArray(r) ? r : [];
+}
+export async function createAdminWorkout(payload) { return apiPost(`${FB}/workouts`, payload); }
+export async function updateAdminWorkout(id, patch) { return apiPatch(`${FB}/workouts/${id}`, patch); }
+export async function deleteAdminWorkout(id) { return apiDelete(`${FB}/workouts/${id}`); }
+export async function unhideAdminWorkout(id) { return apiPost(`${FB}/workouts/${id}/unhide`, {}); }
+
+// Activities
+export async function listAdminActivities({ workout_id, include_hidden = true, skip = 0, limit = 100 } = {}) {
+  const url = withQuery(`${FB}/activities`, {
+    workout_id: workout_id ?? undefined,
+    include_hidden,
+    skip,
+    limit,
+  });
+  const r = await apiGet(url);
+  return Array.isArray(r) ? r : [];
+}
+export async function createAdminActivity(payload) { return apiPost(`${FB}/activities`, payload); }
+export async function updateAdminActivity(id, patch) { return apiPatch(`${FB}/activities/${id}`, patch); }
+export async function deleteAdminActivity(id) { return apiDelete(`${FB}/activities/${id}`); }
+
+// Equipment
+export async function listAdminEquipment({ text, skip = 0, limit = 100 } = {}) {
+  const url = withQuery(`${FB}/equipment`, { text: text || undefined, skip, limit });
+  const r = await apiGet(url);
+  return Array.isArray(r) ? r : [];
+}
+export async function createAdminEquipment(payload) { return apiPost(`${FB}/equipment`, payload); }
+export async function updateAdminEquipment(id, patch) { return apiPatch(`${FB}/equipment/${id}`, patch); }
+export async function deleteAdminEquipment(id) { return apiDelete(`${FB}/equipment/${id}`); }
+
+// Plans
+export async function listAdminPlans({ text, include_hidden = true, public_only = false, created_by_account_id, skip = 0, limit = 50 } = {}) {
+  const url = withQuery(`${FB}/plans`, {
+    text: text || undefined,
+    include_hidden,
+    public_only: public_only || undefined,
+    created_by_account_id: created_by_account_id ?? undefined,
+    skip,
+    limit,
+  });
+  const r = await apiGet(url);
+  return Array.isArray(r) ? r : [];
+}
+export async function createAdminPlan(payload) { return apiPost(`${FB}/plans`, payload); }
+export async function updateAdminPlan(id, patch) { return apiPatch(`${FB}/plans/${id}`, patch); }
+export async function deleteAdminPlan(id) { return apiDelete(`${FB}/plans/${id}`); }
+export async function unhideAdminPlan(id) { return apiPost(`${FB}/plans/${id}/unhide`, {}); }
 
 /**
  * Engagement bar-chart data: bucketed counts of active users and new signups
@@ -232,10 +335,13 @@ function normalizeAdminAccount(item) {
     name: item.name || "Unknown User",
     email: item.email || "",
     role: item.role || (Array.isArray(item.roles) && item.roles[0]) || "client",
-    // Backend provides `is_suspended`; prefer that. Fall back to legacy
-    // `is_active` when `is_suspended` is absent.
-    status: item.is_suspended ? "suspended" : (item.is_active ? "active" : "inactive"),
-    is_suspended: item.is_suspended !== false,
+    // is_suspended (admin-only block) takes priority over is_active (self-service deactivate)
+    status: item.is_suspended
+      ? "suspended"
+      : item.is_active === false
+        ? "inactive"
+        : "active",
+    is_suspended: Boolean(item.is_suspended),
     is_active: item.is_active !== false,
     created_at: item.created_at ? String(item.created_at).slice(0, 10) : "",
     last_active: item.last_active || "",
